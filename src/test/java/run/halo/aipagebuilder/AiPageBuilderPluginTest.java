@@ -1,0 +1,64 @@
+package run.halo.aipagebuilder;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+
+import java.util.function.Consumer;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import run.halo.app.extension.SchemeManager;
+import run.halo.app.extension.index.IndexSpecBuilder;
+import run.halo.app.extension.index.IndexSpecs;
+import run.halo.app.plugin.PluginContext;
+import run.halo.aipagebuilder.model.PageChatSession;
+import run.halo.aipagebuilder.model.PageChatTurnRecord;
+import run.halo.aipagebuilder.model.ThemePage;
+import run.halo.aipagebuilder.model.ThemePageRevision;
+
+@ExtendWith(MockitoExtension.class)
+class AiPageBuilderPluginTest {
+
+    @Mock
+    PluginContext context;
+
+    @Mock
+    SchemeManager schemeManager;
+
+    @InjectMocks
+    AiPageBuilderPlugin plugin;
+
+    @Test
+    void registersAllSchemes() {
+        plugin.start();
+        var order = inOrder(schemeManager);
+        order.verify(schemeManager).register(eq(PageChatSession.class), any());
+        order.verify(schemeManager).register(eq(PageChatTurnRecord.class), any());
+        order.verify(schemeManager).register(eq(ThemePage.class), any());
+        order.verify(schemeManager).register(eq(ThemePageRevision.class), any());
+        plugin.stop();
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void pageSlugIndexIsUnique() {
+        IndexSpecs<ThemePage> indexes = mock(IndexSpecs.class);
+        plugin.start();
+        var configuration = ArgumentCaptor.forClass(Consumer.class);
+        verify(schemeManager).register(eq(ThemePage.class), configuration.capture());
+        configuration.getValue().accept(indexes);
+
+        var captor = ArgumentCaptor.forClass(IndexSpecBuilder.class);
+        verify(indexes, org.mockito.Mockito.times(3)).add(captor.capture());
+        var slugIndex = captor.getAllValues().stream().map(IndexSpecBuilder::build)
+            .filter(index -> "spec.slug".equals(index.getName())).findFirst().orElseThrow();
+        assertThat(slugIndex.isUnique()).isTrue();
+    }
+}

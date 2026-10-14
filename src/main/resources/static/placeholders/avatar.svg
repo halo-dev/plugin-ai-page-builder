@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="头像占位">
+  <rect width="400" height="400" fill="#f4f4f5"/>
+  <rect x="10" y="10" width="380" height="380" rx="190" fill="none" stroke="#d4d4d8" stroke-width="2.5" stroke-dasharray="11 9"/>
+  <g fill="none" stroke="#a1a1aa" stroke-width="9" stroke-linecap="round" transform="translate(140 110)">
+    <circle cx="60" cy="42" r="34"/>
+    <path d="M4 148 C4 106 32 88 60 88 C88 88 116 106 116 148"/>
+  </g>
+  <text x="200" y="310" text-anchor="middle" font-family="system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="22" font-weight="600" fill="#71717a">头像占位</text>
+  <text x="200" y="342" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="#a1a1aa">1:1 · 替换为真实头像</text>
+</svg>

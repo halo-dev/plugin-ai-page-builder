@@ -1,0 +1,132 @@
+package run.halo.aipagebuilder.ai;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import java.time.Instant;
+import java.util.List;
+import run.halo.aipagebuilder.page.PageApi.PageDetail;
+
+/** Public chat contracts intentionally have no Foundation SDK types. */
+public final class ChatApi {
+    private ChatApi() { }
+
+    @Schema(name = "PageChatRequest", requiredProperties = {"runId", "version", "modelName", "prompt"})
+    public record Request(String runId, Long version, String modelName, String prompt,
+                          String baseHash, List<Annotation> annotations, String sessionId) {
+        public Request(String runId, Long version, String modelName, String prompt,
+            String baseHash, List<Annotation> annotations) {
+            this(runId, version, modelName, prompt, baseHash, annotations, null);
+        }
+
+        public Request(String runId, Long version, String modelName, String prompt) {
+            this(runId, version, modelName, prompt, null, List.of(), null);
+        }
+    }
+
+    @Schema(name = "PageAnnotation", requiredProperties = {"id", "path", "tag", "summary", "html", "comment"})
+    public record Annotation(String id, List<Integer> path, String tag, String summary,
+                             String html, String comment) { }
+
+    @Schema(name = "PageChatDisplayPart", requiredProperties = {"type", "id"})
+    public record DisplayPart(String type, String id, String text, String toolName,
+                              String status, String summary, Boolean truncated) { }
+
+    @Schema(name = "PageChatTool", requiredProperties = {"name", "status", "summary"})
+    public record Tool(String name, String status, String summary) { }
+
+    @Schema(name = "PageChatTurn", requiredProperties = {"runId", "actor", "createdAt", "prompt", "text", "tools", "status"})
+    public record Turn(String runId, String actor, Instant createdAt, String prompt, String text,
+                       List<Tool> tools, String status, String revision, String error,
+                       List<DisplayPart> parts, List<Annotation> annotations,
+                       List<Question> questions, List<String> steers) {
+        public Turn {
+            steers = steers == null ? List.of() : List.copyOf(steers);
+        }
+
+        public Turn(String runId, String actor, Instant createdAt, String prompt, String text,
+            List<Tool> tools, String status, String revision, String error,
+            List<DisplayPart> parts, List<Annotation> annotations,
+            List<Question> questions) {
+            this(runId, actor, createdAt, prompt, text, tools, status, revision, error,
+                parts, annotations, questions, List.of());
+        }
+
+        public Turn(String runId, String actor, Instant createdAt, String prompt, String text,
+            List<Tool> tools, String status, String revision, String error,
+            List<DisplayPart> parts, List<Annotation> annotations) {
+            this(runId, actor, createdAt, prompt, text, tools, status, revision, error,
+                parts, annotations, List.of(), List.of());
+        }
+
+        public Turn(String runId, String actor, Instant createdAt, String prompt, String text,
+                    List<Tool> tools, String status, String revision, String error) {
+            this(runId, actor, createdAt, prompt, text, tools, status, revision, error, null, null,
+                List.of(), List.of());
+        }
+    }
+
+    @Schema(name = "PageChatSteerRequest", requiredProperties = {"text"})
+    public record SteerRequest(String text) { }
+
+    @Schema(name = "PageChatRun", requiredProperties = {"runId", "status"})
+    public record Run(String runId, String status, String revision, String error, PageDetail page,
+                      Question pendingQuestion) {
+        public Run(String runId, String status, String revision, String error, PageDetail page) {
+            this(runId, status, revision, error, page, null);
+        }
+    }
+
+    @Schema(name = "PageChatQuestionOption", requiredProperties = {"id", "label"})
+    public record QuestionOption(String id, String label) { }
+
+    @Schema(name = "PageChatQuestionItem", requiredProperties = {"id", "title", "options", "allowCustomAnswer"})
+    public record QuestionItem(String id, String title, List<QuestionOption> options,
+                               boolean allowCustomAnswer) { }
+
+    @Schema(name = "PageChatAnswerItem", requiredProperties = {"questionId"})
+    public record AnswerItem(String questionId, String optionId, String text) { }
+
+    @Schema(name = "PageChatAnswerRequest", requiredProperties = {"answers"})
+    public record AnswerRequest(List<AnswerItem> answers) { }
+
+    @Schema(name = "PageChatQuestion", requiredProperties = {"id", "questions", "createdAt"})
+    public record Question(String id, List<QuestionItem> questions, List<AnswerItem> answers,
+                           Instant createdAt, Instant answeredAt) { }
+
+    @Schema(name = "PageChatRetention", requiredProperties = {"maxTurns", "maxBytes"})
+    public record Retention(int maxTurns, int maxBytes) { }
+
+    @Schema(name = "PageChatSession", requiredProperties = {"pageName", "version", "turns", "retention", "sessionId", "title", "hasMore"})
+    public record Session(String pageName, Long version, List<Turn> turns, Run activeRun,
+                          Retention retention, String sessionId, String title, Instant createdAt,
+                          Instant updatedAt, boolean hasMore, String nextBefore) {
+        public Session(String pageName, Long version, List<Turn> turns, Run activeRun,
+            Retention retention) {
+            this(pageName, version, turns, activeRun, retention, pageName, "默认会话",
+                null, null, false, null);
+        }
+    }
+
+    @Schema(name = "PageChatSessionSummary", requiredProperties = {"sessionId", "pageName", "title", "version", "createdAt", "updatedAt"})
+    public record SessionSummary(String sessionId, String pageName, String title, Long version,
+                                 Instant createdAt, Instant updatedAt, Run activeRun) { }
+
+    @Schema(name = "PageChatSessionList", requiredProperties = {"items"})
+    public record SessionList(List<SessionSummary> items) { }
+
+    @Schema(name = "CreatePageChatSessionRequest")
+    public record CreateSession(String title) { }
+
+    @Schema(name = "RenamePageChatSessionRequest", requiredProperties = {"title", "version"})
+    public record RenameSession(String title, Long version) { }
+
+    @Schema(name = "ValidatePageContentRequest", requiredProperties = {"html", "css"})
+    public record Content(String html, String css, String js) {
+        public Content {
+            js = js == null ? "" : js;
+        }
+
+        public Content(String html, String css) {
+            this(html, css, "");
+        }
+    }
+}

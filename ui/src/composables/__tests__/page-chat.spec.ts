@@ -1,0 +1,557 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effectScope, shallowRef } from 'vue'
+import { conversationMessages, usePageChat } from '../usePageChat'
+import type { UIMessage } from '@halo-dev/ai-foundation-sdk'
+import type { ChatTurn } from '../../api/clients'
+import type { PageDetail, PageChatQuestion } from '../../api/generated'
+const api = vi.hoisted(() => ({
+  ai: {
+    getAiPageBuilderAiStatus: vi.fn<(...args: unknown[]) => unknown>(),
+  },
+  chat: {
+    listPageChatSessions: vi.fn<(...args: unknown[]) => unknown>(),
+    createPageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
+    renamePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
+    deletePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
+    getPageChat: vi.fn<(...args: unknown[]) => unknown>(),
+    getPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
+    cancelPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
+    answerPageChatQuestion: vi.fn<(...args: unknown[]) => unknown>(),
+  },
+}))
+interface MockChatOptions {
+  onError: (error: Error) => void
+  onData: (part: { type: string; data: unknown }) => void
+  sendAutomaticallyWhen: () => boolean
+}
+interface MockTransportOptions {
+  prepareSendMessagesRequest: () => { body: Record<string, unknown> }
+}
+const sdk = vi.hoisted(() => ({
+  options: {} as MockChatOptions,
+  transport: {} as MockTransportOptions,
+  send: vi.fn<(...args: unknown[]) => unknown>(),
+  stop: vi.fn<(...args: unknown[]) => unknown>(),
+  setMessages: vi.fn<(...args: unknown[]) => unknown>(),
+}))
+vi.mock('../../api/clients', () => ({
+  aiPageBuilderAiApi: api.ai,
+  aiPageBuilderChatApi: api.chat,
+  chatUrl: (name: string) => `/pages/${name}/chat`,
+  prepareChatRequest: (_name: string, request: Record<string, unknown>) => ({ body: request }),
+}))
+vi.mock('../../utils/error', () => ({
+  errorMessage: (e: Error) => e.message,
+}))
+vi.mock('../../api/stream', () => ({
+  authenticatedChatFetch: vi.fn<(...args: unknown[]) => unknown>(),
+}))
+vi.mock('@halo-dev/ai-foundation-sdk', () => ({
+  DefaultChatTransport: class {
+    constructor(options: MockTransportOptions) {
+      sdk.transport = options
+    }
+  },
+  useChat: (options: MockChatOptions) => {
+    sdk.options = options
+    const messages = shallowRef<UIMessage[]>([])
+    sdk.setMessages.mockImplementation((value) => {
+      messages.value = value as UIMessage[]
+    })
+    return {
+      messages,
+      status: shallowRef('ready'),
+      isLoading: shallowRef(false),
+      sendMessage: sdk.send,
+      stop: sdk.stop,
+      setMessages: sdk.setMessages,
+      clearError: vi.fn<(...args: unknown[]) => unknown>(),
+    }
+  },
+}))
+let scope = effectScope()
+const committed = vi.fn<(...args: unknown[]) => unknown>()
+const prepare = vi.fn<() => Promise<number | import('../../editor/annotations').PreparedPage>>()
+const page = {
+  page: { name: 'one', draftRevision: 'r2' },
+  document: { html: '<p>AI</p>' },
+} as PageDetail
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.useFakeTimers()
+  scope = effectScope()
+  api.ai.getAiPageBuilderAiStatus.mockResolvedValue({ data: { available: true, message: 'Ready' } })
+  api.chat.listPageChatSessions.mockResolvedValue({
+    data: { items: [{ sessionId: 'one', title: 'Default', version: 3 }] },
+  })
+  api.chat.getPageChat.mockResolvedValue({
+    data: { sessionId: 'one', turns: [], activeRun: null, hasMore: false },
+  })
+  api.chat.getPageChatRun.mockResolvedValue({
+    data: { runId: 'run', status: 'completed', page, revision: 'r2' },
+  })
+  prepare.mockResolvedValue(8)
+  sdk.send.mockResolvedValue(undefined)
+})
+afterEach(() => {
+  scope.stop()
+  vi.useRealTimers()
+})
+function setup() {
+  const state = scope.run(() => usePageChat({ name: 'one', prepare, committed }))!
+  state.modelName.value = 'tool-model'
+  return state
+}
+const question: PageChatQuestion = {
+  id: 'question-batch',
+  createdAt: '2026-01-01T00:00:00Z',
+  questions: [{ id: 'style', title: '风格？', options: [], allowCustomAnswer: true }],
+}
+const waitingRun = { runId: 'waiting', status: 'waiting_for_user', pendingQuestion: question }
+function waitingConversation() {
+  api.chat.listPageChatSessions.mockResolvedValue({
+    data: { items: [{ sessionId: 'busy', activeRun: waitingRun }] },
+  })
+  api.chat.getPageChat.mockResolvedValue({
+    data: {
+      sessionId: 'busy',
+      activeRun: waitingRun,
+      turns: [
+        {
+          runId: 'waiting',
+          prompt: '设计页面',
+          text: '',
+          tools: [],
+          status: 'waiting_for_user',
+          questions: [question],
+        },
+      ],
+    },
+  })
+  api.chat.getPageChatRun.mockResolvedValue({ data: waitingRun })
+}
+
+describe('persistent page chat', () => {
+  it('restores first-run questions when the server has no archived turns', async () => {
+    waitingConversation()
+    api.chat.getPageChat.mockResolvedValue({
+      data: { sessionId: 'busy', activeRun: waitingRun, turns: [] },
+    })
+    const state = setup()
+    await state.recover()
+    expect(state.messages.value).toHaveLength(1)
+    expect(state.messages.value[0]).toMatchObject({
+      role: 'assistant',
+      metadata: { runId: 'waiting' },
+    })
+    expect(state.questions.value).toEqual([question])
+    await state.reconcile()
+    expect(state.messages.value).toHaveLength(1)
+    expect(state.waitingForUser.value).toBe(true)
+  })
+  it('keeps the current question separate from a previous completed assistant message', async () => {
+    waitingConversation()
+    api.chat.getPageChat.mockResolvedValue({
+      data: {
+        sessionId: 'busy',
+        activeRun: waitingRun,
+        turns: [
+          {
+            runId: 'old',
+            prompt: '旧请求',
+            text: '旧回答',
+            tools: [],
+            status: 'completed',
+            questions: [{ ...question, id: 'old-batch' }],
+          },
+        ],
+      },
+    })
+    const state = setup()
+    await state.recover()
+    expect(state.messages.value).toHaveLength(3)
+    expect(state.messages.value[1]?.metadata).toMatchObject({ runId: 'old' })
+    expect(state.messages.value[2]?.metadata).toMatchObject({ runId: 'waiting' })
+    expect(state.questions.value).toEqual([question])
+  })
+  it('recovers a waiting question and keeps editing and session actions locked', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    expect(state.waitingForUser.value).toBe(true)
+    expect(state.running.value).toBe(true)
+    expect(state.sessionBusy.value).toBe(true)
+    expect(state.canSend.value).toBe(false)
+    expect(state.pendingQuestion.value).toEqual(question)
+    expect(state.questions.value).toEqual([question])
+    expect(state.notice.value).toContain('等待你的回答')
+    await state.selectSession('other')
+    await state.createSession()
+    expect(state.sessionId.value).toBe('busy')
+    expect(api.chat.createPageChatSession).not.toHaveBeenCalled()
+    expect(state.messages.value?.[1]?.metadata).toMatchObject({ questions: [question] })
+  })
+  it('ignores an older waiting poll that arrives after the answer resumed generation', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    let finishPoll!: (value: unknown) => void
+    api.chat.getPageChatRun.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishPoll = resolve
+        }),
+    )
+    const poll = state.reconcile()
+    api.chat.answerPageChatQuestion.mockResolvedValue({
+      data: { runId: 'waiting', status: 'running' },
+    })
+    await state.answerQuestion(question.id, [{ questionId: 'style', text: '简洁' }])
+    finishPoll({ data: waitingRun })
+    await poll
+    expect(state.waitingForUser.value).toBe(false)
+    expect(state.activeRun.value?.status).toBe('running')
+  })
+  it('submits once through the generated endpoint and polls the resumed run to commit', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    let finish!: (value: unknown) => void
+    api.chat.answerPageChatQuestion.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    const answers = [{ questionId: 'style', text: '简洁' }]
+    const submitted = state.answerQuestion(question.id, answers)
+    expect(state.answering.value).toBe(true)
+    expect(await state.answerQuestion(question.id, answers)).toBe(false)
+    expect(api.chat.answerPageChatQuestion).toHaveBeenCalledTimes(1)
+    expect(api.chat.answerPageChatQuestion).toHaveBeenCalledWith({
+      name: 'one',
+      runId: 'waiting',
+      questionId: question.id,
+      pageChatAnswerRequest: { answers },
+    })
+    finish({ data: { runId: 'waiting', status: 'running' } })
+    expect(await submitted).toBe(true)
+    expect(state.answering.value).toBe(false)
+    expect(state.waitingForUser.value).toBe(false)
+    expect(state.running.value).toBe(true)
+    expect(state.questions.value[0]?.answers).toEqual(answers)
+    expect(sdk.send).not.toHaveBeenCalled()
+    api.chat.getPageChatRun.mockResolvedValue({
+      data: { runId: 'waiting', status: 'completed', page },
+    })
+    api.chat.getPageChat.mockResolvedValue({
+      data: { sessionId: 'busy', turns: [], activeRun: null },
+    })
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(committed).toHaveBeenCalledWith(page)
+    expect(state.running.value).toBe(false)
+  })
+  it('keeps a failed answer retryable and reconciles a lost successful response', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    api.chat.answerPageChatQuestion.mockRejectedValue(new Error('离线'))
+    const answers = [{ questionId: 'style', text: '简洁' }]
+    expect(await state.answerQuestion(question.id, answers)).toBe(false)
+    expect(state.answerError.value).toBe('离线')
+    expect(state.pendingQuestion.value).toEqual(question)
+    expect(state.answering.value).toBe(false)
+    api.chat.getPageChatRun.mockResolvedValue({ data: { runId: 'waiting', status: 'running' } })
+    expect(await state.answerQuestion(question.id, answers)).toBe(false)
+    expect(state.answerError.value).toBe('')
+    expect(state.waitingForUser.value).toBe(false)
+    expect(await state.answerQuestion(question.id, answers)).toBe(false)
+    expect(api.chat.answerPageChatQuestion).toHaveBeenCalledTimes(2)
+  })
+  it('handles live question events and lets the user cancel a waiting run', async () => {
+    api.chat.getPageChat.mockResolvedValue({
+      data: { sessionId: 'one', turns: [], activeRun: { runId: 'waiting', status: 'running' } },
+    })
+    api.chat.getPageChatRun.mockResolvedValue({ data: { runId: 'waiting', status: 'running' } })
+    const state = setup()
+    await state.recover()
+    sdk.options.onData({ type: 'data-user-question', data: { runId: 'waiting', question } })
+    expect(state.waitingForUser.value).toBe(true)
+    expect(state.pendingQuestion.value).toEqual(question)
+    api.chat.cancelPageChatRun.mockResolvedValue({
+      data: { runId: 'waiting', status: 'cancelled' },
+    })
+    api.chat.getPageChat.mockResolvedValue({
+      data: { sessionId: 'one', turns: [], activeRun: null },
+    })
+    await state.stop()
+    expect(state.running.value).toBe(false)
+    expect(state.pendingQuestion.value).toBeUndefined()
+    expect(sdk.stop).toHaveBeenCalledTimes(1)
+  })
+  it('loads server history and sends only the bound prompt/version without automatic tool loops', async () => {
+    const state = setup()
+    await state.recover()
+    expect(api.chat.getPageChat).toHaveBeenCalledWith({
+      name: 'one',
+      sessionId: undefined,
+      size: 20,
+    })
+    expect(await state.send('Make it calm')).toBe(true)
+    expect(prepare).toHaveBeenCalledTimes(1)
+    expect(sdk.transport.prepareSendMessagesRequest().body).toMatchObject({
+      version: 8,
+      prompt: 'Make it calm',
+    })
+    expect(sdk.options.sendAutomaticallyWhen()).toBe(false)
+    expect(committed).toHaveBeenCalledTimes(1)
+  })
+  it('switches conversation without restoring page revisions and binds subsequent prompts', async () => {
+    const state = setup()
+    await state.recover()
+    api.chat.getPageChat.mockResolvedValueOnce({
+      data: { sessionId: 'two', turns: [], hasMore: false },
+    })
+    await state.selectSession('two')
+    expect(state.sessionId.value).toBe('two')
+    expect(committed).not.toHaveBeenCalled()
+    await state.send('Continue here')
+    expect(sdk.transport.prepareSendMessagesRequest().body.sessionId).toBe('two')
+  })
+  it('uses session versions for rename/delete and loads a newly created session', async () => {
+    const state = setup()
+    await state.recover()
+    await state.renameSession(' Renamed ')
+    expect(api.chat.renamePageChatSession).toHaveBeenCalledWith({
+      name: 'one',
+      sessionId: 'one',
+      renamePageChatSessionRequest: { title: 'Renamed', version: 3 },
+    })
+    await state.deleteSession()
+    expect(api.chat.deletePageChatSession).toHaveBeenCalledWith({
+      name: 'one',
+      sessionId: 'one',
+      version: 3,
+    })
+    api.chat.createPageChatSession.mockResolvedValue({ data: { sessionId: 'new' } })
+    api.chat.getPageChat.mockResolvedValueOnce({
+      data: { sessionId: 'new', turns: [], hasMore: false },
+    })
+    await state.createSession()
+    expect(state.sessionId.value).toBe('new')
+    expect(committed).not.toHaveBeenCalled()
+  })
+  it('recovers the active session and blocks switching/deletion while a run is pending', async () => {
+    api.chat.listPageChatSessions.mockResolvedValue({
+      data: {
+        items: [{ sessionId: 'busy', version: 2, activeRun: { runId: 'r', status: 'running' } }],
+      },
+    })
+    api.chat.getPageChat.mockResolvedValue({
+      data: { sessionId: 'busy', turns: [], activeRun: { runId: 'r', status: 'running' } },
+    })
+    api.chat.getPageChatRun.mockResolvedValue({ data: { runId: 'r', status: 'running' } })
+    const state = setup()
+    await state.recover()
+    expect(api.chat.getPageChat).toHaveBeenCalledWith({ name: 'one', sessionId: 'busy', size: 20 })
+    await state.selectSession('other')
+    await state.deleteSession()
+    await state.createSession()
+    expect(state.sessionId.value).toBe('busy')
+    expect(api.chat.deletePageChatSession).not.toHaveBeenCalled()
+    expect(api.chat.createPageChatSession).not.toHaveBeenCalled()
+  })
+  it('prepends paginated history in order without duplicates or page adoption', async () => {
+    const turn = (runId: string) => ({
+      runId,
+      prompt: runId,
+      text: 'ok',
+      tools: [],
+      status: 'completed',
+    })
+    api.chat.getPageChat.mockResolvedValueOnce({
+      data: { sessionId: 'one', turns: [turn('new')], hasMore: true, nextBefore: 'cursor' },
+    })
+    const state = setup()
+    await state.recover()
+    api.chat.getPageChat.mockResolvedValueOnce({
+      data: { sessionId: 'one', turns: [turn('old'), turn('new')], hasMore: false },
+    })
+    await state.loadEarlier()
+    expect(api.chat.getPageChat).toHaveBeenLastCalledWith({
+      name: 'one',
+      sessionId: 'one',
+      before: 'cursor',
+      size: 20,
+    })
+    expect(state.messages.value?.map((item) => item.id)).toEqual([
+      'old-user',
+      'old-assistant',
+      'new-user',
+      'new-assistant',
+    ])
+    expect(state.hasMore.value).toBe(false)
+    expect(committed).not.toHaveBeenCalled()
+  })
+  it('requires a selected model and respects the server prompt limit', async () => {
+    const state = setup()
+    await state.recover()
+    state.modelName.value = ''
+    expect(await state.send('Change')).toBe(false)
+    state.modelName.value = 'tool-model'
+    expect(await state.send('x'.repeat(8001))).toBe(false)
+    expect(prepare).not.toHaveBeenCalled()
+  })
+  it('unlocks a rejected start with no server run and preserves the retry prompt', async () => {
+    const state = setup()
+    await state.recover()
+    sdk.send.mockImplementation(async () => {
+      sdk.options.onError(new Error('Model unavailable'))
+    })
+    api.chat.getPageChatRun.mockRejectedValue({ response: { status: 404 } })
+    expect(await state.send('Keep this prompt')).toBe(false)
+    expect(state.running.value).toBe(false)
+    expect(state.lastPrompt.value).toBe('Keep this prompt')
+    expect(state.error.value).toBe('Model unavailable')
+  })
+  it('deduplicates final stream commits and run reconciliation', async () => {
+    const state = setup()
+    await state.recover()
+    sdk.send.mockImplementation(async () =>
+      sdk.options.onData({ type: 'data-page-committed', data: page }),
+    )
+    await state.send('Change')
+    expect(committed).toHaveBeenCalledTimes(1)
+  })
+  it('does not report cancelled when the server is already committing', async () => {
+    api.chat.getPageChat.mockResolvedValueOnce({
+      data: { turns: [], activeRun: { runId: 'pending', status: 'running' } },
+    })
+    api.chat.getPageChatRun.mockResolvedValue({ data: { runId: 'pending', status: 'running' } })
+    const state = setup()
+    await state.recover()
+    api.chat.cancelPageChatRun.mockResolvedValue({
+      data: { runId: 'pending', status: 'committing' },
+    })
+    await state.stop()
+    expect(state.running.value).toBe(true)
+    expect(state.notice.value).toContain('保存')
+    expect(sdk.stop).not.toHaveBeenCalled()
+    api.chat.getPageChatRun.mockResolvedValue({
+      data: { runId: 'pending', status: 'completed', page },
+    })
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(committed).toHaveBeenCalledWith(page)
+    expect(state.running.value).toBe(false)
+  })
+  it('preserves a frozen state on unknown commit outcome and does not resubmit', async () => {
+    const state = setup()
+    await state.recover()
+    api.chat.getPageChatRun.mockRejectedValue(new Error('offline'))
+    await state.send('Change')
+    expect(state.running.value).toBe(true)
+    expect(state.error.value).toContain('检查运行结果')
+    await state.send('Retry')
+    expect(sdk.send).toHaveBeenCalledTimes(1)
+  })
+  it('retains original attachments for retry and rejects a changed content digest', async () => {
+    const state = setup()
+    await state.recover()
+    const annotation = {
+      id: 'a',
+      path: [0],
+      tag: 'p',
+      summary: 'Target',
+      html: '<p>Target</p>',
+      comment: 'Change',
+    }
+    prepare.mockResolvedValueOnce({
+      version: 8,
+      baseHash: 'a'.repeat(64),
+      annotations: [annotation],
+    })
+    api.chat.getPageChatRun.mockResolvedValue({
+      data: { runId: 'run', status: 'failed', error: 'Try again' },
+    })
+    await state.send('Change target')
+    prepare.mockResolvedValueOnce({ version: 8, baseHash: 'a'.repeat(64), annotations: [] })
+    await state.send('Change target', true)
+    expect(sdk.transport.prepareSendMessagesRequest().body.annotations).toEqual([annotation])
+    prepare.mockResolvedValueOnce({ version: 9, baseHash: 'b'.repeat(64), annotations: [] })
+    await state.send('Change target', true)
+    expect(sdk.send).toHaveBeenCalledTimes(2)
+    expect(state.error.value).toContain('重新选择')
+  })
+  it('restores ordered text, reasoning and tool display parts', () => {
+    const turns = [
+      {
+        runId: 'a',
+        actor: 'user',
+        createdAt: '2026-01-01T00:00:00Z',
+        prompt: 'Hi',
+        text: 'Legacy',
+        tools: [],
+        status: 'completed',
+        parts: [
+          { type: 'text', id: 'first', text: 'First' },
+          { type: 'reasoning', id: 'why', text: 'Actual reasoning' },
+          {
+            type: 'tool',
+            id: 'tool-a',
+            toolName: 'patch_current_page',
+            status: 'completed',
+            summary: 'Saved',
+          },
+          { type: 'text', id: 'last', text: 'Last' },
+        ],
+      },
+    ] as ChatTurn[]
+    const parts = conversationMessages(turns)[1]!.parts
+    expect(parts.map((part) => part.type)).toEqual([
+      'text',
+      'reasoning',
+      'tool-patch_current_page',
+      'text',
+    ])
+    expect(parts[1]).toMatchObject({ text: 'Actual reasoning' })
+    expect(parts[2]).not.toHaveProperty('input')
+  })
+  it('restores legacy text/tool summaries without tool arguments', () => {
+    const turns = [
+      {
+        runId: 'a',
+        prompt: 'Hello',
+        text: 'Done',
+        tools: [{ name: 'update_current_page', status: 'completed', summary: 'ok' }],
+        status: 'completed',
+      },
+    ] as ChatTurn[]
+    const messages = conversationMessages(turns)
+    expect(messages).toHaveLength(2)
+    expect(messages[1]?.parts[0]).not.toHaveProperty('input')
+    expect(messages[1]?.parts[0]).toHaveProperty('output', { summary: 'ok' })
+  })
+  it('renders mid-run steers as user messages between the prompt and the reply', () => {
+    const turns = [
+      {
+        runId: 'a',
+        actor: 'user',
+        createdAt: '2026-01-01T00:00:00Z',
+        prompt: 'Hello',
+        text: 'Done',
+        tools: [],
+        status: 'completed',
+        steers: ['标题再短一点', '换个配色'],
+      },
+    ] as ChatTurn[]
+    const messages = conversationMessages(turns)
+    expect(messages.map((message) => [message.id, message.role])).toEqual([
+      ['a-user', 'user'],
+      ['a-steer-0', 'user'],
+      ['a-steer-1', 'user'],
+      ['a-assistant', 'assistant'],
+    ])
+    expect(messages[1]?.parts[0]).toMatchObject({ text: '标题再短一点' })
+    expect(messages[2]?.parts[0]).toMatchObject({ text: '换个配色' })
+  })
+})

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html xmlns:th="https://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${aiPageBuilder.title}"></title>
+  <meta name="description" th:content="${aiPageBuilder.description}">
+  <style th:utext="${aiPageBuilder.css}"></style>
+</head>
+<body>
+<!-- Render the full html contract: body markup followed by its script bootstrap, if any. -->
+<div th:id="${aiPageBuilder.rootId}" th:utext="${aiPageBuilder.html}"></div>
+</body>
+</html>

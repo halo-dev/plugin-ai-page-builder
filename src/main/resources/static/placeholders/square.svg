@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" role="img" aria-label="方图占位">
+  <rect width="800" height="800" fill="#f4f4f5"/>
+  <rect x="16" y="16" width="768" height="768" rx="24" fill="none" stroke="#d4d4d8" stroke-width="3" stroke-dasharray="14 11"/>
+  <g fill="none" stroke="#a1a1aa" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" transform="translate(340 300)">
+    <rect x="0" y="0" width="120" height="90" rx="9"/>
+    <circle cx="32" cy="29" r="9"/>
+    <path d="M9 81 L43 47 L65 69 L82 52 L111 81"/>
+  </g>
+  <text x="400" y="470" text-anchor="middle" font-family="system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="26" font-weight="600" fill="#71717a">方图占位</text>
+  <text x="400" y="510" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="17" fill="#a1a1aa">1:1 · 替换为你的图片</text>
+</svg>

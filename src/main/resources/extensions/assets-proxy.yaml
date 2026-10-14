@@ -1,0 +1,8 @@
+apiVersion: plugin.halo.run/v1alpha1
+kind: ReverseProxy
+metadata:
+  name: ai-page-builder-assets
+rules:
+  - path: /placeholders/**
+    file:
+      directory: static/placeholders
