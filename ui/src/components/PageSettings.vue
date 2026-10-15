@@ -6,7 +6,7 @@ import { errorMessage } from '../utils/error'
 import { slugValidation } from '../utils/slug'
 const props = defineProps<{
   document: PageDocument
-  slug: string
+  slug?: string | null
   themeLayout: boolean
   disabled: boolean
   published: boolean
@@ -25,7 +25,7 @@ const buffer = reactive({
 const form = useTemplateRef<{ node: { submit: () => void } }>('form')
 const slugForm = useTemplateRef<{ node: { submit: () => void } }>('slugForm')
 const editingSlug = ref(false)
-const slugBuffer = ref(props.slug)
+const slugBuffer = ref(props.slug ?? '')
 const savingSlug = ref(false)
 const slugError = ref('')
 const layoutOn = ref(props.themeLayout)
@@ -51,7 +51,7 @@ async function toggleLayout(value: unknown) {
   }
 }
 function editSlug() {
-  slugBuffer.value = props.slug
+  slugBuffer.value = props.slug ?? ''
   slugError.value = ''
   editingSlug.value = true
 }
@@ -109,14 +109,14 @@ function submit() {
           <p class="min-w-0 flex-1 break-all text-xs text-gray-500">
             页面路径
             <a
-              v-if="published"
+              v-if="published && slug"
               :href="`/${slug}`"
               target="_blank"
               rel="noopener"
               class="hover:underline"
               >/{{ slug }}</a
             >
-            <span v-else>/{{ slug }}</span>
+            <span v-else>{{ slug ? '/' + slug : '未设置' }}</span>
           </p>
           <VButton size="sm" :disabled="disabled" @click="editSlug">修改</VButton>
         </div>

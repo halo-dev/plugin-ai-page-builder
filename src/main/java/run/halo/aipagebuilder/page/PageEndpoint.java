@@ -134,7 +134,8 @@ public class PageEndpoint implements CustomEndpoint {
                         .implementation(RestoreRequest.class)))
             .GET("/pages/{name}/preview", request -> service.get(name(request))
                     .flatMap(detail -> renderer.render(request, detail.page().name(),
-                        detail.page().slug(), detail.page().themeLayout(), detail.document())),
+                        detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
+                        detail.page().themeLayout(), detail.document())),
                 builder -> builder.operationId("previewPage").tag("AiPageBuilder")
                     .parameter(nameParameter())
                     .response(responseBuilder().responseCode("200")
@@ -143,7 +144,8 @@ public class PageEndpoint implements CustomEndpoint {
             .POST("/pages/{name}/preview", request -> body(request, PageDocument.class)
                     .flatMap(document -> service.get(name(request))
                         .flatMap(detail -> renderer.render(request, detail.page().name(),
-                            detail.page().slug(), detail.page().themeLayout(), document))),
+                            detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
+                            detail.page().themeLayout(), document))),
                 builder -> builder.operationId("previewPageDocument").tag("AiPageBuilder")
                     .parameter(nameParameter())
                     .requestBody(requestBodyBuilder().required(true)

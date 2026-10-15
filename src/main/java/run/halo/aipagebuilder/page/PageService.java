@@ -80,6 +80,8 @@ public class PageService {
 
     public Mono<PageDetail> clonePage(String name, PageApi.ClonePageRequest request, String actor) {
         return mutate(name, request.version(), source -> draftDetail(source).flatMap(detail -> {
+            // Clone still requires an explicit slug even though create accepts a blank one.
+            PagePaths.validate(request.slug());
             var original = detail.document();
             var copy = new PageDocument(original.js().isEmpty() ? 1 : 2, "code", null, null,
                 original.html(), original.css(), request.title(), original.description(), original.js());
@@ -90,9 +92,8 @@ public class PageService {
     private Mono<PageDetail> createDocument(String slug, PageDocument document, Boolean themeLayout,
         String actor) {
         return Mono.defer(() -> {
-            PagePaths.validate(slug);
             contentPolicy.validate(document);
-            return writeSlug(slug, () -> checkSlugAvailable(slug, null).then(Mono.defer(() -> {
+            Supplier<Mono<PageDetail>> write = () -> {
                 var name = UUID.randomUUID().toString();
                 var revision = newRevision(name, document, "manual", actor);
                 return client.create(revision).flatMap(created -> {
@@ -109,7 +110,12 @@ public class PageService {
                             .onErrorResume(cleanupError -> Mono.empty()).then(Mono.error(error)))
                         .map(saved -> detail(saved, created));
                 });
-            })));
+            };
+            if (slug == null || slug.isBlank()) {
+                return write.get();
+            }
+            PagePaths.validate(slug);
+            return writeSlug(slug, () -> checkSlugAvailable(slug, null).then(Mono.defer(write::get)));
         }).onErrorMap(DuplicateKeyException.class, error -> conflict("Slug already exists"))
             .onErrorMap(OptimisticLockingFailureException.class,
                 error -> conflict("Slug already exists or page changed"));
@@ -185,14 +191,19 @@ public class PageService {
     }
 
     public Mono<PageDetail> publish(String name, Long version) {
-        return mutate(name, version, page -> writeSlug(PagePaths.slug(page), () ->
-            checkSlugAvailable(PagePaths.slug(page), name)
+        return mutate(name, version, page -> {
+            var slug = page.getSpec().getSlug();
+            if (slug == null || slug.isBlank()) {
+                return Mono.error(badRequest("请先设置访问路径再发布"));
+            }
+            return writeSlug(slug, () -> checkSlugAvailable(slug, name)
                 .then(revision(name, page.getSpec().getDraftRevision())).flatMap(draft -> {
                     contentPolicy.validate(draft.getSpec().getDocument());
                     page.getSpec().setPublishedRevision(draft.getMetadata().getName());
                     page.getSpec().setUpdatedAt(Instant.now());
                     return client.update(page).map(saved -> detail(saved, draft));
-                })));
+                }));
+        });
     }
 
     public Mono<PageDetail> unpublish(String name, Long version) {
@@ -381,7 +392,7 @@ public class PageService {
     private static PageSummary summary(ThemePage page) {
         var spec = page.getSpec();
         var name = page.getMetadata().getName();
-        return new PageSummary(name, PagePaths.slug(page), spec.getTitle(), spec.getDescription(),
+        return new PageSummary(name, spec.getSlug(), spec.getTitle(), spec.getDescription(),
             page.getMetadata().getVersion(), themeLayout(page), spec.getDraftRevision(),
             spec.getPublishedRevision(),
             spec.getUpdatedAt(), !Objects.equals(spec.getDraftRevision(), spec.getPublishedRevision()));

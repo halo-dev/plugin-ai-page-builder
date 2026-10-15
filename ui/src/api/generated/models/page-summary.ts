@@ -55,7 +55,7 @@ export interface PageSummary {
      * @type {string}
      * @memberof PageSummary
      */
-    'slug': string;
+    'slug'?: string | null;
     /**
      * 
      * @type {boolean}

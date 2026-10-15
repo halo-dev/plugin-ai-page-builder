@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   clone: vi.fn<(...args: unknown[]) => unknown>(),
   export: vi.fn<(...args: unknown[]) => unknown>(),
   create: vi.fn<(...args: unknown[]) => unknown>(),
+  status: vi.fn<(...args: unknown[]) => unknown>(),
   push: vi.fn<(location: unknown) => void>(),
   submit: vi.fn<() => void>(),
 }))
@@ -20,6 +21,7 @@ vi.mock('../../api/clients', () => ({
     clonePage: mocks.clone,
     exportPage: mocks.export,
   },
+  aiPageBuilderAiApi: { getAiPageBuilderAiStatus: mocks.status },
   pagePreviewUrl: (name: string) => `/preview/${name}`,
 }))
 vi.mock('../../utils/error', () => ({
@@ -96,6 +98,7 @@ beforeEach(() => {
   queryClient.clear()
   mocks.list.mockResolvedValue({ data: { items: [], total: 0 } })
   mocks.create.mockResolvedValue({ data: { page: { name: 'created' } } })
+  mocks.status.mockResolvedValue({ data: { available: true, message: '' } })
 })
 
 describe('page creation', () => {
@@ -237,27 +240,69 @@ describe('page creation', () => {
     vi.unstubAllGlobals()
     wrapper.unmount()
   })
-  it('has one creation entry and submits through the FormKit node', async () => {
-    const wrapper = mount(HomeView, { global: { stubs: { FormKit, SearchInput } } })
+  it('navigates to the dedicated create route from the list header', async () => {
+    mocks.list.mockResolvedValue({
+      data: {
+        items: [{ name: 'original', slug: 'original', title: 'Original', version: 7 }],
+        total: 1,
+      },
+    })
+    const wrapper = mount(HomeView, {
+      global: {
+        stubs: { FormKit, SearchInput, PagePreviewCard: true, RouterLink: true },
+        directives: { 'close-popper': {} },
+      },
+    })
     await flushPromises()
     expect(wrapper.findAll('button').filter((button) => button.text() === '新建页面')).toHaveLength(
       1,
     )
-    expect(wrapper.text()).not.toContain('AI 创建页面')
-    expect(wrapper.text()).not.toContain('空白页面')
     await wrapper
       .findAll('button')
       .find((button) => button.text() === '新建页面')!
       .trigger('click')
+    expect(mocks.push).toHaveBeenCalledWith({ name: 'AiPageBuilderNew' })
+    wrapper.unmount()
+  })
+  it('shows the chat panel on the empty list and creates with a placeholder title', async () => {
+    const wrapper = mount(HomeView, { global: { stubs: { FormKit, SearchInput } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('想做一个什么页面？')
+    // A preset chip fills the composer prompt.
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '公司介绍')!
+      .trigger('click')
+    const prompt = wrapper.get('textarea').element.value
+    expect(prompt).toContain('公司介绍')
+    // The theme layout toggle defaults to on.
+    const layoutChip = wrapper.findAll('button').find((button) => button.text() === '主题布局')!
+    expect(layoutChip.attributes('aria-pressed')).toBe('true')
+    await wrapper.get('button[aria-label="发送"]').trigger('click')
+    await flushPromises()
+    expect(mocks.create).toHaveBeenCalledWith({
+      createPageRequest: { title: '未命名页面', themeLayout: true },
+    })
+    expect(mocks.push).toHaveBeenCalledWith({
+      name: 'AiPageBuilderEditor',
+      params: { name: 'created' },
+      state: { aiPrompt: prompt, aiModel: '' },
+    })
+    wrapper.unmount()
+  })
+  it('keeps a manual title-only creation entry and submits through the FormKit node', async () => {
+    const wrapper = mount(HomeView, { global: { stubs: { FormKit, SearchInput } } })
+    await flushPromises()
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '手动创建页面')!
+      .trigger('click')
     const fields = wrapper.findAllComponents(FormKit)
     expect(
       fields.filter((field) => field.props('name')).map((field) => field.props('name')),
-    ).toEqual(['keyword', 'title', 'slug', 'themeLayout', 'model', 'prompt'])
+    ).toEqual(['keyword', 'title', 'themeLayout'])
     expect(fields.find((field) => field.props('name') === 'title')!.props('validation')).toContain(
       'required',
-    )
-    expect(fields.find((field) => field.props('name') === 'slug')!.props('validation')).toEqual(
-      slugValidation,
     )
     expect(fields.some((field) => field.props('type') === 'submit')).toBe(false)
     await wrapper
@@ -266,17 +311,13 @@ describe('page creation', () => {
       .trigger('click')
     expect(mocks.submit).toHaveBeenCalledOnce()
     expect(mocks.create).not.toHaveBeenCalled()
-    const form = fields.find((field) => field.props('modelValue')?.slug === '')!
-    form.vm.$emit('update:modelValue', {
-      title: '关于我们',
-      slug: 'company/about',
-      themeLayout: false,
-    })
+    const form = fields.find((field) => field.props('modelValue')?.title === '')!
+    form.vm.$emit('update:modelValue', { title: '关于我们', themeLayout: false })
     await flushPromises()
     form.vm.$emit('submit')
     await flushPromises()
     expect(mocks.create).toHaveBeenCalledWith({
-      createPageRequest: { title: '关于我们', slug: 'company/about', themeLayout: false },
+      createPageRequest: { title: '关于我们', themeLayout: false },
     })
     expect(mocks.push).toHaveBeenCalledWith({
       name: 'AiPageBuilderEditor',

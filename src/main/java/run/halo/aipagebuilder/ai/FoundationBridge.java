@@ -23,6 +23,7 @@ public final class FoundationBridge implements AiGateway {
         Prefer inheriting theme fonts and colors; provide fallback values when referencing known CSS variables. Do not copy the theme's navigation, header, or footer.
         Do not rely on theme-private classes that were not provided; the canvas previews only base styles and the theme preview is authoritative.
         Prefer patch_current_page for modifying an existing page; use update_current_page for new pages, explicit full redesigns, or the first addition to an empty field. Keep unmodified fields at their original source.
+        A new page starts with the placeholder title 未命名页面; call update_page_title early in the run with a concise, accurate title summarizing the page. On later edits keep the existing title unless the user asks to rename it or the page's purpose clearly changed.
         For a content-rich new page, split the build instead of emitting everything at once: stage the structure and CSS with update_current_page, then add the remaining sections with patch_current_page, keeping every single tool call modest in size.
         read_current_page returns this turn's annotations and the baseHash; DOM summaries in annotations are reference only, and a patch's oldText must come from the returned original source.
         A patch must carry the current baseHash, and oldText must match exactly and uniquely; on a hash or match error re-read the unchanged working copy and fix the patch, never silently fall back to a full-page overwrite.
@@ -109,6 +110,13 @@ public final class FoundationBridge implements AiGateway {
                         .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(),
                             "additionalProperties", false))
                         .executor(context -> Mono.fromSupplier(copy::read)).build(),
+                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                        .name("update_page_title").description("Set the page title (1–200 characters, trimmed). For a new page still titled 未命名页面, call this early with a concise accurate title. Do not change the title for minor edits unless the user asks.")
+                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
+                            "title", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 200)),
+                            "required", java.util.List.of("title"), "additionalProperties", false))
+                        .executor(context -> Mono.fromSupplier(() -> copy.setTitle(context.getInput())))
+                        .build(),
                     run.halo.aifoundation.tool.ToolDefinition.builder()
                         .name("patch_current_page").description("Atomically replace uniquely matched HTML/CSS/JS fragments against the current baseHash. Re-read after hash/match errors; follow validation feedback and never bypass unsupported capabilities")
                         .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(

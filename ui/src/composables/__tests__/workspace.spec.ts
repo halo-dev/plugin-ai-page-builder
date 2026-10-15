@@ -46,6 +46,12 @@ vi.mock('@halo-dev/components', () => ({
       () =>
         h('div', [slots.default?.(), slots.footer?.()]),
   }),
+  VDropdown: defineComponent({
+    setup:
+      (_, { slots }) =>
+      () =>
+        h('div', [slots.default?.(), slots.popper?.()]),
+  }),
   VSpace: defineComponent({
     setup:
       (_, { slots }) =>
@@ -83,7 +89,10 @@ const globals = {
     }),
     FormKit: defineComponent({
       name: 'FormKit',
-      setup: (_, { slots }) => () => h('div', slots.default?.()),
+      setup:
+        (_, { slots }) =>
+        () =>
+          h('div', slots.default?.()),
     }),
     VCodemirror: true,
   },

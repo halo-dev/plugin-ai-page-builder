@@ -25,7 +25,7 @@ export interface CreatePageRequest {
      * @type {string}
      * @memberof CreatePageRequest
      */
-    'slug': string;
+    'slug'?: string | null;
     /**
      * Whether to reuse the theme layout; defaults to true
      * @type {boolean}

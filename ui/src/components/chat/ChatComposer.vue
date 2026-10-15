@@ -11,6 +11,7 @@ const props = defineProps<{
   canStop: boolean
   canSteer?: boolean
   available: boolean
+  placeholder?: string
 }>()
 const prompt = defineModel<string>('prompt', { required: true })
 const model = defineModel<string>('model', { required: true })
@@ -67,7 +68,7 @@ watch(prompt, async () => {
       :placeholder="
         steering
           ? '补充要求，助手会在后续步骤中看到…（Enter 发送，Shift Enter 换行）'
-          : '描述想法，或选中画布内容添加批注…（Enter 发送，Shift Enter 换行）'
+          : (placeholder ?? '描述想法，或选中画布内容添加批注…（Enter 发送，Shift Enter 换行）')
       "
       :disabled="disabled || (running && !steering) || !available"
       :maxlength="8000"
@@ -90,6 +91,7 @@ watch(prompt, async () => {
           :disabled="disabled || running"
         />
       </div>
+      <slot name="footer" />
       <button
         v-if="running"
         type="button"

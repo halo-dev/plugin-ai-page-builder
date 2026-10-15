@@ -379,17 +379,27 @@ class PageServiceTest {
     }
 
     @Test
-    void legacyPagesUseNameFallbackForSummaryAndPublicLookup() {
-        var created = service.create(new CreatePageRequest("about", "About"), "admin").block();
-        var page = pages.remove(created.page().name());
-        page.getMetadata().setName("legacy");
-        page.getSpec().setSlug(null);
-        page.getSpec().setPublishedRevision(created.page().draftRevision());
-        revisions.get(created.page().draftRevision()).getSpec().setPageName("legacy");
-        pages.put("legacy", page);
-        assertThat(service.get("legacy").block().page().slug()).isEqualTo("legacy");
-        assertThat(service.published("legacy").block().page().name()).isEqualTo("legacy");
-        assertConflict(() -> service.create(new CreatePageRequest("legacy", "Duplicate"), "admin").block());
+    void sluglessDraftReportsNullSlugAndPublishesOnlyAfterSlugIsSet() {
+        var created = service.create(new CreatePageRequest(null, "Untitled"), "admin").block();
+        assertThat(created.page().slug()).isNull();
+        assertThat(service.get(created.page().name()).block().page().slug()).isNull();
+        assertBadRequest(() -> service.publish(created.page().name(), created.page().version())
+            .block());
+        assertThat(pages.get(created.page().name()).getSpec().getPublishedRevision()).isNull();
+        var renamed = service.updateSlug(created.page().name(),
+            new PageApi.UpdatePageSlugRequest(created.page().version(), "about")).block();
+        var published = service.publish(renamed.page().name(), renamed.page().version()).block();
+        assertThat(published.page().publishedRevision()).isNotNull();
+        assertThat(service.published("about").block().page().name()).isEqualTo(created.page().name());
+    }
+
+    @Test
+    void cloneStillRequiresAnExplicitSlug() {
+        var created = service.create(new CreatePageRequest(null, "Untitled"), "admin").block();
+        assertBadRequest(() -> service.clonePage(created.page().name(),
+            new PageApi.ClonePageRequest(created.page().version(), null, "Copy"), "admin").block());
+        assertThat(pages).hasSize(1);
+        assertThat(revisions).hasSize(1);
     }
 
     @Test

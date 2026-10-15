@@ -102,4 +102,23 @@ describe('lightweight chat composer', () => {
     expect(wrapper.find('button[aria-label="发送补充要求"]').exists()).toBe(false)
     wrapper.unmount()
   })
+  it('supports a custom placeholder and a footer slot', async () => {
+    const wrapper = mount(ChatComposer, {
+      props: {
+        prompt: '',
+        model: 'model',
+        disabled: false,
+        running: false,
+        canSend: false,
+        canStop: false,
+        available: true,
+        placeholder: '描述想要的页面',
+      },
+      slots: { footer: '<span data-test="chip">主题布局</span>' },
+      global: { stubs: { VButton: button, FormKit: true } },
+    })
+    expect(wrapper.get('textarea').attributes('placeholder')).toBe('描述想要的页面')
+    expect(wrapper.get('[data-test="chip"]').text()).toBe('主题布局')
+    wrapper.unmount()
+  })
 })
