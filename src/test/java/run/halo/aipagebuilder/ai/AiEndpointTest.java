@@ -59,6 +59,7 @@ class AiEndpointTest {
                 .thenReturn(reactor.core.publisher.Mono.just(plugin));
             context.registerBean(run.halo.app.extension.ReactiveExtensionClient.class, () -> client);
             context.registerBean(ContentPolicy.class);
+            context.registerBean(run.halo.aipagebuilder.memory.SiteMemoryService.class);
             context.registerBean(run.halo.aipagebuilder.theme.ThemeContextService.class);
             context.registerBean(run.halo.aipagebuilder.page.PageService.class,
                 () -> mock(run.halo.aipagebuilder.page.PageService.class));

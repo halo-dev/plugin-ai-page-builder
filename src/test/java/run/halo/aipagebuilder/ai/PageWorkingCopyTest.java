@@ -17,6 +17,31 @@ import run.halo.aipagebuilder.theme.ThemeStyleContext;
 
 class PageWorkingCopyTest {
     @Test
+    void memorySuccessRemainsRecordedWhenItsOutputExceedsTheBudget() {
+        var service = org.mockito.Mockito.mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
+        org.mockito.Mockito.when(service.apply(org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Mono.just(PageMemoryToolsTest.snapshot(2)));
+        var memory = new PageMemoryTools(service, PageMemoryToolsTest.snapshot(1),
+            new run.halo.aipagebuilder.memory.SiteMemoryService.SourceContext("p", "s", "run", "admin"));
+        memory.prompt("0571-12345678");
+        var copy = copy("<p>old</p>", "");
+        copy.memory(memory);
+        var input = PageMemoryToolsTest.input(1, "run/prompt", "0571-12345678");
+        copy.consume("x".repeat(PageWorkingCopy.MAX_BYTES
+            - JsonUtils.objectToJson(input).getBytes(java.nio.charset.StandardCharsets.UTF_8).length - 1));
+        assertThatThrownBy(() -> copy.updateMemory("memory", input).block())
+            .hasMessageContaining("预算");
+        copy.closeMemory().block();
+        assertThat(copy.exhausted()).isTrue();
+        assertThat(copy.summaries()).singleElement().satisfies(tool ->
+            assertThat(tool.status()).isEqualTo("completed"));
+        assertThat(copy.memoryOutcomes().get("memory").status()).isEqualTo("completed");
+        org.mockito.Mockito.verify(service).apply(org.mockito.ArgumentMatchers.any(),
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void hashUsesLengthPrefixedUtf8AndPreservesExactText() {
         assertThat(DocumentHash.of("", ""))
             .isEqualTo("af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc");

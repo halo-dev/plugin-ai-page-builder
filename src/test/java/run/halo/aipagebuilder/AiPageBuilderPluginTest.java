@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
@@ -14,12 +15,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import run.halo.app.extension.Scheme;
 import run.halo.app.extension.SchemeManager;
 import run.halo.app.extension.index.IndexSpecBuilder;
 import run.halo.app.extension.index.IndexSpecs;
 import run.halo.app.plugin.PluginContext;
 import run.halo.aipagebuilder.model.PageChatSession;
 import run.halo.aipagebuilder.model.PageChatTurnRecord;
+import run.halo.aipagebuilder.model.SiteMemory;
 import run.halo.aipagebuilder.model.ThemePage;
 import run.halo.aipagebuilder.model.ThemePageRevision;
 
@@ -39,11 +42,22 @@ class AiPageBuilderPluginTest {
     void registersAllSchemes() {
         plugin.start();
         var order = inOrder(schemeManager);
+        order.verify(schemeManager).register(SiteMemory.class);
         order.verify(schemeManager).register(eq(PageChatSession.class), any());
         order.verify(schemeManager).register(eq(PageChatTurnRecord.class), any());
         order.verify(schemeManager).register(eq(ThemePage.class), any());
         order.verify(schemeManager).register(eq(ThemePageRevision.class), any());
         plugin.stop();
+    }
+
+    @Test
+    void unregistersSiteMemorySchemeOnStop() {
+        var scheme = Scheme.buildFromType(SiteMemory.class);
+        when(schemeManager.get(SiteMemory.class)).thenReturn(scheme);
+
+        plugin.stop();
+
+        verify(schemeManager).unregister(scheme);
     }
 
     @Test

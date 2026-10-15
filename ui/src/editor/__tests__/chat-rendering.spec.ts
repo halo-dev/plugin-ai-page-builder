@@ -11,6 +11,31 @@ vi.mock('@halo-dev/components', () => ({
   VStatusDot: { props: ['animate'], template: '<span :data-animate="animate" />' },
 }))
 describe('streaming conversation rendering', () => {
+  it('renders durable memory outcomes separately from page staging', async () => {
+    const part = {
+      type: 'tool-update_site_memory' as const,
+      toolCallId: 'memory',
+      toolName: 'update_site_memory',
+      state: 'output-available' as const,
+      input: {},
+      output: { summary: '已记住公司电话' },
+    }
+    const wrapper = mount(ChatMessageParts, {
+      props: { active: false, message: { id: 'm', role: 'assistant', parts: [part] } },
+    })
+    expect(wrapper.text()).toContain('记忆业务资料')
+    expect(wrapper.text()).toContain('已记住公司电话')
+    expect(wrapper.text()).not.toContain('已暂存')
+    await wrapper.setProps({
+      message: {
+        id: 'm', role: 'assistant',
+        parts: [{ ...part, output: { error: '保存结果待确认', summary: '保存结果待确认' } }],
+      },
+    })
+    expect(wrapper.text()).toContain('未确认保存')
+    expect(wrapper.text()).toContain('保存结果待确认')
+    wrapper.unmount()
+  })
   it('shows a static ask-user waiting state without thinking or tool animations', () => {
     const wrapper = mount(ChatMessageParts, {
       props: {

@@ -50,6 +50,7 @@ public class PageChatService {
     private final ContentPolicy policy;
     private final run.halo.aipagebuilder.theme.ThemeContextService themes;
     private final PageReferenceTools referenceTools;
+    private final run.halo.aipagebuilder.memory.SiteMemoryService memories;
     private final String owner = UUID.randomUUID().toString();
     private final Map<String, Active> active = new ConcurrentHashMap<>();
 
@@ -58,10 +59,17 @@ public class PageChatService {
         this(client, pages, gateway, policy, themes, null);
     }
 
-    @Autowired
     public PageChatService(ReactiveExtensionClient client, PageService pages, AiGateway gateway,
         ContentPolicy policy, run.halo.aipagebuilder.theme.ThemeContextService themes,
         PageReferenceTools referenceTools) {
+        this(client, pages, gateway, policy, themes, referenceTools, null);
+    }
+
+    @Autowired
+    public PageChatService(ReactiveExtensionClient client, PageService pages, AiGateway gateway,
+        ContentPolicy policy, run.halo.aipagebuilder.theme.ThemeContextService themes,
+        PageReferenceTools referenceTools, run.halo.aipagebuilder.memory.SiteMemoryService memories) {
+        this.memories = memories;
         this.referenceTools = referenceTools;
         this.themes = themes;
         this.client = client;
@@ -222,9 +230,27 @@ public class PageChatService {
         session.getSpec().setActive(run.turn());
         session.getSpec().setActiveSessionId(sessionId);
         session.getSpec().setOwner(owner);
-        return history(sessionId, null, MAX_TURNS).map(records -> contextWindow(records.stream()
+        var memory = memories == null ? Mono.<Void>empty() : memories.load()
+            .timeout(java.time.Duration.ofSeconds(15))
+            .doOnNext(snapshot -> {
+                run.memory = new PageMemoryTools(memories, snapshot,
+                    new run.halo.aipagebuilder.memory.SiteMemoryService.SourceContext(
+                        name, sessionId, request.runId(), actor));
+                run.copy.memory(run.memory);
+            }).then().onErrorResume(error -> {
+                run.copy.memoryUnavailable();
+                return Mono.empty();
+            });
+        var preparing = new java.util.concurrent.atomic.AtomicBoolean(true);
+        return memory.then(history(sessionId, null, MAX_TURNS))
+            .doOnSuccess(ignored -> preparing.set(false))
+            .doOnCancel(() -> {
+                if (preparing.getAndSet(false)) active.remove(name, run);
+            })
+            .map(records -> contextWindow(records.stream()
                 .map(record -> record.getSpec().getTurn()).toList().reversed()))
             .flatMap(history -> client.update(session).flatMap(saved -> Mono.deferContextual(context -> {
+            if (run.memory != null) run.memory.prompt(request.prompt());
             execute(name, run, history).contextWrite(context).subscribe(ignored -> { }, error -> {
                 // Keep the persisted committing record for reconciliation after an uncertain write.
                 run.events.tryEmitNext(Map.of("type", "error", "errorText", "运行结果待确认，请查询运行状态"));
@@ -290,6 +316,7 @@ public class PageChatService {
                             "name", "user-answer", "id", answered.id(), "data",
                             Map.of("runId", runId, "question", answered)));
                         run.copy.timeBudget.resume();
+                        if (run.memory != null) run.memory.answered(answered);
                         run.answer.tryEmitValue(answered);
                     }
                 }).doOnError(error -> {
@@ -332,9 +359,10 @@ public class PageChatService {
                 }
                 run.steers.add(text);
                 var index = run.steers.size() - 1;
-                run.copy.queueSteer(text);
                 run.transition = persistActive(name, run).doOnSuccess(ignored -> {
                     synchronized (run) {
+                        if (run.memory != null) run.memory.steer(index, text);
+                        run.copy.queueSteer(text);
                         run.transition = null;
                         run.events.tryEmitNext(Map.of("type", "data-steer", "name", "steer",
                             "id", run.request.runId() + "-steer-" + index, "data",
@@ -342,6 +370,7 @@ public class PageChatService {
                     }
                 }).doOnError(error -> {
                     synchronized (run) {
+                        run.steers.remove(index);
                         run.transition = null;
                     }
                 }).cache();
@@ -425,6 +454,11 @@ public class PageChatService {
                     }
                 }
             }).then(Mono.defer(() -> {
+                synchronized (run) {
+                    return run.transition == null ? Mono.<Void>empty()
+                        : run.transition.onErrorComplete();
+                }
+            })).then(Mono.defer(() -> {
                 List<String> steers;
                 synchronized (run) {
                     if ("cancelled".equals(run.status)) {
@@ -434,6 +468,7 @@ public class PageChatService {
                     steers = run.continuations < MAX_CONTINUATIONS && !run.copy.exhausted()
                         ? run.copy.drainSteers() : List.of();
                     if (!steers.isEmpty()) run.continuations++;
+                    else run.status = "committing";
                 }
                 if (!steers.isEmpty()) {
                     return converse(name, run, continuedHistory(run, history, steers.size()),
@@ -515,7 +550,11 @@ public class PageChatService {
     }
 
     private Mono<Void> finish(String name, Active run, PageDetail page) {
-        return client.fetch(PageChatSession.class, name).flatMap(session -> {
+        return run.copy.closeMemory().then(Mono.defer(() -> {
+            synchronized (run) {
+                return run.transition == null ? Mono.<Void>empty() : run.transition.onErrorComplete();
+            }
+        })).then(client.fetch(PageChatSession.class, name)).flatMap(session -> {
             requireRun(session, run.request.runId());
             return archive(name, run.sessionId, run.turn())
                 .then(touchSession(name, run.sessionId)).then(Mono.defer(() -> {
@@ -571,7 +610,8 @@ public class PageChatService {
                         run.status = "cancelled";
                         run.cancel.tryEmitEmpty();
                     }
-                    return Mono.just(new ChatApi.Run(runId, run.status, run.revision, run.error, null));
+                    return run.copy.closeMemory().then(Mono.fromSupplier(() ->
+                        new ChatApi.Run(runId, run.status, run.revision, run.error, null)));
                 }
             }
             return result(name, runId);
@@ -861,6 +901,7 @@ public class PageChatService {
         final Instant createdAt = Instant.now();
         final PageDetail base;
         final PageWorkingCopy copy;
+        PageMemoryTools memory;
         final StringBuilder text = new StringBuilder();
         final ChatDisplay display = new ChatDisplay();
         final Sinks.Empty<Void> cancel = Sinks.empty();
@@ -889,7 +930,7 @@ public class PageChatService {
 
         synchronized ChatApi.Turn turn() {
             return new ChatApi.Turn(request.runId(), actor, createdAt, request.prompt(), text.toString(),
-                copy.summaries(), status, revision, error, display.snapshot(status),
+                copy.summaries(), status, revision, error, display.snapshot(status, copy.memoryOutcomes()),
                 request.annotations() == null ? List.of() : request.annotations().stream()
                     .map(annotation -> new ChatApi.Annotation(annotation.id(), List.of(), annotation.tag(),
                         annotation.summary(), "", annotation.comment())).toList(), List.copyOf(questions),

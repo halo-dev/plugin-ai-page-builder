@@ -63,6 +63,7 @@ const parts = computed(() =>
       search_attachments: '搜索附件',
       fetch_webpage: '读取网页信息',
       ask_user: '确认页面需求',
+      update_site_memory: '记忆业务资料',
     }
     return [
       {
@@ -75,7 +76,9 @@ const parts = computed(() =>
           state: failed ? ('error' as const) : done ? ('success' as const) : ('default' as const),
           active: props.active && !done && !failed,
           status: failed
-            ? '校验未通过'
+            ? part.toolName === 'update_site_memory'
+              ? '未确认保存'
+              : '校验未通过'
             : done
               ? changing && output.staged === false
                 ? '内容未变化'

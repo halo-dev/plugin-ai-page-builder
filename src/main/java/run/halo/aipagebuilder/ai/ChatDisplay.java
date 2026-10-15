@@ -44,9 +44,12 @@ final class ChatDisplay {
             var summary = old == null ? "" : old.summary();
             if ("tool-output-available".equals(type)) {
                 var output = chunk.get("output") instanceof Map<?, ?> value ? value : Map.of();
-                boolean invalid = Boolean.FALSE.equals(output.get("valid"));
+                boolean memory = PageMemoryTools.NAME.equals(name);
+                boolean invalid = Boolean.FALSE.equals(output.get("valid"))
+                    || memory && output.containsKey("error");
                 status = invalid ? "error" : "completed";
-                summary = invalid ? String.valueOf(output.getOrDefault("error", null))
+                summary = memory && output.get("summary") instanceof String message ? message
+                    : invalid ? String.valueOf(output.getOrDefault("error", null))
                     : Boolean.TRUE.equals(output.get("staged")) ? "修改已通过校验并暂存"
                     : Boolean.TRUE.equals(output.get("valid")) ? "内容未发生变化" : "读取完成";
             } else if (type.endsWith("-error") || type.endsWith("-denied")) {
@@ -64,9 +67,19 @@ final class ChatDisplay {
     }
 
     synchronized List<ChatApi.DisplayPart> snapshot(String status) {
+        return snapshot(status, Map.of());
+    }
+
+    synchronized List<ChatApi.DisplayPart> snapshot(String status,
+        Map<String, ChatApi.Tool> memoryOutcomes) {
         var result = new ArrayList<ChatApi.DisplayPart>();
         for (var part : parts.values()) {
-            if ("tool".equals(part.type()) && "running".equals(part.status())
+            var outcome = memoryOutcomes.get(part.id());
+            if ("tool".equals(part.type()) && PageMemoryTools.NAME.equals(part.toolName())
+                && outcome != null) {
+                result.add(new ChatApi.DisplayPart(part.type(), part.id(), null, part.toolName(),
+                    outcome.status(), outcome.summary(), false));
+            } else if ("tool".equals(part.type()) && "running".equals(part.status())
                 && !"running".equals(status) && !"waiting_for_user".equals(status)) {
                 result.add(new ChatApi.DisplayPart(part.type(), part.id(), null, part.toolName(),
                     "error", "本轮结束，工具未完成", false));
