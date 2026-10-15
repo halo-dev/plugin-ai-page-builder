@@ -196,6 +196,41 @@ class SiteMemoryServiceTest {
     }
 
     @Test
+    void deletionClearsAllSurvivingQuotesAfterTheWholeBatch() {
+        for (boolean deleteFirst : List.of(true, false)) {
+            var original = entry("name", "Name", "Acme");
+            stored.set(memory(1L, List.of(original, entry("phone", "Phone", "0571-12345678"))));
+            var added = new Change("add", null, "Brand", "Email", "fact", "contact@example.com",
+                "source-2", "电话 0571 12345678，邮箱 contact@example.com");
+            var changes = deleteFirst ? List.of(delete("phone"), added)
+                : List.of(added, delete("phone"));
+            var result = service.apply(1L, changes, CONTEXT).block();
+            assertThat(result.getSpec().getEntries()).hasSize(2).allSatisfy(entry ->
+                assertThat(entry.source().quote()).isEmpty());
+            assertThat(result.getSpec().getEntries().getFirst())
+                .usingRecursiveComparison().ignoringFields("source.quote").isEqualTo(original);
+            assertThat(result.getSpec().getEntries().getLast().value()).isEqualTo("contact@example.com");
+            assertThat(service.load().block()).isEqualTo(result);
+            // Cleared provenance remains valid for later batches, including a no-op add.
+            assertThat(apply(add("Brand", "Name", "Acme"))).isEqualTo(result);
+            assertThat(apply(add("Brand", "Hours", "9–5")).getSpec().getEntries()).hasSize(3);
+        }
+    }
+
+    @Test
+    void failedDeletionBatchLeavesStoredQuotesAndEntriesIntact() {
+        var original = memory(1L, List.of(entry("name", "Name", "Acme"),
+            entry("phone", "Phone", "0571-12345678")));
+        stored.set(original);
+        when(client.fetch(SiteMemory.class, SiteMemory.NAME)).thenReturn(Mono.just(original));
+        assertStatus(409, () -> apply(delete("phone"), delete("missing")));
+        assertThat(stored.get()).isEqualTo(original);
+        assertThat(original.getSpec().getEntries()).hasSize(2).allSatisfy(entry ->
+            assertThat(entry.source().quote()).isEqualTo("user said this"));
+        verify(client, never()).update(any(SiteMemory.class));
+    }
+
+    @Test
     void staleVersionRejectsEvenNoOpAndNeverWrites() {
         service.load().block();
         apply(add("Brand", "Name", "Acme"));

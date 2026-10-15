@@ -144,6 +144,12 @@ class PageMemoryIntegrationTest {
         second.prompt("忘记电话");
         var result = second.execute(input(2, Map.of("action", "delete", "entryId", phone.id(),
             "sourceId", "delete/prompt", "quote", "忘记电话"))).block();
+        assertThat(JsonUtils.objectToJson(service.load().block())).doesNotContain("0571-12345678");
+        assertThat(stored.get().getSpec().getEntries()).singleElement().satisfies(entry -> {
+            assertThat(entry.value()).isEqualTo("Acme");
+            assertThat(entry.source().quote()).isEmpty();
+            assertThat(entry.source().sourceId()).isEqualTo("run/prompt");
+        });
         assertThat(JsonUtils.objectToJson(result)).doesNotContain("0571-12345678", "source");
         assertThat(tools("page", "session", "next", "admin").reference())
             .contains("Acme").doesNotContain("0571-12345678", "quote");

@@ -65,6 +65,15 @@ public class SiteMemoryService {
                 for (var change : changes) {
                     changed |= applyChange(entries, change, context, touchedKeys, touchedIds);
                 }
+                if (changes.stream().anyMatch(change -> "delete".equals(change.action()))) {
+                    // Shared quotes can retain forgotten facts in any spelling. Keep references only.
+                    entries.replaceAll(entry -> {
+                        var source = entry.source();
+                        return new Entry(entry.id(), entry.subject(), entry.key(), entry.kind(),
+                            entry.value(), new Source(source.pageName(), source.sessionId(),
+                                source.runId(), source.sourceId(), "", source.actor()), entry.updatedAt());
+                    });
+                }
                 updated.getSpec().setEntries(entries);
                 validateCapacity(updated);
                 if (!changed) {
