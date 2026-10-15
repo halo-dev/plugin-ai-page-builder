@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 import { Toast, VButton, VDropdown, type VDropdownPlacement } from '@halo-dev/components'
 import IconRefresh from '~icons/mingcute/refresh-2-line'
 import IconEarth from '~icons/mingcute/earth-line'
@@ -17,24 +17,39 @@ const props = withDefaults(
   }>(),
   { placement: 'bottom-end' },
 )
-const emit = defineEmits<{ published: [detail: PageDetail] }>()
+const emit = defineEmits<{ published: [detail: PageDetail]; pending: [pending: boolean] }>()
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/
 
+const slugId = useId()
 const shown = ref(false)
 const slug = ref(props.slug || randomSlug())
+// Slug/version already saved on the server by this popper, so a retry after a
+// failed publishPage call doesn't resend a stale version to updatePageSlug.
+const synced = ref<{ slug: string | null; version: number } | null>(null)
 const pending = ref(false)
 const error = ref('')
 const slugValid = computed(() => SLUG_PATTERN.test(slug.value) && slug.value.length <= 200)
 const previewUrl = computed(() => `${window.location.origin}/${slug.value}`)
 
+watch(shown, (open) => {
+  if (!open) return
+  // The slug may have changed through Page Settings while the popper was
+  // closed; re-sync from the latest props on every open.
+  slug.value = props.slug || randomSlug()
+  synced.value = null
+  error.value = ''
+})
+
 async function publish() {
   if (pending.value || !slugValid.value) return
   pending.value = true
+  emit('pending', true)
   error.value = ''
   try {
-    let version = props.version
-    if (slug.value !== props.slug) {
+    const base = synced.value ?? { slug: props.slug ?? null, version: props.version }
+    let version = base.version
+    if (slug.value !== base.slug) {
       const updated = (
         await aiPageBuilderApi.updatePageSlug({
           name: props.name,
@@ -42,6 +57,7 @@ async function publish() {
         })
       ).data
       version = updated.page.version
+      synced.value = { slug: slug.value, version }
     }
     const published = (
       await aiPageBuilderApi.publishPage({ name: props.name, mutationRequest: { version } })
@@ -54,6 +70,7 @@ async function publish() {
     error.value = errorMessage(e)
   } finally {
     pending.value = false
+    emit('pending', false)
   }
 }
 function keydown(event: KeyboardEvent) {
@@ -76,9 +93,9 @@ function keydown(event: KeyboardEvent) {
     <template #popper>
       <div class="w-80 p-3.5">
         <p class="mb-2 text-[13px] font-semibold text-gray-900">发布页面</p>
-        <label for="apb-publish-slug" class="mb-1 block text-xs text-gray-500">访问路径</label>
+        <label :for="slugId" class="mb-1 block text-xs text-gray-500">访问路径</label>
         <input
-          id="apb-publish-slug"
+          :id="slugId"
           v-model.trim="slug"
           class="apb-input"
           :class="!slugValid && slug ? '!border-red-300' : ''"

@@ -394,6 +394,13 @@ class PageServiceTest {
     }
 
     @Test
+    void blankSlugIsNormalizedToNullOnCreate() {
+        var created = service.create(new CreatePageRequest("  ", "Untitled"), "admin").block();
+        assertThat(created.page().slug()).isNull();
+        assertThat(pages.get(created.page().name()).getSpec().getSlug()).isNull();
+    }
+
+    @Test
     void cloneStillRequiresAnExplicitSlug() {
         var created = service.create(new CreatePageRequest(null, "Untitled"), "admin").block();
         assertBadRequest(() -> service.clonePage(created.page().name(),

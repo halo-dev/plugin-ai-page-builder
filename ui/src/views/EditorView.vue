@@ -139,6 +139,9 @@ queryClient
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
+// First publish runs inside PublishPagePopper; block the AI panel while it is
+// in flight so a generation cannot commit against the pre-publish version.
+const publishPending = shallowRef(false)
 const view = shallowRef<'visual' | 'source' | 'runtime'>('visual')
 const viewOptions = [
   { value: 'visual', label: '可视化', icon: IconEdit },
@@ -429,6 +432,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           :slug="detail.page.slug"
           :version="detail.page.version"
           @published="published"
+          @pending="publishPending = $event"
         >
           <button type="button" class="apb-btn-primary" :disabled="locked || dirty || !valid">
             <IconRocket class="text-sm" />
@@ -481,7 +485,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           class="border-r border-gray-200"
           :class="mobilePanel === 'chat' ? 'flex' : 'hidden md:flex'"
           :page-name="detail.page.name"
-          :disabled="busy || preparing || !valid || settingsOpen || historyOpen"
+          :disabled="busy || publishPending || preparing || !valid || settingsOpen || historyOpen"
           :prepare="prepareChat"
           :document="working"
           :annotations="annotations"

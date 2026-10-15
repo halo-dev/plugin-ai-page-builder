@@ -92,6 +92,8 @@ public class PageService {
     private Mono<PageDetail> createDocument(String slug, PageDocument document, Boolean themeLayout,
         String actor) {
         return Mono.defer(() -> {
+            // Normalize blank slugs so callers cannot persist an empty string.
+            final var normalizedSlug = slug == null || slug.isBlank() ? null : slug;
             contentPolicy.validate(document);
             Supplier<Mono<PageDetail>> write = () -> {
                 var name = UUID.randomUUID().toString();
@@ -102,7 +104,7 @@ public class PageService {
                     metadata.setName(name);
                     page.setMetadata(metadata);
                     page.setSpec(new ThemePage.Spec());
-                    page.getSpec().setSlug(slug);
+                    page.getSpec().setSlug(normalizedSlug);
                     page.getSpec().setThemeLayout(themeLayout);
                     applyDraft(page, created);
                     return client.create(page).flux().single()
@@ -111,11 +113,12 @@ public class PageService {
                         .map(saved -> detail(saved, created));
                 });
             };
-            if (slug == null || slug.isBlank()) {
+            if (normalizedSlug == null) {
                 return write.get();
             }
-            PagePaths.validate(slug);
-            return writeSlug(slug, () -> checkSlugAvailable(slug, null).then(Mono.defer(write::get)));
+            PagePaths.validate(normalizedSlug);
+            return writeSlug(normalizedSlug,
+                () -> checkSlugAvailable(normalizedSlug, null).then(Mono.defer(write::get)));
         }).onErrorMap(DuplicateKeyException.class, error -> conflict("Slug already exists"))
             .onErrorMap(OptimisticLockingFailureException.class,
                 error -> conflict("Slug already exists or page changed"));
