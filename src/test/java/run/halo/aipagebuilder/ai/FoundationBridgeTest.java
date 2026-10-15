@@ -62,6 +62,36 @@ class FoundationBridgeTest {
     }
 
     @Test
+    void injectsBoundMemoryAndRegistersItsToolWithoutChangingPageState() {
+        var request = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var tools = new PageMemoryTools(mock(run.halo.aipagebuilder.memory.SiteMemoryService.class),
+            PageMemoryToolsTest.snapshot(1),
+            new run.halo.aipagebuilder.memory.SiteMemoryService.SourceContext("p", "s", "r", "admin"));
+        tools.prompt("公司电话 0571-12345678");
+        var copy = copy();
+        copy.memory(tools);
+        bridge.chat("model", java.util.List.of(), "公司电话 0571-12345678", copy).blockLast();
+        assertThat(request.get().getTools()).extracting(tool -> tool.getName()).contains("update_site_memory");
+        assertThat(run.halo.app.infra.utils.JsonUtils.objectToJson(request.get().getMessages()))
+            .contains("currentRunSources", "r/prompt", "0571-12345678");
+        assertThat(request.get().getMessages().getLast().getRole().toString()).isEqualTo("USER");
+        assertThat(request.get().getSystem())
+            .contains("continue deleting in batches", "add and update are forbidden")
+            .doesNotContain("delete closes memory writes");
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+    }
+
+    @Test
+    void unavailableMemoryAlsoKeepsTheFinalMessageAsUser() {
+        var request = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var copy = copy();
+        copy.memoryUnavailable();
+        bridge.chat("model", java.util.List.of(), "生成页面", copy).blockLast();
+        assertThat(request.get().getMessages().getLast().getRole().toString()).isEqualTo("USER");
+        assertThat(request.get().getMessages().toString()).contains("could not be loaded", "生成页面");
+    }
+
+    @Test
     void silentProviderTimesOutAndCancelsWithoutSdkTimeoutRace() {
         var request = setup(Flux.never());
         reactor.test.StepVerifier.withVirtualTime(() -> bridge.chat("model", java.util.List.of(), "change", copy()))

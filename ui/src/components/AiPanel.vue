@@ -106,7 +106,7 @@ function turnResult(role: string, metadata: unknown) {
   if (!label) return undefined
   return {
     failed: status === 'failed' || status === 'interrupted',
-    text: `${label} · 本轮修改未保存`,
+    text: `${label} · 本轮页面修改未保存`,
     error: typeof error === 'string' ? error : '',
   }
 }

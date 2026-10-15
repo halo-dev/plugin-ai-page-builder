@@ -27,6 +27,63 @@ public final class PageWorkingCopy {
     private boolean invalidUpdate;
     private ThemeStyleContext themeSnapshot;
     private PageReferenceTools.Session references;
+    private PageMemoryTools memory;
+    private boolean memoryUnavailable;
+    private Mono<Void> memoryCompletion = Mono.empty();
+    private final Map<String, ChatApi.Tool> memoryOutcomes = new LinkedHashMap<>();
+
+    synchronized void memory(PageMemoryTools memory) {
+        this.memory = memory;
+    }
+
+    synchronized void memoryUnavailable() {
+        memoryUnavailable = true;
+        summaries.add(new ChatApi.Tool(PageMemoryTools.NAME, "error", "记忆读取失败，本轮未使用记忆"));
+    }
+
+    synchronized String memoryReference() {
+        return memory != null ? memory.reference() : memoryUnavailable
+            ? "Site memory could not be loaded. Do not claim there are no saved facts. "
+                + "Briefly report memory is unavailable this turn; continue the page task."
+            : "";
+    }
+
+    synchronized boolean hasMemory() {
+        return memory != null;
+    }
+
+    synchronized Mono<Void> closeMemory() {
+        return memory == null ? Mono.empty() : memory.close().then(memoryCompletion);
+    }
+
+    synchronized Map<String, ChatApi.Tool> memoryOutcomes() {
+        return Map.copyOf(memoryOutcomes);
+    }
+
+    public Mono<Map<String, Object>> updateMemory(Map<String, Object> input) {
+        return updateMemory(null, input);
+    }
+
+    public Mono<Map<String, Object>> updateMemory(String toolCallId, Map<String, Object> input) {
+        return Mono.defer(() -> {
+            synchronized (this) {
+                call();
+                consume(JsonUtils.objectToJson(input));
+                var result = memory.execute(input).doOnNext(output -> {
+                    synchronized (this) {
+                        var outcome = new ChatApi.Tool(PageMemoryTools.NAME,
+                            output.containsKey("error") ? "error" : "completed",
+                            String.valueOf(output.get("summary")));
+                        summaries.add(outcome);
+                        if (toolCallId != null) memoryOutcomes.put(toolCallId, outcome);
+                        consume(JsonUtils.objectToJson(output));
+                    }
+                }).cache();
+                memoryCompletion = Mono.when(memoryCompletion, result.then()).onErrorComplete();
+                return result;
+            }
+        });
+    }
     private List<ChatApi.Annotation> annotations = List.of();
     private final List<String> pendingSteers = new ArrayList<>();
     final ActiveTimeBudget timeBudget = new ActiveTimeBudget();
@@ -51,7 +108,8 @@ public final class PageWorkingCopy {
                     consume(JsonUtils.objectToJson(answered));
                     summaries.add(new ChatApi.Tool("ask_user", "completed", "用户已回答问题"));
                 }
-                return (Object) answered;
+                if (memory == null) return (Object) answered;
+                return (Object) Map.of("question", answered, "memoryReference", memory.reference());
             });
         });
     }

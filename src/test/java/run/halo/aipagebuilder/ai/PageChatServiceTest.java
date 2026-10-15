@@ -198,6 +198,167 @@ class PageChatServiceTest {
     }
 
     @Test
+    void memorySurvivesPageFailureAndLoadsInAnotherPage() {
+        var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
+        var snapshot = new java.util.concurrent.atomic.AtomicReference<>(PageMemoryToolsTest.snapshot(1));
+        when(memories.load()).thenAnswer(ignored -> Mono.just(snapshot.get()));
+        when(memories.apply(any(), any(), any())).thenAnswer(ignored -> {
+            var saved = PageMemoryToolsTest.snapshot(2);
+            saved.getSpec().setEntries(List.of(new run.halo.aipagebuilder.model.SiteMemory.Entry(
+                "phone", "本站公司", "电话", "fact", "0571-12345678", null, java.time.Instant.now())));
+            snapshot.set(saved);
+            return Mono.just(saved);
+        });
+        var chat = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class), null, memories);
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.updateMemory(PageMemoryToolsTest.input(1, runId + "/prompt", "0571-12345678"))
+                .thenMany(Flux.error(new IllegalStateException("model failed")));
+        });
+        chat.start("page", new ChatApi.Request(runId, 1L, "model", "公司电话 0571-12345678"), "admin")
+            .block().blockLast();
+        assertThat(chat.session("page").block().turns().getFirst().tools())
+            .anySatisfy(tool -> assertThat(tool.status()).isEqualTo("completed"));
+        when(pages.get("other")).thenReturn(Mono.just(fixture.base));
+        org.mockito.Mockito.reset(gateway);
+        when(gateway.available()).thenReturn(Mono.just(true));
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            assertThat(copy.memoryReference()).contains("0571-12345678");
+            return Flux.empty();
+        });
+        chat.start("other", new ChatApi.Request(UUID.randomUUID().toString(), 1L, "model", "联系我们"), "admin")
+            .block().blockLast();
+        verify(memories, times(1)).apply(any(), any(), any());
+    }
+
+    @Test
+    void stalledInitialMemoryLoadDegradesAndCancelledLoadReleasesReservation() {
+        var clock = reactor.test.scheduler.VirtualTimeScheduler.getOrSet();
+        try {
+            var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
+            when(memories.load()).thenReturn(Mono.never());
+            var chat = new PageChatService(client, pages, gateway, policy,
+                mock(run.halo.aipagebuilder.theme.ThemeContextService.class), null, memories);
+            when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                assertThat(copy.hasMemory()).isFalse();
+                assertThat(copy.memoryReference()).contains("could not be loaded");
+                return Flux.empty();
+            });
+            var abandoned = chat.start("page", request(), "admin").subscribe();
+            abandoned.dispose();
+            var started = chat.start("page", request(), "admin").toFuture();
+            clock.advanceTimeBy(java.time.Duration.ofSeconds(15));
+            assertThat(started).isCompleted();
+            assertThat(started.join().collectList().block()).extracting(event -> event.get("type"))
+                .contains("finish");
+            assertThat(chat.session("page").block().turns().getFirst().tools())
+                .anySatisfy(tool -> assertThat(tool.summary()).contains("记忆读取失败"));
+            verify(gateway, times(1)).chat(anyString(), any(), anyString(), any());
+        } finally {
+            reactor.test.scheduler.VirtualTimeScheduler.reset();
+        }
+    }
+
+    @Test
+    void downstreamCancellationAfterStartupKeepsTheRunningReservation() {
+        var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
+        when(memories.load()).thenReturn(Mono.just(PageMemoryToolsTest.snapshot(1)));
+        var chat = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class), null, memories);
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        var events = new java.util.concurrent.atomic.AtomicReference<Flux<Map<String, Object>>>();
+        var response = chat.start("page", request(), "admin")
+            .flatMap(stream -> {
+                events.set(stream);
+                return Mono.never();
+            }).subscribe();
+        response.dispose();
+        assertThat(chat.result("page", runId).block().status()).isEqualTo("running");
+        assertThat(chat.cancel("page", runId).block().status()).isEqualTo("cancelled");
+        assertThat(events.get().collectList().block()).extracting(event -> event.get("type"))
+            .contains("abort");
+    }
+
+    @Test
+    void cancellationWaitsForMemoryWriteAndArchivesItsOutcome() {
+        var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
+        when(memories.load()).thenReturn(Mono.just(PageMemoryToolsTest.snapshot(1)));
+        var saved = Sinks.<run.halo.aipagebuilder.model.SiteMemory>one();
+        when(memories.apply(any(), any(), any())).thenReturn(saved.asMono());
+        var chat = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class), null, memories);
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return Flux.concat(Flux.just(Map.<String, Object>of("type", "tool-input-start",
+                "toolCallId", "memory", "toolName", PageMemoryTools.NAME)),
+                copy.updateMemory("memory", PageMemoryToolsTest.input(1, runId + "/prompt", "0571-12345678"))
+                    .thenMany(Flux.never()));
+        });
+        var events = chat.start("page", new ChatApi.Request(runId, 1L, "model", "0571-12345678"), "admin")
+            .block().collectList();
+        var cancelled = new java.util.concurrent.atomic.AtomicReference<ChatApi.Run>();
+        chat.cancel("page", runId).subscribe(cancelled::set);
+        assertThat(cancelled.get()).isNull();
+        saved.tryEmitValue(PageMemoryToolsTest.snapshot(2));
+        assertThat(cancelled.get().status()).isEqualTo("cancelled");
+        assertThat(events.block()).extracting(value -> value.get("type")).contains("abort");
+        var turn = chat.session("page").block().turns().getFirst();
+        assertThat(turn.tools()).singleElement().satisfies(tool ->
+            assertThat(tool.status()).isEqualTo("completed"));
+        assertThat(turn.parts()).singleElement().satisfies(part -> {
+            assertThat(part.id()).isEqualTo("memory");
+            assertThat(part.status()).isEqualTo("completed");
+            assertThat(part.summary()).isEqualTo(turn.tools().getFirst().summary());
+        });
+    }
+
+    @Test
+    void cancellationFinishesOnMemoryTimeoutAndLateStorageCannotChangeHistory() {
+        var clock = reactor.test.scheduler.VirtualTimeScheduler.getOrSet();
+        try {
+            var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
+            when(memories.load()).thenReturn(Mono.just(PageMemoryToolsTest.snapshot(1)));
+            var saved = Sinks.<run.halo.aipagebuilder.model.SiteMemory>one();
+            var storageCancelled = new java.util.concurrent.atomic.AtomicBoolean();
+            when(memories.apply(any(), any(), any()))
+                .thenReturn(saved.asMono().doOnCancel(() -> storageCancelled.set(true)));
+            var chat = new PageChatService(client, pages, gateway, policy,
+                mock(run.halo.aipagebuilder.theme.ThemeContextService.class), null, memories);
+            when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                return Flux.concat(Flux.just(Map.<String, Object>of("type", "tool-input-start",
+                    "toolCallId", "memory", "toolName", PageMemoryTools.NAME)),
+                    copy.updateMemory("memory", PageMemoryToolsTest.input(1, runId + "/prompt", "0571-12345678"))
+                        .thenMany(Flux.never()));
+            });
+            var events = chat.start("page", new ChatApi.Request(runId, 1L, "model", "0571-12345678"), "admin")
+                .block().collectList().toFuture();
+            var cancelled = chat.cancel("page", runId).toFuture();
+            clock.advanceTimeBy(PageMemoryTools.SAVE_TIMEOUT);
+            assertThat(cancelled.join().status()).isEqualTo("cancelled");
+            assertThat(events.join()).extracting(event -> event.get("type")).contains("abort");
+            var turn = chat.session("page").block().turns().getFirst();
+            assertThat(turn.parts()).singleElement().satisfies(part -> {
+                assertThat(part.status()).isEqualTo("error");
+                assertThat(part.summary()).contains("结果待确认");
+            });
+            assertThat(storageCancelled.get()).isFalse();
+            saved.tryEmitValue(PageMemoryToolsTest.snapshot(2));
+            assertThat(chat.session("page").block().turns().getFirst()).isEqualTo(turn);
+            org.mockito.Mockito.doReturn(Flux.empty()).when(gateway)
+                .chat(anyString(), any(), anyString(), any());
+            chat.start("page", new ChatApi.Request(UUID.randomUUID().toString(), 1L, "model", "继续"), "admin")
+                .block().blockLast();
+            verify(memories, times(1)).apply(any(), any(), any());
+        } finally {
+            reactor.test.scheduler.VirtualTimeScheduler.reset();
+        }
+    }
+
+    @Test
     void rejectsStaleAnnotationsBeforeCallingModel() {
         var annotation = new ChatApi.Annotation("a", List.of(0), "p", "old", "<p>old</p>", "修改这一段");
         var annotated = new ChatApi.Request(runId, 1L, "model", "按批注修改", "stale", List.of(annotation));
@@ -253,6 +414,69 @@ class PageChatServiceTest {
         assertThat(stream.collectList().block()).extracting(value -> value.get("type"))
             .containsExactly("data-page-committed", "finish");
         assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
+    }
+
+    @Test
+    void finishingModelWaitsForPersistedSteerBeforeContinuing() {
+        var modelDone = Sinks.<Map<String, Object>>one();
+        var persisted = Sinks.<PageChatSession>one();
+        var candidate = new java.util.concurrent.atomic.AtomicReference<PageChatSession>();
+        var copyRef = new java.util.concurrent.atomic.AtomicReference<PageWorkingCopy>();
+        var prompts = new java.util.ArrayList<String>();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
+            copyRef.set(i.getArgument(3));
+            prompts.add(i.getArgument(2));
+            return prompts.size() == 1 ? modelDone.asMono().flux() : Flux.empty();
+        }));
+        var events = service.start("page", request(), "admin").block().collectList();
+        when(client.update(any(PageChatSession.class))).thenAnswer(i -> {
+            PageChatSession session = i.getArgument(0);
+            if (session.getSpec().getActive() != null
+                && session.getSpec().getActive().steers().size() == 1 && candidate.get() == null) {
+                candidate.set(session);
+                return persisted.asMono();
+            }
+            session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            return Mono.just(session);
+        });
+        service.steer("page", runId, new ChatApi.SteerRequest("电话改成 0571-12345678"), "admin").subscribe();
+        assertThat(copyRef.get().drainSteers()).isEmpty();
+        modelDone.tryEmitEmpty();
+        assertThat(prompts).hasSize(1);
+        var session = candidate.get();
+        session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+        stored.put("page", JsonUtils.deepCopy(session));
+        persisted.tryEmitValue(session);
+        assertThat(events.block()).extracting(value -> value.get("type")).contains("finish");
+        assertThat(prompts).hasSize(2);
+        assertThat(prompts.get(1)).contains("0571-12345678");
+    }
+
+    @Test
+    void failedSteerIsNeitherDeliveredNorArchived() {
+        var done = Sinks.<Map<String, Object>>one();
+        var copyRef = new java.util.concurrent.atomic.AtomicReference<PageWorkingCopy>();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            copyRef.set(i.getArgument(3));
+            return done.asMono().flux();
+        });
+        var events = service.start("page", request(), "admin").block().collectList();
+        when(client.update(any(PageChatSession.class))).thenAnswer(i -> {
+            PageChatSession session = i.getArgument(0);
+            if (session.getSpec().getActive() != null && !session.getSpec().getActive().steers().isEmpty()) {
+                return Mono.error(new IllegalStateException("failed steer save"));
+            }
+            session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            return Mono.just(session);
+        });
+        assertThatThrownBy(() -> service.steer("page", runId,
+            new ChatApi.SteerRequest("不要保存这条失败输入"), "admin").block()).hasMessageContaining("failed steer");
+        assertThat(copyRef.get().drainSteers()).isEmpty();
+        done.tryEmitEmpty();
+        events.block();
+        assertThat(service.session("page").block().turns().getFirst().steers()).isEmpty();
     }
 
     @Test
