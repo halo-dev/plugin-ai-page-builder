@@ -81,6 +81,29 @@ class PageMemoryToolsTest {
     }
 
     @Test
+    void rejectsMixedDeletionBatchesBeforeWritingAndAllowsDeleteOnlyRetry() {
+        tools.prompt("请忘记 0571-12345678");
+        when(service.apply(eq(1L), any(), any())).thenReturn(Mono.just(snapshot(2L)));
+        var deletion = Map.<String, Object>of("action", "delete", "entryId", "phone",
+            "sourceId", "run/prompt", "quote", "请忘记 0571-12345678");
+        for (var action : List.of("add", "update")) {
+            var write = new java.util.LinkedHashMap<String, Object>(Map.of(
+                "action", action, "subject", "本站公司", "key", "联系电话", "kind", "fact",
+                "value", "0571-12345678", "sourceId", "run/prompt", "quote", "0571-12345678"));
+            if ("update".equals(action)) write.put("entryId", "other");
+            for (boolean deleteFirst : List.of(true, false)) {
+                var operations = deleteFirst ? List.of(deletion, write) : List.of(write, deletion);
+                assertThat(tools.execute(Map.of("expectedVersion", 1L, "operations", operations)).block())
+                    .containsEntry("error", "删除记忆的批次只能包含删除操作，请单独提交删除批次");
+            }
+        }
+        verify(service, never()).apply(any(), any(), any());
+        assertThat(tools.execute(Map.of("expectedVersion", 1L, "operations", List.of(deletion)))
+            .block()).containsEntry("version", 2L).doesNotContainKey("error");
+        verify(service, times(1)).apply(any(), any(), any());
+    }
+
+    @Test
     void closingWaitsForInFlightWriteEvenWhenItsCallerUnsubscribes() {
         tools.prompt("0571-12345678");
         var stored = Sinks.<SiteMemory>one();

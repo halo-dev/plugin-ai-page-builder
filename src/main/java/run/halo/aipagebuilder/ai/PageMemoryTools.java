@@ -96,6 +96,10 @@ final class PageMemoryTools {
                 }
                 expected = number.longValue();
                 changes = parse(input.get("operations"));
+                if (changes.stream().anyMatch(change -> "delete".equals(change.action()))
+                    && changes.stream().anyMatch(change -> !"delete".equals(change.action()))) {
+                    return Mono.just(error("删除记忆的批次只能包含删除操作，请单独提交删除批次"));
+                }
                 requestKey = JsonUtils.objectToJson(List.of(expected, changes));
                 if (completed.containsKey(requestKey)) return Mono.just(completed.get(requestKey));
                 if (deletesOnly && changes.stream().anyMatch(change -> !"delete".equals(change.action()))) {

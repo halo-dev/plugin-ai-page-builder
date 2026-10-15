@@ -76,7 +76,8 @@ class FoundationBridgeTest {
             .contains("currentRunSources", "r/prompt", "0571-12345678");
         assertThat(request.get().getMessages().getLast().getRole().toString()).isEqualTo("USER");
         assertThat(request.get().getSystem())
-            .contains("continue deleting in batches", "add and update are forbidden")
+            .contains("continue deleting in batches", "add and update are forbidden",
+                "A batch containing delete must contain only delete operations")
             .doesNotContain("delete closes memory writes");
         assertThat(copy.hasInvalidUpdate()).isFalse();
     }
