@@ -229,10 +229,8 @@ async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'descri
       })
     ).data
     cacheSettingsDetail(result)
-    if (settingsDetail.value?.page.name === current.page.name) {
-      settingsDetail.value = undefined
-      Toast.success('设置已保存')
-    }
+    if (settingsDetail.value?.page.name === current.page.name) settingsDetail.value = undefined
+    Toast.success('设置已保存')
   } catch (e) {
     Toast.error(errorMessage(e))
   } finally {

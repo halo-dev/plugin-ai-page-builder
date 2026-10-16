@@ -399,7 +399,7 @@ describe('workspace integration', () => {
     expect(wrapper.emitted('apply')).toEqual([[{}]])
     wrapper.unmount()
   })
-  it('blocks submit and close while the layout save is in flight', async () => {
+  it('blocks submit while the layout save is in flight but still allows close', async () => {
     let resolveLayout!: (value: PageDetail) => void
     const saveLayout = vi.fn<(themeLayout: boolean) => Promise<PageDetail | undefined>>(
       () => new Promise((resolve) => (resolveLayout = resolve)),
@@ -430,13 +430,12 @@ describe('workspace integration', () => {
     await flushPromises()
     expect(saveSlug).not.toHaveBeenCalled()
     expect(wrapper.emitted('apply')).toBeUndefined()
+    // VModal hides itself before emitting close, so closing is always allowed;
+    // the parent discards the late layout result instead.
     wrapper.findComponent({ name: 'VModal' }).vm.$emit('close')
-    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(wrapper.emitted('close')).toHaveLength(1)
     resolveLayout(page)
     await flushPromises()
-    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
-    await flushPromises()
-    expect(saveSlug).toHaveBeenCalledWith('two')
     wrapper.unmount()
   })
   it('emits an empty settings patch when a legacy description is untouched', async () => {

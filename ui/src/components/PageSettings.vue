@@ -30,7 +30,9 @@ const layoutOn = ref(props.themeLayout)
 const layoutSaving = ref(false)
 // Serialize the modal's writes: every operation (slug, layout, apply,
 // unpublish via the disabled prop) shares the page's optimistic-lock version,
-// so no two of them may be in flight at once, and closing is blocked meanwhile.
+// so no two of them may be in flight at once. Closing stays allowed even
+// while busy: VModal hides itself before emitting close, so the event cannot
+// be vetoed — parents must tolerate late results instead.
 const busy = computed(() => saving.value || layoutSaving.value || props.disabled)
 watch(
   () => props.themeLayout,
@@ -81,7 +83,7 @@ async function submit() {
 }
 </script>
 <template>
-  <VModal title="页面设置" :width="560" @close="!busy && emit('close')">
+  <VModal title="页面设置" :width="560" @close="emit('close')">
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
     <div>
       <VAlert v-if="slugError" type="error" :title="slugError" class="mb-4" />
@@ -137,7 +139,7 @@ async function submit() {
             @click="form?.node.submit()"
             >应用</VButton
           >
-          <VButton :disabled="busy" @click="emit('close')">取消</VButton>
+          <VButton @click="emit('close')">取消</VButton>
         </VSpace>
         <VButton v-if="published" ghost :disabled="busy" @click="emit('unpublish')"
           >取消发布</VButton

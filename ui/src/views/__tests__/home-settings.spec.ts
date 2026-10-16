@@ -3,7 +3,7 @@ import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import HomeView from '../../views/HomeView.vue'
 import PageSettings from '../../components/PageSettings.vue'
-import { queryClient } from '../../lib/query-client'
+import { pageKeys, queryClient } from '../../lib/query-client'
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn<(...args: unknown[]) => unknown>(),
@@ -188,6 +188,29 @@ describe('page settings from the list', () => {
     await openSettingsFor(wrapper, 0)
     await flushPromises()
     expect(mocks.get).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+  it('does not revive a closed modal when a late mutation resolves', async () => {
+    const slow = deferred<unknown>()
+    mocks.updateLayout.mockReturnValue(slow.promise)
+    const wrapper = mountHome()
+    await flushPromises()
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    const settings = wrapper.findComponent(PageSettings)
+    // Start a layout save, then close the modal before it resolves.
+    const layoutPromise = settings.props('saveLayout')(false)
+    settings.vm.$emit('close')
+    await flushPromises()
+    expect(wrapper.findComponent(PageSettings).exists()).toBe(false)
+    slow.resolve({ data: detail('a', { version: 2, themeLayout: false }) })
+    await layoutPromise
+    await flushPromises()
+    expect(wrapper.findComponent(PageSettings).exists()).toBe(false)
+    // The cache still received the result, so the list shows the new state.
+    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+      page: { version: 2 },
+    })
     wrapper.unmount()
   })
   it('re-reads the latest version when unpublish is confirmed', async () => {
