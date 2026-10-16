@@ -373,6 +373,45 @@ describe('page settings from the list', () => {
     })
     wrapper.unmount()
   })
+  it('ignores a late save response that resolves after a newer refresh', async () => {
+    mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
+    const refresh = deferred<unknown>()
+    const layoutSave = deferred<unknown>()
+    let getCalls = 0
+    mocks.get.mockImplementation(() => {
+      getCalls++
+      return getCalls === 1
+        ? Promise.resolve({ data: detail('a', { version: 1 }) })
+        : refresh.promise
+    })
+    mocks.updateLayout.mockReturnValue(layoutSave.promise)
+    const wrapper = mountHome()
+    await flushPromises()
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    const settings = wrapper.findComponent(PageSettings)
+    settings
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'slug')!
+      .vm.$emit('update:modelValue', 'taken-path')
+    await flushPromises()
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    // Conflict refresh in flight; the layout save response is even slower.
+    const save = settings.props('saveLayout')(false)
+    refresh.resolve({ data: detail('a', { version: 3, themeLayout: false }) })
+    await flushPromises()
+    layoutSave.resolve({ data: detail('a', { version: 2, themeLayout: false }) })
+    await save
+    await flushPromises()
+    // The v2 save response must not roll the v3 modal back.
+    await wrapper.findComponent(PageSettings).props('saveLayout')(true)
+    expect(mocks.updateLayout).toHaveBeenLastCalledWith({
+      name: 'a',
+      updatePageLayoutRequest: { version: 3, themeLayout: true },
+    })
+    wrapper.unmount()
+  })
   it('re-reads the latest version when unpublish is confirmed', async () => {
     mocks.list.mockResolvedValue({
       data: { items: [summary('a', { publishedRevision: 'r1' })], total: 1 },

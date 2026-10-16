@@ -190,7 +190,15 @@ function cacheSettingsDetail(result: PageDetail) {
 // Late results still update the cache, but only their own session's modal.
 function applySettingsResult(result: PageDetail, session: number) {
   cacheSettingsDetail(result)
-  if (session === settingsSession && settingsDetail.value?.page.name === result.page.name)
+  if (session === settingsSession) showSettingsResult(result)
+}
+// Within a session the modal's version stays monotonic: a late save response
+// must not overwrite a newer refresh (or vice versa).
+function showSettingsResult(result: PageDetail) {
+  if (
+    settingsDetail.value?.page.name === result.page.name &&
+    settingsDetail.value.page.version <= result.page.version
+  )
     settingsDetail.value = result
 }
 const isConflict = (e: unknown) =>
@@ -202,10 +210,7 @@ async function refreshSettingsDetail(name: string, session: number) {
   try {
     const fresh = (await aiPageBuilderApi.getPage({ name })).data
     cacheSettingsDetail(fresh)
-    if (session === settingsSession && settingsDetail.value?.page.name === name) {
-      // A newer save may have landed while the refresh was in flight.
-      if (settingsDetail.value.page.version <= fresh.page.version) settingsDetail.value = fresh
-    }
+    if (session === settingsSession) showSettingsResult(fresh)
   } catch {
     // Keep the stale snapshot; reopening the modal always refetches.
   }
