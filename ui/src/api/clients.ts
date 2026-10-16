@@ -29,6 +29,8 @@ export type {
 export const chatUrl = (name: string) => `${API_BASE}/pages/${encodeURIComponent(name)}/chat`
 export const pagePreviewUrl = (name: string) =>
   `${API_BASE}/pages/${encodeURIComponent(name)}/preview`
+export const revisionPreviewUrl = (name: string, revision: string) =>
+  `${API_BASE}/pages/${encodeURIComponent(name)}/revisions/${encodeURIComponent(revision)}/preview`
 
 // Render an unsaved, validated candidate with the same template/CSS pipeline as the public page.
 export async function renderPagePreview(name: string, document: PageDocument, signal: AbortSignal) {

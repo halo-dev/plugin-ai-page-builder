@@ -614,6 +614,8 @@ function applySettings(value: Parameters<typeof patch>[0]) {
         :name="detail.page.name"
         :current="working"
         :busy="locked || !valid"
+        :draft-revision="detail.page.draftRevision"
+        :published-revision="detail.page.publishedRevision"
         @close="historyOpen = false"
         @restore="restore"
       />

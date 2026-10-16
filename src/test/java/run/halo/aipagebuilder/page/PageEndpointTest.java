@@ -141,6 +141,25 @@ class PageEndpointTest {
     }
 
     @Test
+    void revisionPreviewRendersRevisionDocumentWithPageTheme() {
+        var document = new PageDocument(1, "code", null, null, "", "", "About", "");
+        var revisionDocument = new PageDocument(2, "code", null, null, "<p>Old</p>", "", "Old title", "");
+        when(service.get("about")).thenReturn(Mono.just(detail(document)));
+        when(service.revisionDetail("about", "rev-1"))
+            .thenReturn(Mono.just(new PageApi.RevisionDetail(
+                new PageApi.RevisionSummary("rev-1", java.time.Instant.now(), "admin", "ai",
+                    "Old title"),
+                revisionDocument)));
+        when(renderer.render(any(), eq("about"), eq("company/about-us"), eq(true),
+            eq(revisionDocument))).thenReturn(ServerResponse.ok().build());
+
+        assertThat(asAdmin(endpoint, request("/pages/about/revisions/rev-1/preview")).block()
+            .statusCode()).isEqualTo(HttpStatus.OK);
+        verify(renderer).render(any(), eq("about"), eq("company/about-us"), eq(true),
+            eq(revisionDocument));
+    }
+
+    @Test
     void candidatePreviewRequiresExistingPage() {
         var candidate = new PageDocument(1, "code", null, null, "<p>Unsaved</p>", "", "Title", null);
         when(service.get("about")).thenReturn(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND)));
