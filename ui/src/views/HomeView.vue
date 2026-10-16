@@ -159,6 +159,9 @@ const settingsSaving = ref(false)
 // Rapid clicks on different cards race their detail fetches; only the latest
 // request may open or replace the modal.
 let settingsGeneration = 0
+// Each modal session gets an id: a mutation started in one session must never
+// write its result into a later session, not even for the same page.
+let settingsSession = 0
 async function openSettings(item: PageSummary) {
   const generation = ++settingsGeneration
   try {
@@ -168,46 +171,80 @@ async function openSettings(item: PageSummary) {
       queryFn: async () => (await aiPageBuilderApi.getPage({ name: item.name })).data,
       staleTime: 0,
     })
-    if (generation === settingsGeneration) settingsDetail.value = detail
+    if (generation === settingsGeneration) {
+      settingsSession = generation
+      settingsDetail.value = detail
+    }
   } catch (e) {
     if (generation === settingsGeneration) Toast.error(errorMessage(e))
   }
 }
 function cacheSettingsDetail(result: PageDetail) {
-  queryClient.setQueryData(pageKeys.detail(result.page.name), result)
+  const key = pageKeys.detail(result.page.name)
+  const cached = queryClient.getQueryData<PageDetail>(key)
+  // A late response must not roll the cache back to an older version.
+  if (cached && cached.page.version > result.page.version) return
+  queryClient.setQueryData(key, result)
   void queryClient.invalidateQueries({ queryKey: pageKeys.all })
 }
-// A late response must not revive a closed modal or replace another page's
-// session; the cache is updated regardless so the list stays fresh.
-function applySettingsResult(result: PageDetail) {
+// Late results still update the cache, but only their own session's modal.
+function applySettingsResult(result: PageDetail, session: number) {
   cacheSettingsDetail(result)
-  if (settingsDetail.value?.page.name === result.page.name) settingsDetail.value = result
+  if (session === settingsSession && settingsDetail.value?.page.name === result.page.name)
+    settingsDetail.value = result
+}
+const isConflict = (e: unknown) =>
+  (e as { response?: { status?: number } })?.response?.status === 409
+// After a version conflict the snapshot is stale; refetch so an in-modal retry
+// uses the current version. The keyed modal is not remounted, so the form
+// buffer survives.
+async function refreshSettingsDetail(name: string, session: number) {
+  try {
+    const fresh = (await aiPageBuilderApi.getPage({ name })).data
+    cacheSettingsDetail(fresh)
+    if (session === settingsSession && settingsDetail.value?.page.name === name)
+      settingsDetail.value = fresh
+  } catch {
+    // Keep the stale snapshot; reopening the modal always refetches.
+  }
 }
 async function saveSettingsSlug(slug: string) {
   const current = settingsDetail.value
   if (!current) return undefined
   if (slug === current.page.slug) return current
-  const result = (
-    await aiPageBuilderApi.updatePageSlug({
-      name: current.page.name,
-      updatePageSlugRequest: { version: current.page.version, slug },
-    })
-  ).data
-  applySettingsResult(result)
-  return result
+  const session = settingsSession
+  try {
+    const result = (
+      await aiPageBuilderApi.updatePageSlug({
+        name: current.page.name,
+        updatePageSlugRequest: { version: current.page.version, slug },
+      })
+    ).data
+    applySettingsResult(result, session)
+    return result
+  } catch (e) {
+    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
+    throw e
+  }
 }
 async function saveSettingsLayout(themeLayout: boolean) {
   const current = settingsDetail.value
   if (!current) return undefined
   if (themeLayout === current.page.themeLayout) return current
-  const result = (
-    await aiPageBuilderApi.updatePageLayout({
-      name: current.page.name,
-      updatePageLayoutRequest: { version: current.page.version, themeLayout },
-    })
-  ).data
-  applySettingsResult(result)
-  return result
+  const session = settingsSession
+  try {
+    const result = (
+      await aiPageBuilderApi.updatePageLayout({
+        name: current.page.name,
+        updatePageLayoutRequest: { version: current.page.version, themeLayout },
+      })
+    ).data
+    applySettingsResult(result, session)
+    return result
+  } catch (e) {
+    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
+    throw e
+  }
 }
 async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'description'>>) {
   const current = settingsDetail.value
@@ -216,6 +253,7 @@ async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'descri
     settingsDetail.value = undefined
     return
   }
+  const session = settingsSession
   settingsSaving.value = true
   try {
     const result = (
@@ -229,10 +267,12 @@ async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'descri
       })
     ).data
     cacheSettingsDetail(result)
-    if (settingsDetail.value?.page.name === current.page.name) settingsDetail.value = undefined
+    if (session === settingsSession && settingsDetail.value?.page.name === current.page.name)
+      settingsDetail.value = undefined
     Toast.success('设置已保存')
   } catch (e) {
     Toast.error(errorMessage(e))
+    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
   } finally {
     settingsSaving.value = false
   }
@@ -240,6 +280,7 @@ async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'descri
 function unpublishFromSettings() {
   const name = settingsDetail.value?.page.name
   if (!name) return
+  const session = settingsSession
   Dialog.warning({
     title: '取消发布此页面？',
     description: '访客将无法访问此页面。',
@@ -249,7 +290,7 @@ function unpublishFromSettings() {
       // Re-read: slug/layout saves may have bumped the version while the
       // confirmation dialog was open.
       const current = settingsDetail.value
-      if (current?.page.name !== name) return
+      if (session !== settingsSession || current?.page.name !== name) return
       settingsSaving.value = true
       try {
         const result = (
@@ -258,10 +299,11 @@ function unpublishFromSettings() {
             mutationRequest: { version: current.page.version },
           })
         ).data
-        applySettingsResult(result)
+        applySettingsResult(result, session)
         Toast.success('已取消发布')
       } catch (e) {
         Toast.error(errorMessage(e))
+        if (isConflict(e)) void refreshSettingsDetail(name, session)
       } finally {
         settingsSaving.value = false
       }

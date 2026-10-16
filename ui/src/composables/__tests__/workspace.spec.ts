@@ -399,6 +399,39 @@ describe('workspace integration', () => {
     expect(wrapper.emitted('apply')).toEqual([[{}]])
     wrapper.unmount()
   })
+  it('does not emit apply when unmounted while the slug save is in flight', async () => {
+    let resolveSlug!: (value: PageDetail) => void
+    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>(
+      () => new Promise((resolve) => (resolveSlug = resolve)),
+    )
+    const wrapper = mount(PageSettings, {
+      props: {
+        document: page.document,
+        slug: 'one',
+        themeLayout: true,
+        disabled: false,
+        published: false,
+        saveSlug,
+        saveLayout: vi.fn(),
+      },
+      global: globals,
+    })
+    const fields = wrapper.findAllComponents({ name: 'FormKit' })
+    fields
+      .find((field) => field.attributes('name') === 'title')!
+      .vm.$emit('update:modelValue', 'Buffered title')
+    fields
+      .find((field) => field.attributes('name') === 'slug')!
+      .vm.$emit('update:modelValue', 'two')
+    await flushPromises()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    expect(saveSlug).toHaveBeenCalledWith('two')
+    wrapper.unmount()
+    resolveSlug(page)
+    await flushPromises()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+  })
   it('blocks submit while the layout save is in flight but still allows close', async () => {
     let resolveLayout!: (value: PageDetail) => void
     const saveLayout = vi.fn<(themeLayout: boolean) => Promise<PageDetail | undefined>>(

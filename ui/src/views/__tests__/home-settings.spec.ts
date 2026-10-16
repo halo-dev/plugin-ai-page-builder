@@ -213,6 +213,84 @@ describe('page settings from the list', () => {
     })
     wrapper.unmount()
   })
+  it('ignores a late mutation response from a previous session of the same page', async () => {
+    let getCalls = 0
+    mocks.get.mockImplementation(() => {
+      getCalls++
+      return Promise.resolve({ data: detail('a', { version: getCalls }) })
+    })
+    const first = deferred<unknown>()
+    let layoutCalls = 0
+    mocks.updateLayout.mockImplementation(() => {
+      layoutCalls++
+      return layoutCalls === 1
+        ? first.promise
+        : Promise.resolve({ data: detail('a', { version: 3, themeLayout: false }) })
+    })
+    const wrapper = mountHome()
+    await flushPromises()
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    // Session 1: layout save (v1 → v2) stays in flight while the modal closes.
+    const staleSave = wrapper.findComponent(PageSettings).props('saveLayout')(false)
+    wrapper.findComponent(PageSettings).vm.$emit('close')
+    await flushPromises()
+    // Session 2: reopen the same page (now at v2) and save again (v2 → v3).
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    await wrapper.findComponent(PageSettings).props('saveLayout')(false)
+    await flushPromises()
+    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+      page: { version: 3 },
+    })
+    // The session-1 response arrives last; it must not roll anything back.
+    first.resolve({ data: detail('a', { version: 2 }) })
+    await staleSave
+    await flushPromises()
+    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+      page: { version: 3 },
+    })
+    // The modal still holds v3, so the next save builds on it.
+    await wrapper.findComponent(PageSettings).props('saveLayout')(true)
+    expect(mocks.updateLayout).toHaveBeenLastCalledWith({
+      name: 'a',
+      updatePageLayoutRequest: { version: 3, themeLayout: true },
+    })
+    wrapper.unmount()
+  })
+  it('refreshes the detail after a version conflict so retry uses the new version', async () => {
+    mocks.save
+      .mockRejectedValueOnce({ response: { status: 409 }, message: 'Page changed' })
+      .mockResolvedValue({ data: detail('a', { version: 3 }) })
+    const wrapper = mountHome()
+    await flushPromises()
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    expect(mocks.get).toHaveBeenCalledTimes(1)
+    mocks.get.mockResolvedValue({ data: detail('a', { version: 2 }) })
+    const settings = wrapper.findComponent(PageSettings)
+    settings
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'title')!
+      .vm.$emit('update:modelValue', 'New title')
+    await flushPromises()
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    // The 409 triggers a refetch; the modal stays open with its form buffer.
+    expect(mocks.get).toHaveBeenCalledTimes(2)
+    expect(wrapper.findComponent(PageSettings).exists()).toBe(true)
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    expect(mocks.save).toHaveBeenLastCalledWith({
+      name: 'a',
+      savePageRequest: {
+        version: 2,
+        document: expect.objectContaining({ title: 'New title' }),
+        source: 'manual',
+      },
+    })
+    wrapper.unmount()
+  })
   it('re-reads the latest version when unpublish is confirmed', async () => {
     mocks.list.mockResolvedValue({
       data: { items: [summary('a', { publishedRevision: 'r1' })], total: 1 },

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, useTemplateRef, watch } from 'vue'
 import { Toast, VAlert, VButton, VModal, VSpace } from '@halo-dev/components'
 import type { PageDetail, PageDocument } from '../api/generated'
 import { errorMessage } from '../utils/error'
@@ -79,8 +79,15 @@ async function submit() {
       saving.value = false
     }
   }
+  // The modal may have closed while the slug save was in flight; a dead
+  // instance must not emit into whatever modal session is open now.
+  if (!alive) return
   emit('apply', patch)
 }
+let alive = true
+onBeforeUnmount(() => {
+  alive = false
+})
 </script>
 <template>
   <VModal title="页面设置" :width="560" @close="emit('close')">
