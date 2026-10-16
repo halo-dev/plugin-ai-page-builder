@@ -46,7 +46,7 @@ class FoundationBridgeTest {
         var chunks = bridge.chat("model", java.util.List.of(), "change", copy).collectList().block();
         assertThat(chunks).extracting(value -> value.get("type")).containsExactly("text-delta");
         assertThat(request.get().getTools()).extracting(tool -> tool.getName())
-            .containsExactly("get_theme_context", "read_current_page", "update_page_title", "patch_current_page", "update_current_page",
+            .containsExactly("get_theme_context", "read_current_page", "set_page_slug", "update_page_title", "patch_current_page", "update_current_page",
                 "ask_user", "list_theme_files", "read_theme_file", "list_posts", "list_single_pages",
                 "list_ai_pages", "read_ai_page", "get_site_profile", "get_navigation", "read_content", "search_attachments",
                 "fetch_webpage", "search_public_apis", "get_public_api");
@@ -59,6 +59,21 @@ class FoundationBridgeTest {
         setup(Flux.empty());
         assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy).blockLast())
             .isInstanceOf(AiGenerationException.class);
+    }
+
+    @Test
+    void executesSemanticPathToolAgainstTheCurrentWorkingCopy() {
+        var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var copy = copy();
+        bridge.chat("model", java.util.List.of(), "公司介绍页", copy).blockLast();
+        var tool = captured.get().getTools().stream()
+            .filter(item -> "set_page_slug".equals(item.getName())).findFirst().orElseThrow();
+        var result = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+            .input(java.util.Map.of("slug", "company/about")).build()).block();
+        assertThat(result).isEqualTo(java.util.Map.of("valid", true, "staged", true,
+            "slug", "company/about"));
+        assertThat(copy.slug()).isEqualTo("company/about");
+        assertThat(captured.get().getSystem()).contains("canSetSlug=true", "never use random");
     }
 
     @Test

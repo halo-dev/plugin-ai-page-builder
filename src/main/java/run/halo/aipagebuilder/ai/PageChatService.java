@@ -514,12 +514,14 @@ public class PageChatService {
                 run.status = "committing";
             }
             return persistActive(name, run).then(Mono.defer(() -> {
-                if (Objects.equals(run.base.document(), run.copy.document())) {
+                var slugChanged = !Objects.equals(run.base.page().slug(), run.copy.slug());
+                if (Objects.equals(run.base.document(), run.copy.document()) && !slugChanged) {
                     return Mono.just(run.base);
                 }
                 run.saveStarted = true;
                 return pages.saveAi(name, run.request.version(), run.copy.document(),
-                    run.actor, run.request.runId(), run.base.page().draftRevision());
+                    run.actor, run.request.runId(), run.base.page().draftRevision(),
+                    slugChanged ? run.copy.slug() : null);
             })).flatMap(page -> {
                 run.status = "completed";
                 if (!Objects.equals(page.page().draftRevision(), run.base.page().draftRevision())) {
@@ -924,7 +926,8 @@ public class PageChatService {
             this.request = request;
             this.actor = actor;
             this.base = base;
-            this.copy = new PageWorkingCopy(base.document(), policy, themeContext);
+            this.copy = new PageWorkingCopy(base.document(), policy, themeContext,
+                base.page().slug(), base.page().publishedRevision() != null);
             this.copy.annotations(request.annotations() == null ? List.of() : request.annotations());
         }
 

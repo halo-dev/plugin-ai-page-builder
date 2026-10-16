@@ -110,6 +110,76 @@ class PageServiceTest {
     }
 
     @Test
+    void aiSavesTitleContentAndSemanticPathInOnePageUpdate() {
+        var created = service.create(new CreatePageRequest(null, "未命名页面"), "admin").block();
+        var saved = service.saveAi(created.page().name(), created.page().version(), document("About"),
+            "admin", "run-path", created.page().draftRevision(), "company/about").block();
+        assertThat(saved.page().slug()).isEqualTo("company/about");
+        assertThat(saved.page().title()).isEqualTo("About");
+        assertThat(saved.page().version()).isEqualTo(created.page().version() + 1);
+        assertThat(saved.page().publishedRevision()).isNull();
+        assertThat(service.get(created.page().name()).block()).isEqualTo(saved);
+        assertThat(service.committedAiRevision(created.page().name(), "run-path").block())
+            .isEqualTo(saved.page().draftRevision());
+    }
+
+    @Test
+    void pathOnlyAiSaveIsPersistedAndCanBeReconciled() {
+        var created = service.create(new CreatePageRequest(null, "About"), "admin").block();
+        var saved = service.saveAi(created.page().name(), created.page().version(), created.document(),
+            "admin", "run-path", created.page().draftRevision(), "about").block();
+        assertThat(saved.page().slug()).isEqualTo("about");
+        assertThat(saved.document()).isEqualTo(created.document());
+        assertThat(service.committedAiRevision(created.page().name(), "run-path").block())
+            .isEqualTo(saved.page().draftRevision());
+    }
+
+    @Test
+    void conflictingOrReservedAiPathDoesNotPartiallySaveTheDraft() {
+        service.create(new CreatePageRequest("taken", "Existing"), "admin").block();
+        var created = service.create(new CreatePageRequest(null, "Original"), "admin").block();
+        for (var slug : java.util.List.of("taken", "console/settings", "Bad Path")) {
+            assertThatThrownBy(() -> service.saveAi(created.page().name(), created.page().version(),
+                document("Changed"), "admin", "run-path", created.page().draftRevision(), slug).block())
+                .isInstanceOf(ResponseStatusException.class);
+            assertThat(service.get(created.page().name()).block()).isEqualTo(created);
+            assertThat(revisions).hasSize(2);
+        }
+    }
+
+    @Test
+    void failedAiPathCommitLeavesNeitherPathNorContentAndCanRetry() {
+        var created = service.create(new CreatePageRequest(null, "Original"), "admin").block();
+        failUpdate = true;
+        assertThatThrownBy(() -> service.saveAi(created.page().name(), created.page().version(),
+            document("Changed"), "admin", "run-path", created.page().draftRevision(), "about").block())
+            .isInstanceOf(ResponseStatusException.class);
+        assertThat(service.get(created.page().name()).block()).isEqualTo(created);
+        assertThat(service.committedAiRevision(created.page().name(), "run-path").block()).isNull();
+        assertThat(revisions).hasSize(1);
+        failUpdate = false;
+        assertThat(service.saveAi(created.page().name(), created.page().version(), document("Changed"),
+            "admin", "run-path", created.page().draftRevision(), "about").block().page().slug())
+            .isEqualTo("about");
+    }
+
+    @Test
+    void aiCannotReplaceAnExistingOrConcurrentlySetPath() {
+        var created = service.create(new CreatePageRequest(null, "Original"), "admin").block();
+        var manual = service.updateSlug(created.page().name(),
+            new PageApi.UpdatePageSlugRequest(created.page().version(), "manual-path")).block();
+        for (var version : java.util.List.of(created.page().version(), manual.page().version())) {
+            assertThatThrownBy(() -> service.saveAi(created.page().name(), version, document("Changed"),
+                "admin", "run-path", created.page().draftRevision(), "about").block())
+                .isInstanceOf(ResponseStatusException.class);
+            assertThat(service.get(created.page().name()).block()).isEqualTo(manual);
+        }
+        var edited = service.saveAi(manual.page().name(), manual.page().version(), document("Changed"),
+            "admin", "run-content", manual.page().draftRevision(), null).block();
+        assertThat(edited.page().slug()).isEqualTo("manual-path");
+    }
+
+    @Test
     void draftChangesDoNotChangePublishedContentAndRestoreCreatesANewDraft() {
         var created = service.create(new CreatePageRequest("about", "Original"), "admin").block();
         var first = created.page().draftRevision();

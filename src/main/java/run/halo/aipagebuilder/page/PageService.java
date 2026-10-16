@@ -150,11 +150,29 @@ public class PageService {
 
     public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
         String actor, String runId, String baseRevision) {
+        return saveAi(name, version, document, actor, runId, baseRevision, null);
+    }
+
+    public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
+        String actor, String runId, String baseRevision, String slug) {
         return mutate(name, version, page -> {
             if (baseRevision != null && !baseRevision.equals(page.getSpec().getDraftRevision())) {
                 return Mono.error(conflict("Page changed; reload before saving"));
             }
             contentPolicy.validate(document);
+            if (slug != null) {
+                if (page.getSpec().getSlug() != null && !page.getSpec().getSlug().isBlank()
+                    || page.getSpec().getPublishedRevision() != null) {
+                    return Mono.error(conflict("已有访问路径或已发布的页面不能由 AI 更改路径"));
+                }
+                PagePaths.validate(slug);
+                return writeSlug(slug, () -> checkSlugAvailable(slug, name)
+                    .then(Mono.defer(() -> {
+                        page.getSpec().setSlug(slug);
+                        // Even a path-only run needs a revision for commit reconciliation.
+                        return writeDraft(page, document, "ai", actor, runId);
+                    })));
+            }
             return revision(name, page.getSpec().getDraftRevision()).flatMap(current -> {
                 if (Objects.equals(current.getSpec().getDocument(), document)) {
                     return Mono.just(detail(page, current));

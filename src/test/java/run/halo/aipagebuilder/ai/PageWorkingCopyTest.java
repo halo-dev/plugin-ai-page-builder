@@ -67,6 +67,51 @@ class PageWorkingCopyTest {
     }
 
     @Test
+    void semanticSlugIsStagedWithTitleAndContent() {
+        var copy = copy("<p>old</p>", "");
+        assertThat(copy.read()).containsEntry("slug", "").containsEntry("canSetSlug", true);
+        assertThat(copy.setSlug(Map.of("slug", "  company/about-us  ")))
+            .containsEntry("valid", true).containsEntry("staged", true);
+        copy.setTitle(Map.of("title", "关于我们"));
+        copy.update(Map.of("html", "<p>About us</p>", "css", ""));
+        assertThat(copy.read()).containsEntry("slug", "company/about-us")
+            .containsEntry("title", "关于我们");
+        assertThat(copy.setSlug(Map.of("slug", "company/about-us")))
+            .containsEntry("staged", false);
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+    }
+
+    @Test
+    void invalidSlugCannotBeHiddenByContentOrTitleUpdates() {
+        for (var slug : List.of("", "UPPER", "/about", "console/about", "a".repeat(201))) {
+            var copy = copy("<p>old</p>", "");
+            assertThat(copy.setSlug(Map.of("slug", slug))).containsEntry("valid", false);
+            assertThat(copy.slug()).isNull();
+            copy.setTitle(Map.of("title", "About"));
+            copy.update(Map.of("html", "<p>About</p>", "css", ""));
+            assertThat(copy.hasInvalidUpdate()).isTrue();
+            assertThat(copy.setSlug(Map.of("slug", "about"))).containsEntry("valid", true);
+            assertThat(copy.hasInvalidUpdate()).isFalse();
+        }
+    }
+
+    @Test
+    void existingAndPublishedPathsAreProtectedFromAi() {
+        var document = copy("<p>old</p>", "").document();
+        for (var published : List.of(false, true)) {
+            var copy = new PageWorkingCopy(document, new ContentPolicy(),
+                Mono.just(ThemeStyleContext.unavailable()), "custom-path", published);
+            assertThat(copy.read()).containsEntry("canSetSlug", false);
+            assertThat(copy.setSlug(Map.of("slug", "about"))).containsEntry("valid", false);
+            assertThat(copy.slug()).isEqualTo("custom-path");
+        }
+        var legacy = new PageWorkingCopy(document, new ContentPolicy(),
+            Mono.just(ThemeStyleContext.unavailable()), null, true);
+        assertThat(legacy.setSlug(Map.of("slug", "about"))).containsEntry("valid", false);
+        assertThat(legacy.slug()).isNull();
+    }
+
+    @Test
     void setTitleStagesTrimmedTitleAndSurvivesLaterContentUpdates() {
         var copy = copy("<p>old</p>", "");
         assertThat(copy.setTitle(Map.of("title", "  新标题  ")))

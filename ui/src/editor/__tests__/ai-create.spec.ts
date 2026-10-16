@@ -84,7 +84,7 @@ const FormKit = defineComponent({
   emits: ['update:modelValue', 'submit', 'node'],
   setup(props, { slots, emit }) {
     if (props.type === 'form') emit('node', { submit: mocks.submit })
-    return () => h('div', slots.default?.())
+    return () => h('div', slots.default?.({ state: { valid: true } }))
   },
 })
 // SearchInput is registered globally by the Halo console; in tests it only
