@@ -67,6 +67,44 @@ class PageWorkingCopyTest {
     }
 
     @Test
+    void setTitleStagesTrimmedTitleAndSurvivesLaterContentUpdates() {
+        var copy = copy("<p>old</p>", "");
+        assertThat(copy.setTitle(Map.of("title", "  新标题  ")))
+            .containsEntry("valid", true).containsEntry("staged", true);
+        assertThat(copy.document().title()).isEqualTo("新标题");
+        assertThat(copy.document().html()).isEqualTo("<p>old</p>");
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")))
+            .containsEntry("valid", true);
+        assertThat(copy.document().title()).isEqualTo("新标题");
+        assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
+            .containsExactly("update_page_title", "update_current_page");
+    }
+
+    @Test
+    void invalidTitleIsRejectedWithoutMutationAndClearedByLaterSuccess() {
+        var copy = copy("<p>old</p>", "");
+        var original = copy.document();
+        List<Map<String, Object>> invalidInputs = List.of(
+            Map.<String, Object>of(),
+            Map.<String, Object>of("title", "   "),
+            Map.<String, Object>of("title", "x".repeat(201)),
+            Map.<String, Object>of("title", 1));
+        for (var input : invalidInputs) {
+            assertThat(copy.setTitle(input)).containsEntry("valid", false)
+                .containsEntry("staged", false);
+            assertThat(copy.document()).isSameAs(original);
+            assertThat(copy.hasInvalidUpdate()).isTrue();
+        }
+        assertThat(copy.setTitle(Map.of("title", "恢复")))
+            .containsEntry("valid", true).containsEntry("staged", true);
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+        assertThat(copy.setTitle(Map.of("title", "恢复")))
+            .containsEntry("valid", true).containsEntry("staged", false);
+        assertThat(copy.document().title()).isEqualTo("恢复");
+    }
+
+    @Test
     void patchesUseOriginalPositionsAndApplyInDescendingOrderAcrossFields() {
         var copy = copy("<p>one two three</p>", "p{color:red}");
         var result = copy.patch(Map.of("baseHash", hash(copy), "patches", List.of(

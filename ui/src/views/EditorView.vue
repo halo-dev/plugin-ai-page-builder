@@ -32,6 +32,7 @@ import { pageKeys, queryClient } from '../lib/query-client'
 import AiPanel from '../components/AiPanel.vue'
 import HistoryPanel from '../components/HistoryPanel.vue'
 import PageSettings from '../components/PageSettings.vue'
+import PublishPagePopper from '../components/PublishPagePopper.vue'
 import SourceEditor from '../components/SourceEditor.vue'
 import ApbSegmented from '../components/ui/ApbSegmented.vue'
 import { useWorkingDocument } from '../composables/useWorkingDocument'
@@ -138,6 +139,9 @@ queryClient
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
+// First publish runs inside PublishPagePopper; block the AI panel while it is
+// in flight so a generation cannot commit against the pre-publish version.
+const publishPending = shallowRef(false)
 const view = shallowRef<'visual' | 'source' | 'runtime'>('visual')
 const viewOptions = [
   { value: 'visual', label: '可视化', icon: IconEdit },
@@ -258,13 +262,9 @@ function preview() {
 }
 async function publish(unpublish = false) {
   if (!detail.value || locked.value || (!unpublish && (dirty.value || !valid.value))) return
-  if (
-    !(await confirm(
-      unpublish ? '取消发布？' : '发布当前草稿？',
-      unpublish ? '访客将无法访问此页面。' : '访客将看到已保存草稿的内容。',
-    ))
-  )
-    return
+  // First publish goes through the popper for the slug; this path is 更新发布/取消发布.
+  if (!unpublish && !detail.value.page.publishedRevision) return
+  if (unpublish && !(await confirm('取消发布？', '访客将无法访问此页面。'))) return
   busy.value = true
   error.value = ''
   try {
@@ -285,6 +285,10 @@ async function publish(unpublish = false) {
   } finally {
     busy.value = false
   }
+}
+function published(result: NonNullable<typeof detail.value>) {
+  detail.value = result
+  queryClient.setQueryData(pageKeys.detail(result.page.name), result)
 }
 async function restore(revision: string) {
   if (!detail.value || locked.value || !valid.value) return
@@ -422,14 +426,29 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           <IconSave v-else class="text-sm" />
           保存
         </button>
+        <PublishPagePopper
+          v-if="!detail.page.publishedRevision"
+          :name="detail.page.name"
+          :slug="detail.page.slug"
+          :version="detail.page.version"
+          @published="published"
+          @updated="published"
+          @pending="publishPending = $event"
+        >
+          <button type="button" class="apb-btn-primary" :disabled="locked || dirty || !valid">
+            <IconRocket class="text-sm" />
+            发布
+          </button>
+        </PublishPagePopper>
         <button
+          v-else
           type="button"
           class="apb-btn-primary"
-          :disabled="locked || dirty || !valid"
+          :disabled="locked || dirty || !valid || busy"
           @click="publish()"
         >
           <IconRocket class="text-sm" />
-          {{ detail.page.publishedRevision ? '更新发布' : '发布' }}
+          更新发布
         </button>
       </div>
     </header>
@@ -467,7 +486,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           class="border-r border-gray-200"
           :class="mobilePanel === 'chat' ? 'flex' : 'hidden md:flex'"
           :page-name="detail.page.name"
-          :disabled="busy || preparing || !valid || settingsOpen || historyOpen"
+          :disabled="busy || publishPending || preparing || !valid || settingsOpen || historyOpen"
           :prepare="prepareChat"
           :document="working"
           :annotations="annotations"

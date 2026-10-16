@@ -272,6 +272,31 @@ public final class PageWorkingCopy {
         return stage(tool, html.toString(), css.toString(), js.toString());
     }
 
+    public synchronized Map<String, Object> setTitle(Map<String, Object> input) {
+        call();
+        consume(JsonUtils.objectToJson(input));
+        var tool = "update_page_title";
+        if (input == null || !(input.get("title") instanceof String raw)) {
+            return invalid(tool, "title 必须是字符串");
+        }
+        var title = raw.trim();
+        try {
+            var changed = !title.equals(document.title());
+            var candidate = changed
+                ? new PageDocument(document.js().isEmpty() ? 1 : 2, "code", null, null,
+                    document.html(), document.css(), title, document.description(), document.js())
+                : document;
+            policy.validate(candidate);
+            document = candidate;
+            invalidUpdate = false;
+            summaries.add(new ChatApi.Tool(tool, "completed",
+                changed ? "已暂存新标题" : "标题未变化"));
+            return Map.of("valid", true, "staged", changed, "baseHash", baseHash());
+        } catch (ResponseStatusException error) {
+            return invalid(tool, error.getReason());
+        }
+    }
+
     private Map<String, Object> stage(String tool, String html, String css, String js) {
         try {
             boolean changed = !html.equals(document.html()) || !css.equals(document.css())

@@ -9,9 +9,9 @@ public final class PageApi {
     private PageApi() {
     }
 
-    @Schema(name = "CreatePageRequest", requiredProperties = {"slug", "title"})
+    @Schema(name = "CreatePageRequest", requiredProperties = {"title"})
     public record CreatePageRequest(
-        @Schema(pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
+        @Schema(nullable = true, pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
             maxLength = 200) String slug,
         String title,
         @Schema(nullable = true, description = "Whether to reuse the theme layout; defaults to true") Boolean themeLayout
@@ -47,9 +47,10 @@ public final class PageApi {
     public record RestoreRequest(Long version, String revision) {
     }
 
-    @Schema(name = "PageSummary", requiredProperties = {"name", "slug", "title", "description",
+    @Schema(name = "PageSummary", requiredProperties = {"name", "title", "description",
         "version", "themeLayout", "draftRevision", "updatedAt", "hasUnpublishedChanges"})
-    public record PageSummary(String name, String slug, String title,
+    public record PageSummary(String name,
+        @Schema(nullable = true) String slug, String title,
         @Schema(nullable = true) String description,
         Long version, boolean themeLayout, String draftRevision,
         @Schema(nullable = true) String publishedRevision,

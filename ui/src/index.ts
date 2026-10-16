@@ -1,5 +1,5 @@
 import { definePlugin, type PluginModule, type RouteRecordAppend } from '@halo-dev/ui-shared'
-import type { RouteRecordRaw } from 'vue-router'
+import { RouterView, type RouteRecordRaw } from 'vue-router'
 import IconGrid from '~icons/mingcute/layout-grid-line'
 import { markRaw } from 'vue'
 
@@ -9,14 +9,30 @@ const routes: (RouteRecordRaw | RouteRecordAppend)[] = [
     parentName: 'Root',
     route: {
       path: '/ai-page-builder',
-      name: 'AiPageBuilderPages',
-      component: () => import('./views/HomeView.vue'),
+      name: 'AiPageBuilderRoot',
+      component: RouterView,
       meta: {
         title: 'AI 页面构建',
-        searchable: true,
         permissions: ['*'],
         menu: { name: 'AI 页面构建', group: 'content', icon: markRaw(IconGrid), priority: 30 },
       },
+      children: [
+        {
+          path: '',
+          name: 'AiPageBuilderPages',
+          component: () => import('./views/HomeView.vue'),
+          // Global search pushes the whole route record, which vue-router
+          // resolves by name, so searchable must live on this leaf route;
+          // putting it on the RouterView parent would render an empty outlet.
+          meta: { title: 'AI 页面构建', searchable: true, permissions: ['*'] },
+        },
+        {
+          path: 'new',
+          name: 'AiPageBuilderNew',
+          component: () => import('./views/CreatePageView.vue'),
+          meta: { title: '新建页面', permissions: ['*'] },
+        },
+      ],
     },
   },
   {
