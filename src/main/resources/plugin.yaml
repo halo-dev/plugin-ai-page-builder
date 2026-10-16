@@ -1,9 +1,6 @@
-# Refer https://docs.halo.run/developer-guide/plugin/basics/manifest
-
 apiVersion: plugin.halo.run/v1alpha1
 kind: Plugin
 metadata:
-  # The name defines how the plugin is invoked, A unique name
   name: ai-page-builder
 spec:
   enabled: true
@@ -11,14 +8,14 @@ spec:
   pluginDependencies:
     "ai-foundation?": ">=1.1.1 & <2.0.0"
   author:
-    name: ryanwang
-    website: https://github.com/ryanwang
+    name: Halo
+    website: https://www.halo.run
   logo: logo.png
-  homepage: https://github.com/ryanwang/plugin-ai-page-builder#readme
-  repo: https://github.com/ryanwang/plugin-ai-page-builder
-  issues: https://github.com/ryanwang/plugin-ai-page-builder/issues
+  homepage: https://github.com/halo-dev/plugin-ai-page-builder#readme
+  repo: https://github.com/halo-dev/plugin-ai-page-builder
+  issues: https://github.com/halo-dev/plugin-ai-page-builder/issues
   displayName: "AI Page Builder"
   description: "AI 驱动的主题扩展页面，支持可视化编辑、源码编辑和版本历史。"
   license:
     - name: "GPL-3.0"
-      url: "https://github.com/ryanwang/plugin-ai-page-builder/blob/main/LICENSE"
+      url: "https://github.com/halo-dev/plugin-ai-page-builder/blob/main/LICENSE"
