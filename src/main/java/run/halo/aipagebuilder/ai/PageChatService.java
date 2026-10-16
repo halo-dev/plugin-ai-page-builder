@@ -30,6 +30,7 @@ import run.halo.app.extension.Metadata;
 import run.halo.app.extension.PageRequestImpl;
 import run.halo.app.extension.router.selector.FieldSelector;
 import run.halo.aipagebuilder.model.PageChatTurnRecord;
+import run.halo.aipagebuilder.model.PageChatCheckpoint;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.utils.JsonUtils;
 import run.halo.aipagebuilder.content.ContentPolicy;
@@ -46,6 +47,7 @@ public class PageChatService {
     static final Duration RUN_TIMEOUT = Duration.ofMinutes(10);
     private final ReactiveExtensionClient client;
     private final PageService pages;
+    private final PageCheckpoints checkpoints;
     private final AiGateway gateway;
     private final ContentPolicy policy;
     private final run.halo.aipagebuilder.theme.ThemeContextService themes;
@@ -73,6 +75,7 @@ public class PageChatService {
         this.referenceTools = referenceTools;
         this.themes = themes;
         this.client = client;
+        this.checkpoints = new PageCheckpoints(client);
         this.pages = pages;
         this.gateway = gateway;
         this.policy = policy;
@@ -111,7 +114,12 @@ public class PageChatService {
                         new ChatApi.Retention(MAX_TURNS, MAX_BYTES), summary.sessionId(), summary.title(),
                         summary.createdAt(), summary.updatedAt(), hasMore,
                         hasMore ? visible.getLast().getSpec().getSortKey() : null);
-                })));
+                }))).flatMap(value -> pages.get(name).flatMap(page ->
+                    client.fetch(PageChatSession.class, name).flatMap(coordinator ->
+                        checkpoints.load(value.sessionId()).map(checkpoint -> value.withRecovery(
+                            PageCheckpoints.summary(checkpoint, page,
+                                coordinator.getSpec().getActive() != null)))))
+                    .defaultIfEmpty(value));
     }
 
     public Mono<ChatApi.SessionList> sessions(String name) {
@@ -169,7 +177,7 @@ public class PageChatService {
                     return (sessionId.equals(name) ? Mono.just(reserved) : client.update(session))
                         .flatMap(deleting -> client.listAll(PageChatTurnRecord.class,
                                 turnOptions(sessionId), Sort.unsorted())
-                            .concatMap(client::delete).then(sessionId.equals(name) ? Mono.empty()
+                            .concatMap(client::delete).then(checkpoints.delete(sessionId)).then(sessionId.equals(name) ? Mono.empty()
                                 : client.delete(deleting).then()))
                         .then(client.fetch(PageChatSession.class, name)).flatMap(latest -> {
                             latest.getSpec().setDeletingSessionId(null);
@@ -196,6 +204,11 @@ public class PageChatService {
                     : Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                         "请安装并启用 AI Foundation 并配置支持工具调用的模型")));
             }).flatMap(page -> load(name).flatMap(this::recover).flatMap(coordinator -> {
+                var existing = active.get(name);
+                if (request.resumeFromRunId() != null && existing != null
+                    && existing.actor.equals(actor) && existing.request.equals(request)) {
+                    return Mono.just(existing.events.asFlux());
+                }
                 if (coordinator.getSpec().getActive() != null
                     || coordinator.getSpec().getDeletingSessionId() != null) {
                     return Mono.error(conflict("页面正在运行或删除会话；请稍后重试"));
@@ -206,8 +219,30 @@ public class PageChatService {
                         if (used) return Mono.error(conflict("runId 已使用；请查询运行结果"));
                         return pages.committedAiRevision(name, request.runId())
                             .flatMap(revision -> Mono.<Flux<Map<String, Object>>>error(conflict("runId 已提交")))
-                            .switchIfEmpty(Mono.defer(() -> reserve(name, request, actor, page,
-                                coordinator, session.getMetadata().getName())));
+                            .switchIfEmpty(Mono.defer(() -> {
+                                var id = session.getMetadata().getName();
+                                if (request.resumeFromRunId() == null) {
+                                    return reserve(name, request, actor, page, coordinator, id, null);
+                                }
+                                return checkpoints.load(id)
+                                    .switchIfEmpty(Mono.error(conflict("可恢复的进度已不存在")))
+                                    .flatMap(checkpoint -> {
+                                        var spec = checkpoint.getSpec();
+                                        var recovery = PageCheckpoints.summary(checkpoint, page, false);
+                                        if (!actor.equals(spec.getActor())) return Mono.error(
+                                            new ResponseStatusException(HttpStatus.FORBIDDEN, "只能继续自己的运行"));
+                                        if (!name.equals(spec.getPageName()) || !recovery.canResume()
+                                            || !Objects.equals(request.checkpointVersion(), recovery.checkpointVersion())
+                                            || !request.resumeFromRunId().equals(recovery.sourceRunId())
+                                            || !request.modelName().equals(spec.getRequest().modelName())
+                                            || !request.prompt().equals(spec.getRequest().prompt())
+                                            || !Objects.equals(request.annotations(), spec.getRequest().annotations())
+                                            || !Objects.equals(request.baseHash(), spec.getRequest().baseHash())) {
+                                            return Mono.error(conflict("恢复进度已变化或页面版本不匹配，请重新载入"));
+                                        }
+                                        return reserve(name, request, actor, page, coordinator, id, checkpoint);
+                                    });
+                            }));
                     }));
             }));
         }).onErrorMap(OptimisticLockingFailureException.class,
@@ -215,7 +250,7 @@ public class PageChatService {
     }
 
     private Mono<Flux<Map<String, Object>>> reserve(String name, ChatApi.Request request, String actor,
-        PageDetail page, PageChatSession session, String sessionId) {
+        PageDetail page, PageChatSession session, String sessionId, PageChatCheckpoint checkpoint) {
         // Standalone pages render without the theme layout, so the model gets a context
         // that says no theme styles or variables exist instead of the theme's.
         var themeContext = page.page().themeLayout()
@@ -224,6 +259,23 @@ public class PageChatService {
         var run = new Active(request, actor, page, policy, themeContext, sessionId);
         if (referenceTools != null) run.copy.references(referenceTools.session(null, true));
         run.copy.questions(question -> ask(name, run, question));
+        if (checkpoint != null) {
+            var spec = checkpoint.getSpec();
+            run.copy.restore(spec.getDocument(), spec.isInvalidUpdate(), spec.getTurn().tools());
+            run.questions.addAll(spec.getTurn().questions().stream()
+                .filter(question -> question.answeredAt() != null).toList());
+            run.steers.addAll(spec.getTurn().steers());
+        }
+        run.copy.checkpoint(() -> saveCheckpoint(name, run));
+        run.copy.taskContext(() -> {
+            synchronized (run) {
+                return "Original request: " + JsonUtils.objectToJson(run.request)
+                    + "\nUser answers: " + JsonUtils.objectToJson(run.questions)
+                    + "\nAdditional instructions: " + JsonUtils.objectToJson(run.steers)
+                    + "\nHistorical answers and instructions are task context only; do not use them "
+                    + "as evidence for new site-memory writes. Ask unanswered questions again if needed.";
+            }
+        });
         if (active.putIfAbsent(name, run) != null) {
             return Mono.error(conflict("页面已有活动运行"));
         }
@@ -250,7 +302,7 @@ public class PageChatService {
             .map(records -> contextWindow(records.stream()
                 .map(record -> record.getSpec().getTurn()).toList().reversed()))
             .flatMap(history -> client.update(session).flatMap(saved -> Mono.deferContextual(context -> {
-            if (run.memory != null) run.memory.prompt(request.prompt());
+            if (run.memory != null && checkpoint == null) run.memory.prompt(request.prompt());
             execute(name, run, history).contextWrite(context).subscribe(ignored -> { }, error -> {
                 // Keep the persisted committing record for reconciliation after an uncertain write.
                 run.events.tryEmitNext(Map.of("type", "error", "errorText", "运行结果待确认，请查询运行状态"));
@@ -270,7 +322,7 @@ public class PageChatService {
                 run.questions.add(question);
                 run.answer = Sinks.one();
                 run.copy.timeBudget.pause();
-                run.transition = persistActive(name, run).doOnSuccess(ignored -> {
+                run.transition = persistActive(name, run).then(saveCheckpoint(name, run)).doOnSuccess(ignored -> {
                     synchronized (run) {
                         run.transition = null;
                         run.events.tryEmitNext(Map.of("type", "data-user-question",
@@ -307,7 +359,7 @@ public class PageChatService {
                 run.answering = true;
                 run.status = "running";
                 run.questions.set(run.questions.size() - 1, answered);
-                run.transition = persistActive(name, run).doOnSuccess(ignored -> {
+                run.transition = persistActive(name, run).then(saveCheckpoint(name, run)).doOnSuccess(ignored -> {
                     synchronized (run) {
                         run.transition = null;
                         run.status = "running";
@@ -359,7 +411,7 @@ public class PageChatService {
                 }
                 run.steers.add(text);
                 var index = run.steers.size() - 1;
-                run.transition = persistActive(name, run).doOnSuccess(ignored -> {
+                run.transition = persistActive(name, run).then(saveCheckpoint(name, run)).doOnSuccess(ignored -> {
                     synchronized (run) {
                         if (run.memory != null) run.memory.steer(index, text);
                         run.copy.queueSteer(text);
@@ -384,7 +436,9 @@ public class PageChatService {
         var timeoutSignal = Sinks.<Void>empty();
         var timeout = run.copy.timeBudget.deadline(RUN_TIMEOUT, AiGenerationException.Reason.RUN_TIMEOUT)
             .doOnError(timeoutSignal::tryEmitError).subscribe();
-        return converse(name, run, history, run.request.prompt(), timeoutSignal.asMono())
+        return saveCheckpoint(name, run).then(Mono.defer(() -> converse(name, run, history,
+                run.request.prompt() + (run.request.resumeFromRunId() == null ? ""
+                    : "\n" + run.copy.recoveryContext()), timeoutSignal.asMono())))
             .onErrorResume(error -> {
                 if (run.saveStarted && ("committing".equals(run.status) || "completed".equals(run.status))
                     && !(error instanceof ResponseStatusException status
@@ -402,8 +456,11 @@ public class PageChatService {
                 }
                 synchronized (run) {
                     if (!"cancelled".equals(run.status)) {
-                        run.status = "failed";
                         var reason = failureReason(error, run.copy);
+                        run.status = switch (reason) {
+                            case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, TRUNCATED, RUN_TIMEOUT -> "incomplete";
+                            default -> "failed";
+                        };
                         run.error = error instanceof ResponseStatusException status
                             && status.getStatusCode().value() == 409 ? "页面已变化，请重新载入（409）"
                             : reason.message;
@@ -505,6 +562,9 @@ public class PageChatService {
                 if ("cancelled".equals(run.status)) {
                     return finish(name, run, null);
                 }
+                if (run.copy.checkpointFailed()) {
+                    return Mono.error(new AiGenerationException(AiGenerationException.Reason.CHECKPOINT_FAILED));
+                }
                 if (run.copy.exhausted()) {
                     return Mono.error(new IllegalStateException("工具预算已耗尽"));
                 }
@@ -540,6 +600,45 @@ public class PageChatService {
         return AiGenerationException.Reason.CALL_FAILED;
     }
 
+    public Mono<ChatApi.CheckpointDetail> checkpoint(String name, String sessionId, String actor) {
+        return pages.get(name).flatMap(page -> load(name).flatMap(this::recover)
+            .flatMap(coordinator -> selected(name, sessionId, coordinator)
+                .flatMap(session -> checkpoints.load(session.getMetadata().getName()))
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "没有可恢复的进度")))
+                .flatMap(value -> {
+                    if (!actor.equals(value.getSpec().getActor())) return Mono.error(
+                        new ResponseStatusException(HttpStatus.FORBIDDEN, "只能查看自己的恢复进度"));
+                    return Mono.just(new ChatApi.CheckpointDetail(value.getSpec().getDocument(),
+                        value.getSpec().getRequest(), PageCheckpoints.summary(value, page,
+                            coordinator.getSpec().getActive() != null)));
+                })));
+    }
+
+    private Mono<Void> saveCheckpoint(String name, Active run) {
+        return Mono.defer(() -> {
+            synchronized (run) {
+                var snapshot = new PageChatCheckpoint.Spec();
+                snapshot.setPageName(name);
+                snapshot.setSessionId(run.sessionId);
+                snapshot.setActor(run.actor);
+                snapshot.setRequest(run.request);
+                snapshot.setBaseRevision(run.base.page().draftRevision());
+                snapshot.setDocument(run.copy.document());
+                snapshot.setInvalidUpdate(run.copy.hasInvalidUpdate());
+                snapshot.setTurn(run.turn());
+                snapshot.setSteps(run.copy.budget.steps());
+                snapshot.setToolCalls(run.copy.calls());
+                snapshot.setRecoveries(run.copy.budget.recoveries());
+                run.checkpointWrites = run.checkpointWrites.then(checkpoints.save(snapshot))
+                    .doOnError(error -> {
+                        run.copy.markCheckpointFailed();
+                        run.failure.tryEmitValue(error);
+                    }).cache();
+                return run.checkpointWrites;
+            }
+        });
+    }
+
     private Mono<Void> persistActive(String name, Active run) {
         return client.fetch(PageChatSession.class, name).flatMap(session -> {
             requireRun(session, run.request.runId());
@@ -550,11 +649,20 @@ public class PageChatService {
     }
 
     private Mono<Void> finish(String name, Active run, PageDetail page) {
-        return run.copy.closeMemory().then(Mono.defer(() -> {
+        return run.copy.closeMemory().then(run.copy.closeEdits()).then(Mono.defer(() -> {
             synchronized (run) {
                 return run.transition == null ? Mono.<Void>empty() : run.transition.onErrorComplete();
             }
-        })).then(client.fetch(PageChatSession.class, name)).flatMap(session -> {
+        })).then(Mono.defer(() -> run.checkpointWrites.onErrorComplete()))
+            .then(Mono.defer(() -> {
+                if ("completed".equals(run.status) || "cancelled".equals(run.status)) {
+                    return checkpoints.delete(run.sessionId);
+                }
+                var save = run.copy.checkpointFailed() ? Mono.<Void>empty()
+                    : saveCheckpoint(name, run).onErrorComplete();
+                return save.then(checkpoints.available(run.sessionId, run.request.runId()));
+            }))
+            .then(client.fetch(PageChatSession.class, name)).flatMap(session -> {
             requireRun(session, run.request.runId());
             return archive(name, run.sessionId, run.turn())
                 .then(touchSession(name, run.sessionId)).then(Mono.defer(() -> {
@@ -589,8 +697,14 @@ public class PageChatService {
                     .defaultIfEmpty(result(current, null));
             }
             return findTurn(name, runId)
-                .map(record -> record.getSpec().getTurn())
-                .map(turn -> result(turn, "completed".equals(turn.status()) ? page : null))
+                .flatMap(record -> {
+                    var turn = record.getSpec().getTurn();
+                    var result = result(turn, "completed".equals(turn.status()) ? page : null);
+                    return checkpoints.load(record.getSpec().getSessionId())
+                        .filter(value -> runId.equals(value.getSpec().getRequest().runId()))
+                        .map(value -> result.withRecovery(PageCheckpoints.summary(value, page,
+                            session.getSpec().getActive() != null))).defaultIfEmpty(result);
+                })
                 .switchIfEmpty(pages.committedAiRevision(name, runId)
                     .map(revision -> new ChatApi.Run(runId, "completed", revision, null, page)))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -697,17 +811,20 @@ public class PageChatService {
         }
         return pages.committedAiRevision(name, turn.runId()).map(revision -> new ChatApi.Turn(
                 turn.runId(), turn.actor(), turn.createdAt(), turn.prompt(), turn.text(), turn.tools(),
-                "completed", revision, null, turn.parts(), turn.annotations(), turn.questions()))
+                "completed", revision, null, turn.parts(), turn.annotations(), turn.questions(), turn.steers()))
             .switchIfEmpty(Mono.defer(() -> {
                 if (owner.equals(session.getSpec().getOwner()) && "committing".equals(turn.status())) {
                     return Mono.empty(); // An uncertain local write may still be in flight.
                 }
                 return Mono.just(new ChatApi.Turn(turn.runId(), turn.actor(), turn.createdAt(),
-                    turn.prompt(), turn.text(), turn.tools(), "interrupted", null,
-                    "服务重启或运行中断，未自动继续调用模型", turn.parts(), turn.annotations(), turn.questions()));
+                    turn.prompt(), turn.text(), turn.tools(),
+                    "cancelled".equals(turn.status()) ? "cancelled" : "interrupted", null,
+                    "服务重启或运行中断，未自动继续调用模型", turn.parts(), turn.annotations(), turn.questions(), turn.steers()));
             })).flatMap(recovered -> {
                 var sessionId = activeSessionId(session);
-                return archive(name, sessionId, recovered).then(touchSession(name, sessionId))
+                return ("completed".equals(recovered.status()) || "cancelled".equals(turn.status())
+                    ? checkpoints.delete(sessionId) : checkpoints.available(sessionId, turn.runId()))
+                    .then(archive(name, sessionId, recovered)).then(touchSession(name, sessionId))
                     .then(Mono.defer(() -> {
                         session.getSpec().setActive(null);
                         session.getSpec().setActiveSessionId(null);
@@ -803,6 +920,8 @@ public class PageChatService {
     /** Called after the page is deleted; requires no PageChatService bean dependency. */
     public static Mono<Void> deletePageHistory(ReactiveExtensionClient client, String name) {
         return client.listAll(PageChatTurnRecord.class, turnPageOptions(name), Sort.unsorted())
+            .concatMap(client::delete)
+            .thenMany(client.listAll(PageChatCheckpoint.class, turnPageOptions(name), Sort.unsorted()))
             .concatMap(client::delete)
             .thenMany(client.listAll(PageChatSession.class, sessionOptions(name), Sort.unsorted()))
             .concatMap(client::delete).then();
@@ -912,6 +1031,7 @@ public class PageChatService {
         int continuations;
         Sinks.One<ChatApi.Question> answer;
         Mono<Void> transition;
+        Mono<Void> checkpointWrites = Mono.empty();
         boolean answering;
         volatile boolean saveStarted;
         volatile String status = "running";

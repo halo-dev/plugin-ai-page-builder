@@ -77,6 +77,10 @@ public class PageChatEndpoint implements CustomEndpoint {
                     .parameter(parameterBuilder().name("version").in(ParameterIn.QUERY).required(true)
                         .implementation(Long.class))
                     .response(responseBuilder().responseCode("204")))
+            .GET("/pages/{name}/sessions/{sessionId}/checkpoint", request -> actor().flatMap(actor ->
+                    json(chats.checkpoint(request.pathVariable("name"), request.pathVariable("sessionId"), actor))),
+                builder -> sessionNamed(builder, "getPageChatCheckpoint")
+                    .response(responseBuilder().responseCode("200").implementation(ChatApi.CheckpointDetail.class)))
             .POST("/pages/{name}/chat", this::chat,
                 builder -> named(builder, "runPageChat", String.class)
                     .description("Halo UIMessage SSE; page commit is emitted as data-page-committed before finish")

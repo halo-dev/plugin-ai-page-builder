@@ -313,6 +313,87 @@ class FoundationBridgeTest {
         assertThat(captured.get().getCancellationToken().isCancellationRequested()).isTrue();
     }
 
+    @Test
+    void truncationContinuesFromValidatedCopyWithoutReplayingToolArgumentsOrFinish() {
+        setup(Flux.empty());
+        var attempts = new java.util.ArrayList<GenerateTextRequest>();
+        var copy = copy();
+        var saves = new java.util.concurrent.atomic.AtomicInteger();
+        copy.checkpoint(() -> Mono.fromRunnable(saves::incrementAndGet));
+        when(model.streamText(any())).thenAnswer(invocation -> {
+            GenerateTextRequest request = invocation.getArgument(0);
+            attempts.add(request);
+            request.getPrepareStep().prepare(run.halo.aifoundation.chat.StepContext.builder()
+                .messages(request.getMessages()).build());
+            Flux<TextStreamPart> source;
+            if (attempts.size() == 1) {
+                var tool = request.getTools().stream().filter(t -> "update_current_page".equals(t.getName()))
+                    .findFirst().orElseThrow();
+                source = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                    .input(java.util.Map.of("html", "<p>verified</p>")).build()).thenMany(Flux.just(
+                        TextStreamPart.textStart("same-id"), TextStreamPart.textDelta("same-id", "first"),
+                        TextStreamPart.textEnd("same-id"),
+                        TextStreamPart.toolInputStart("partial", "same-tool", "update_current_page"),
+                        TextStreamPart.toolInputDelta("partial", "same-tool", "update_current_page", "partial-secret"),
+                        TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
+            } else {
+                assertThat(request.getMessages().toString()).contains("verified", "Discard truncated arguments")
+                    .doesNotContain("partial-secret");
+                source = Flux.just(TextStreamPart.textStart("same-id"),
+                    TextStreamPart.textDelta("same-id", "second"), TextStreamPart.textEnd("same-id"),
+                    TextStreamPart.finish(FinishReason.STOP, "stop", null));
+            }
+            return new StreamTextResult(source, Flux.empty(), Flux.empty(), Flux.empty(), Mono.empty(), Mono.empty());
+        });
+        var chunks = bridge.chat("model", java.util.List.of(), "original task", copy).collectList().block();
+        assertThat(attempts).hasSize(2);
+        assertThat(saves).hasValue(1);
+        assertThat(copy.budget.steps()).isEqualTo(2);
+        assertThat(chunks.stream().filter(chunk -> "text-delta".equals(chunk.get("type"))))
+            .extracting(chunk -> chunk.get("id")).containsExactly("attempt-1-same-id", "attempt-2-same-id");
+        assertThat(chunks).filteredOn(chunk -> "data-generation-recovery".equals(chunk.get("type"))).hasSize(1);
+        assertThat(chunks).noneMatch(chunk -> "finish".equals(chunk.get("type")) || "error".equals(chunk.get("type")));
+    }
+
+    @Test
+    void truncationRecoveryAndSteerCallsShareTheTwentyStepBudget() {
+        var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var copy = copy();
+        bridge.chat("model", java.util.List.of(), "task", copy).blockLast();
+        var context = run.halo.aifoundation.chat.StepContext.builder().messages(java.util.List.of()).build();
+        for (int i = 1; i <= 20; i++) {
+            var prepared = captured.get().getPrepareStep().prepare(context);
+            assertThat(captured.get().getStopWhen().shouldContinue(context)).isEqualTo(i < 20);
+            if (i >= 18) assertThat(prepared.getMessages().toString()).contains("model steps remain");
+        }
+        assertThatThrownBy(() -> captured.get().getPrepareStep().prepare(context))
+            .isInstanceOfSatisfying(AiGenerationException.class,
+                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STEP_LIMIT));
+        assertThat(copy.budget.recover()).isFalse();
+        setup(Flux.just(TextStreamPart.finish(FinishReason.TOOL_CALLS, "tool_calls", null)));
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "steer", copy).blockLast())
+            .isInstanceOfSatisfying(AiGenerationException.class,
+                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STEP_LIMIT));
+    }
+
+    @Test
+    void permitsExactlyTwoTruncationRecoveriesAndNeverRetriesNetworkOrValidationFailures() {
+        var copy = copy();
+        setup(Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
+        var chunks = new java.util.ArrayList<java.util.Map<String, Object>>();
+        reactor.test.StepVerifier.create(bridge.chat("model", java.util.List.of(), "task", copy)
+            .doOnNext(chunks::add)).expectNextCount(2)
+            .expectError(AiGenerationException.class).verify();
+        org.mockito.Mockito.verify(model, org.mockito.Mockito.times(3)).streamText(any());
+        assertThat(copy.budget.recoveries()).isEqualTo(2);
+        assertThat(chunks).allMatch(chunk -> "data-generation-recovery".equals(chunk.get("type")));
+        org.mockito.Mockito.clearInvocations(model);
+        setup(Flux.error(new IllegalStateException("network")));
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "task", copy()).blockLast())
+            .isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verify(model).streamText(any());
+    }
+
     private PageWorkingCopy copy() {
         return new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null,
             "", "", "Title", ""), new ContentPolicy());

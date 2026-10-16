@@ -487,6 +487,8 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           :class="mobilePanel === 'chat' ? 'flex' : 'hidden md:flex'"
           :page-name="detail.page.name"
           :disabled="busy || publishPending || preparing || !valid || settingsOpen || historyOpen"
+          :dirty="dirty"
+          :page-version="detail.page.version"
           :prepare="prepareChat"
           :document="working"
           :annotations="annotations"

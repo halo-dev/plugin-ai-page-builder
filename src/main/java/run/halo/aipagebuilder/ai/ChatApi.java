@@ -11,7 +11,12 @@ public final class ChatApi {
 
     @Schema(name = "PageChatRequest", requiredProperties = {"runId", "version", "modelName", "prompt"})
     public record Request(String runId, Long version, String modelName, String prompt,
-                          String baseHash, List<Annotation> annotations, String sessionId) {
+                          String baseHash, List<Annotation> annotations, String sessionId,
+                          String resumeFromRunId, Long checkpointVersion) {
+        public Request(String runId, Long version, String modelName, String prompt,
+            String baseHash, List<Annotation> annotations, String sessionId) {
+            this(runId, version, modelName, prompt, baseHash, annotations, sessionId, null, null);
+        }
         public Request(String runId, Long version, String modelName, String prompt,
             String baseHash, List<Annotation> annotations) {
             this(runId, version, modelName, prompt, baseHash, annotations, null);
@@ -37,7 +42,18 @@ public final class ChatApi {
     public record Turn(String runId, String actor, Instant createdAt, String prompt, String text,
                        List<Tool> tools, String status, String revision, String error,
                        List<DisplayPart> parts, List<Annotation> annotations,
-                       List<Question> questions, List<String> steers) {
+                       List<Question> questions, List<String> steers, Recovery recovery) {
+        public Turn(String runId, String actor, Instant createdAt, String prompt, String text,
+            List<Tool> tools, String status, String revision, String error, List<DisplayPart> parts,
+            List<Annotation> annotations, List<Question> questions, List<String> steers) {
+            this(runId, actor, createdAt, prompt, text, tools, status, revision, error,
+                parts, annotations, questions, steers, null);
+        }
+
+        public Turn withRecovery(Recovery value) {
+            return new Turn(runId, actor, createdAt, prompt, text, tools, status, revision, error,
+                parts, annotations, questions, steers, value);
+        }
         public Turn {
             steers = steers == null ? List.of() : List.copyOf(steers);
         }
@@ -69,11 +85,27 @@ public final class ChatApi {
 
     @Schema(name = "PageChatRun", requiredProperties = {"runId", "status"})
     public record Run(String runId, String status, String revision, String error, PageDetail page,
-                      Question pendingQuestion) {
+                      Question pendingQuestion, Recovery recovery) {
+        public Run(String runId, String status, String revision, String error, PageDetail page,
+            Question pendingQuestion) {
+            this(runId, status, revision, error, page, pendingQuestion, null);
+        }
+
+        public Run withRecovery(Recovery value) {
+            return new Run(runId, status, revision, error, page, pendingQuestion, value);
+        }
         public Run(String runId, String status, String revision, String error, PageDetail page) {
             this(runId, status, revision, error, page, null);
         }
     }
+
+    @Schema(name = "PageChatRecovery", requiredProperties = {"sourceRunId", "checkpointVersion", "canResume", "updatedAt"})
+    public record Recovery(String sourceRunId, Long checkpointVersion, boolean canResume,
+                           String blockedReason, Instant updatedAt) { }
+
+    @Schema(name = "PageChatCheckpointDetail", requiredProperties = {"document", "request", "recovery"})
+    public record CheckpointDetail(run.halo.aipagebuilder.model.PageDocument document,
+                                   Request request, Recovery recovery) { }
 
     @Schema(name = "PageChatQuestionOption", requiredProperties = {"id", "label"})
     public record QuestionOption(String id, String label) { }
@@ -98,7 +130,19 @@ public final class ChatApi {
     @Schema(name = "PageChatSession", requiredProperties = {"pageName", "version", "turns", "retention", "sessionId", "title", "hasMore"})
     public record Session(String pageName, Long version, List<Turn> turns, Run activeRun,
                           Retention retention, String sessionId, String title, Instant createdAt,
-                          Instant updatedAt, boolean hasMore, String nextBefore) {
+                          Instant updatedAt, boolean hasMore, String nextBefore, Recovery recovery) {
+        public Session(String pageName, Long version, List<Turn> turns, Run activeRun,
+            Retention retention, String sessionId, String title, Instant createdAt,
+            Instant updatedAt, boolean hasMore, String nextBefore) {
+            this(pageName, version, turns, activeRun, retention, sessionId, title,
+                createdAt, updatedAt, hasMore, nextBefore, null);
+        }
+
+        public Session withRecovery(Recovery value) {
+            return new Session(pageName, version, turns.stream().map(turn -> turn.withRecovery(
+                value != null && turn.runId().equals(value.sourceRunId()) ? value : null)).toList(),
+                activeRun, retention, sessionId, title, createdAt, updatedAt, hasMore, nextBefore, value);
+        }
         public Session(String pageName, Long version, List<Turn> turns, Run activeRun,
             Retention retention) {
             this(pageName, version, turns, activeRun, retention, pageName, "默认会话",

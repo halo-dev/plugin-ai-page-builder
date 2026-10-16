@@ -17,6 +17,40 @@ import run.halo.aipagebuilder.theme.ThemeStyleContext;
 
 class PageWorkingCopyTest {
     @Test
+    void partialUpdatesPreserveOmittedFieldsAndEmptyInputDoesNotClearInvalidState() {
+        var copy = copy("<p>old</p>", "p{color:red}");
+        assertThat(copy.update(Map.of("html", "<p>new</p>"))).containsEntry("valid", true);
+        assertThat(copy.document().css()).isEqualTo("p{color:red}");
+        assertThat(copy.update(Map.of("css", ""))).containsEntry("valid", true);
+        assertThat(copy.document().html()).isEqualTo("<p>new</p>");
+        assertThat(copy.document().css()).isEmpty();
+        assertThat(copy.update(Map.of())).containsEntry("valid", false);
+        assertThat(copy.hasInvalidUpdate()).isTrue();
+        assertThat(copy.update(Map.of("unknown", ""))).containsEntry("valid", false);
+        assertThat(copy.hasInvalidUpdate()).isTrue();
+    }
+
+    @Test
+    void pageToolAcknowledgementWaitsForDurableCheckpointAndCloseWaitsForWrite() {
+        var copy = copy("<p>old</p>", "");
+        var write = reactor.core.publisher.Sinks.<Void>empty();
+        copy.checkpoint(write::asMono);
+        var acknowledged = new java.util.concurrent.atomic.AtomicBoolean();
+        copy.edit(() -> copy.update(Map.of("html", "<p>new</p>")))
+            .subscribe(output -> acknowledged.set(true));
+        assertThat(acknowledged).isFalse();
+        var closed = new java.util.concurrent.atomic.AtomicBoolean();
+        copy.closeEdits().subscribe(ignored -> { }, error -> { }, () -> closed.set(true));
+        assertThat(closed).isFalse();
+        write.tryEmitEmpty();
+        assertThat(acknowledged).isTrue();
+        assertThat(closed).isTrue();
+        assertThatThrownBy(() -> copy.edit(() -> copy.update(Map.of("html", "<p>late</p>"))).block())
+            .isInstanceOf(AiGenerationException.class);
+        assertThat(copy.document().html()).isEqualTo("<p>new</p>");
+    }
+
+    @Test
     void memorySuccessRemainsRecordedWhenItsOutputExceedsTheBudget() {
         var service = org.mockito.Mockito.mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
         org.mockito.Mockito.when(service.apply(org.mockito.ArgumentMatchers.any(),

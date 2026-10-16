@@ -23,10 +23,12 @@ models/mutation-request.ts
 models/page-annotation.ts
 models/page-chat-answer-item.ts
 models/page-chat-answer-request.ts
+models/page-chat-checkpoint-detail.ts
 models/page-chat-display-part.ts
 models/page-chat-question-item.ts
 models/page-chat-question-option.ts
 models/page-chat-question.ts
+models/page-chat-recovery.ts
 models/page-chat-request.ts
 models/page-chat-retention.ts
 models/page-chat-run.ts

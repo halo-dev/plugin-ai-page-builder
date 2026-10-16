@@ -15,6 +15,9 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { PageChatRecovery } from './page-chat-recovery';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { PageChatRetention } from './page-chat-retention';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -59,6 +62,12 @@ export interface PageChatSession {
      * @memberof PageChatSession
      */
     'pageName': string;
+    /**
+     * 
+     * @type {PageChatRecovery}
+     * @memberof PageChatSession
+     */
+    'recovery'?: PageChatRecovery;
     /**
      * 
      * @type {PageChatRetention}

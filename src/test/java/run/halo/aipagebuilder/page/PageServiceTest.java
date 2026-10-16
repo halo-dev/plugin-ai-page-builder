@@ -58,6 +58,8 @@ class PageServiceTest {
             .thenReturn(Mono.empty());
         when(client.listAll(eq(run.halo.aipagebuilder.model.PageChatSession.class), any(ListOptions.class), any()))
             .thenReturn(Flux.empty());
+        when(client.listAll(eq(run.halo.aipagebuilder.model.PageChatCheckpoint.class), any(ListOptions.class), any()))
+            .thenReturn(Flux.empty());
         when(client.listAll(eq(run.halo.aipagebuilder.model.PageChatTurnRecord.class), any(ListOptions.class), any()))
             .thenReturn(Flux.empty());
         when(client.fetch(eq(ThemePage.class), anyString())).thenAnswer(invocation ->

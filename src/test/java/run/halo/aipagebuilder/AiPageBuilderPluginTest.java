@@ -43,6 +43,7 @@ class AiPageBuilderPluginTest {
         plugin.start();
         var order = inOrder(schemeManager);
         order.verify(schemeManager).register(SiteMemory.class);
+        order.verify(schemeManager).register(eq(run.halo.aipagebuilder.model.PageChatCheckpoint.class), any());
         order.verify(schemeManager).register(eq(PageChatSession.class), any());
         order.verify(schemeManager).register(eq(PageChatTurnRecord.class), any());
         order.verify(schemeManager).register(eq(ThemePage.class), any());

@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
     createPageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     renamePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     deletePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
+    getPageChatCheckpoint: vi.fn<(...args: unknown[]) => unknown>(),
     getPageChat: vi.fn<(...args: unknown[]) => unknown>(),
     getPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
     cancelPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
@@ -97,8 +98,8 @@ afterEach(() => {
   scope.stop()
   vi.useRealTimers()
 })
-function setup() {
-  const state = scope.run(() => usePageChat({ name: 'one', prepare, committed }))!
+function setup(extra: Partial<Parameters<typeof usePageChat>[0]> = {}) {
+  const state = scope.run(() => usePageChat({ name: 'one', prepare, committed, ...extra }))!
   state.modelName.value = 'tool-model'
   return state
 }
@@ -553,5 +554,98 @@ describe('persistent page chat', () => {
     ])
     expect(messages[1]?.parts[0]).toMatchObject({ text: '标题再短一点' })
     expect(messages[2]?.parts[0]).toMatchObject({ text: '换个配色' })
+  })
+})
+
+describe('checkpoint recovery', () => {
+  const recovery = {
+    sourceRunId: 'original-run',
+    checkpointVersion: 7,
+    canResume: true,
+    updatedAt: '2026-10-16T10:00:00Z',
+  }
+  const original = {
+    runId: 'original-run',
+    version: 8,
+    modelName: 'original-model',
+    prompt: 'Build original page',
+    sessionId: 'one',
+    annotations: [],
+    baseHash: 'hash',
+  }
+  function savedProgress() {
+    api.chat.getPageChat.mockResolvedValue({ data: { sessionId: 'one', turns: [], recovery } })
+    api.chat.getPageChatCheckpoint.mockResolvedValue({
+      data: {
+        request: original,
+        recovery,
+        document: { html: '<p>durable</p>', css: '', js: '' },
+      },
+    })
+  }
+  it('continues with original request/model and a fresh run id without saving the local editor', async () => {
+    savedProgress()
+    const state = setup({ version: () => 8, dirty: () => false })
+    await state.recover()
+    state.modelName.value = '' // The stored model is sufficient for resume.
+    expect(state.canResume.value).toBe(true)
+    await state.resume()
+    expect(prepare).not.toHaveBeenCalled()
+    expect(sdk.transport.prepareSendMessagesRequest().body).toMatchObject({
+      ...original,
+      runId: expect.any(String),
+      resumeFromRunId: 'original-run',
+      checkpointVersion: 7,
+    })
+    expect(sdk.transport.prepareSendMessagesRequest().body.runId).not.toBe('original-run')
+    expect(sdk.send).toHaveBeenCalledWith({ text: '继续生成' })
+  })
+  it('blocks resume while local edits are dirty and rechecks base version before sending', async () => {
+    savedProgress()
+    const dirty = shallowRef(true)
+    const state = setup({ dirty: () => dirty.value, version: () => 9 })
+    await state.recover()
+    expect(state.canResume.value).toBe(false)
+    expect(await state.resume()).toBe(false)
+    expect(api.chat.getPageChatCheckpoint).not.toHaveBeenCalled()
+    dirty.value = false
+    expect(await state.resume()).toBe(false)
+    expect(state.error.value).toContain('页面已变化')
+    expect(prepare).not.toHaveBeenCalled()
+    expect(sdk.send).not.toHaveBeenCalled()
+  })
+  it('loads checkpoint content only on demand and never adopts preview as a draft', async () => {
+    savedProgress()
+    const state = setup()
+    await state.recover()
+    expect(api.chat.getPageChatCheckpoint).not.toHaveBeenCalled()
+    await state.viewCheckpoint()
+    expect(state.preview.value).toMatchObject({
+      status: 'checkpoint',
+      content: { html: '<p>durable</p>' },
+    })
+    expect(committed).not.toHaveBeenCalled()
+    expect(prepare).not.toHaveBeenCalled()
+    await state.viewCheckpoint()
+    expect(state.preview.value).toBeUndefined()
+  })
+  it('rejects a checkpoint response arriving after switching sessions', async () => {
+    savedProgress()
+    let respond!: (value: unknown) => void
+    api.chat.getPageChatCheckpoint.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          respond = resolve
+        }),
+    )
+    const state = setup()
+    await state.recover()
+    const pending = state.viewCheckpoint()
+    api.chat.getPageChat.mockResolvedValue({ data: { sessionId: 'other', turns: [] } })
+    await state.selectSession('other')
+    respond({ data: { request: original, recovery, document: { html: '<p>wrong session</p>' } } })
+    await pending
+    expect(state.preview.value).toBeUndefined()
+    expect(committed).not.toHaveBeenCalled()
   })
 })

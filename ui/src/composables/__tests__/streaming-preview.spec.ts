@@ -40,6 +40,47 @@ function setup() {
   return { ...state, chunk, runId, messages }
 }
 describe('temporary streamed candidates', () => {
+  it('discards partial arguments at a recovery boundary and uses fresh tool ids with the validated baseline', async () => {
+    const state = setup()
+    state.chunk({
+      type: 'tool-input-available',
+      toolCallId: 'attempt-1-good',
+      toolName: 'update_current_page',
+      input: { html: '<p>Saved</p>' },
+    })
+    state.accept({
+      runId: 'run',
+      toolCallId: 'attempt-1-good',
+      baseHash: hash,
+      html: '<p>Saved</p>',
+      css: 'p{color:blue}',
+    })
+    state.chunk({
+      type: 'tool-input-start',
+      toolCallId: 'attempt-1-partial',
+      toolName: 'update_current_page',
+    })
+    state.chunk({
+      type: 'tool-input-delta',
+      toolCallId: 'attempt-1-partial',
+      inputTextDelta: '{"html":"<p>truncated',
+    })
+    state.restartAttempt()
+    expect(state.preview.value).toBeUndefined()
+    state.chunk({
+      type: 'tool-input-start',
+      toolCallId: 'attempt-2-partial',
+      toolName: 'update_current_page',
+    })
+    state.chunk({
+      type: 'tool-input-delta',
+      toolCallId: 'attempt-2-partial',
+      inputTextDelta: '{"css":"p{color:green}"}',
+    })
+    await vi.advanceTimersByTimeAsync(250)
+    expect(state.preview.value?.content).toEqual({ html: '<p>Saved</p>', css: 'p{color:green}' })
+    expect(state.preview.value?.source).not.toContain('truncated')
+  })
   it('accepts named staged events through the actual SDK reducer before showing a candidate', () => {
     const state = setup()
     state.chunk({

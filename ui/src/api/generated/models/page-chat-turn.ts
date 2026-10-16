@@ -24,6 +24,9 @@ import type { PageChatDisplayPart } from './page-chat-display-part';
 import type { PageChatQuestion } from './page-chat-question';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { PageChatRecovery } from './page-chat-recovery';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { PageChatTool } from './page-chat-tool';
 
 /**
@@ -74,6 +77,12 @@ export interface PageChatTurn {
      * @memberof PageChatTurn
      */
     'questions'?: Array<PageChatQuestion>;
+    /**
+     * 
+     * @type {PageChatRecovery}
+     * @memberof PageChatTurn
+     */
+    'recovery'?: PageChatRecovery;
     /**
      * 
      * @type {string}

@@ -32,6 +32,9 @@ public class AiPageBuilderPlugin extends BasePlugin {
     @Override
     public void start() {
         schemeManager.register(SiteMemory.class);
+        schemeManager.register(run.halo.aipagebuilder.model.PageChatCheckpoint.class, indexes ->
+            indexes.add(IndexSpecs.<run.halo.aipagebuilder.model.PageChatCheckpoint, String>single("spec.pageName", String.class)
+                .indexFunc(checkpoint -> checkpoint.getSpec().getPageName())));
         schemeManager.register(run.halo.aipagebuilder.model.PageChatSession.class, indexes -> {
             indexes.add(IndexSpecs.<run.halo.aipagebuilder.model.PageChatSession, String>single("spec.pageName", String.class)
                 .indexFunc(session -> session.getSpec().getPageName()));
@@ -64,6 +67,7 @@ public class AiPageBuilderPlugin extends BasePlugin {
     @Override
     public void stop() {
         schemeManager.unregister(schemeManager.get(SiteMemory.class));
+        schemeManager.unregister(schemeManager.get(run.halo.aipagebuilder.model.PageChatCheckpoint.class));
         schemeManager.unregister(schemeManager.get(run.halo.aipagebuilder.model.PageChatTurnRecord.class));
         schemeManager.unregister(schemeManager.get(run.halo.aipagebuilder.model.PageChatSession.class));
         schemeManager.unregister(schemeManager.get(ThemePageRevision.class));
