@@ -32,6 +32,7 @@ class PageReferenceToolsTest {
     private ReactiveExtensionClient client;
     private ThemeContextService themes;
     private WebReferenceTools web;
+    private ApiReferenceTools apis;
     private PageReferenceTools tools;
 
     @BeforeEach
@@ -39,8 +40,9 @@ class PageReferenceToolsTest {
         client = mock(ReactiveExtensionClient.class);
         themes = mock(ThemeContextService.class);
         web = mock(WebReferenceTools.class);
+        apis = mock(ApiReferenceTools.class);
         tools = new PageReferenceTools(client, themes,
-            mock(SiteReferenceTools.class), mock(ContentReferenceTools.class), web);
+            mock(SiteReferenceTools.class), mock(ContentReferenceTools.class), web, apis);
     }
 
     @Test
@@ -161,7 +163,7 @@ class PageReferenceToolsTest {
         assertThat(PageReferenceTools.definitions()).extracting(PageReferenceTools.Definition::name)
             .containsExactly("list_theme_files", "read_theme_file", "list_posts", "list_single_pages",
                 "list_ai_pages", "read_ai_page", "get_site_profile", "get_navigation",
-                "read_content", "search_attachments", "fetch_webpage");
+                "read_content", "search_attachments", "fetch_webpage", "search_public_apis", "get_public_api");
     }
 
     @Test
@@ -172,6 +174,17 @@ class PageReferenceToolsTest {
         assertThat(tools.session(null, true).execute("fetch_webpage", arguments).block())
             .isSameAs(result);
         verify(web).execute(arguments);
+    }
+
+    @Test
+    void dispatchesPublicApiToolsThroughReferenceSession() {
+        for (var name : List.of("search_public_apis", "get_public_api")) {
+            var arguments = Map.<String, Object>of("query", "posts");
+            var result = Map.<String, Object>of("items", List.of());
+            when(apis.execute(name, arguments)).thenReturn(Mono.just(result));
+            assertThat(tools.session(null, true).execute(name, arguments).block()).isSameAs(result);
+            verify(apis).execute(name, arguments);
+        }
     }
 
     @Test

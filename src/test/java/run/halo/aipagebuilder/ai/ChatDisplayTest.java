@@ -25,6 +25,26 @@ class ChatDisplayTest {
     }
 
     @Test
+    void retainsPublicApiToolNamesAndCompletionInHistory() {
+        var display = new ChatDisplay();
+        for (var name : java.util.List.of("search_public_apis", "get_public_api")) {
+            display.accept(Map.of("type", "tool-input-start", "toolCallId", name,
+                "toolName", name));
+            assertThat(display.snapshot("running").getLast().status()).isEqualTo("running");
+            display.accept(Map.of("type", "tool-output-available", "toolCallId", name,
+                "output", Map.of("items", java.util.List.of(), "schema", "raw-contract-marker")));
+        }
+        var parts = display.snapshot("completed");
+        assertThat(parts).extracting(ChatApi.DisplayPart::toolName)
+            .containsExactly("search_public_apis", "get_public_api");
+        assertThat(parts).allSatisfy(part -> {
+            assertThat(part.status()).isEqualTo("completed");
+            assertThat(part.summary()).isEqualTo("读取完成");
+        });
+        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("raw-contract-marker");
+    }
+
+    @Test
     void retainsMemoryOutcomeWithoutConfusingItWithPageStaging() {
         var display = new ChatDisplay();
         display.accept(Map.of("type", "tool-input-start", "toolCallId", "m",

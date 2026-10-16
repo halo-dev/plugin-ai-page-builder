@@ -63,7 +63,8 @@ class AiEndpointTest {
             context.registerBean(run.halo.aipagebuilder.theme.ThemeContextService.class);
             context.registerBean(run.halo.aipagebuilder.page.PageService.class,
                 () -> mock(run.halo.aipagebuilder.page.PageService.class));
-            for (var type : List.of("SiteReferenceTools", "ContentReferenceTools", "WebReferenceTools")) {
+            for (var type : List.of("SiteReferenceTools", "ContentReferenceTools", "WebReferenceTools",
+                "ApiReferenceTools")) {
                 var referenceType = loader.loadClass("run.halo.aipagebuilder.ai." + type);
                 context.getBeanFactory().registerSingleton(type, mock(referenceType));
             }

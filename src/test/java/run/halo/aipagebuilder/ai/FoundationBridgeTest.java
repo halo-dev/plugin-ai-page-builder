@@ -49,7 +49,7 @@ class FoundationBridgeTest {
             .containsExactly("get_theme_context", "read_current_page", "update_page_title", "patch_current_page", "update_current_page",
                 "ask_user", "list_theme_files", "read_theme_file", "list_posts", "list_single_pages",
                 "list_ai_pages", "read_ai_page", "get_site_profile", "get_navigation", "read_content", "search_attachments",
-                "fetch_webpage");
+                "fetch_webpage", "search_public_apis", "get_public_api");
         assertThat(request.get().getTools()).allSatisfy(tool -> assertThat(tool.getExecutor()).isNotNull());
         assertThat(request.get().getStopWhen()).isNotNull();
         assertThat(request.get().getMaxRetries()).isZero();
@@ -59,6 +59,30 @@ class FoundationBridgeTest {
         setup(Flux.empty());
         assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy).blockLast())
             .isInstanceOf(AiGenerationException.class);
+    }
+
+    @Test
+    void executesPublicApiToolsThroughExistingReferenceBudget() {
+        var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var session = mock(PageReferenceTools.Session.class);
+        var copy = copy();
+        copy.references(session);
+        var before = copy.document();
+        bridge.chat("model", java.util.List.of(), "最新文章", copy).blockLast();
+        for (var name : java.util.List.of("search_public_apis", "get_public_api")) {
+            var arguments = java.util.Map.<String, Object>of("query", "posts");
+            var expected = java.util.Map.<String, Object>of("items", java.util.List.of());
+            when(session.execute(name, arguments)).thenReturn(Mono.just(expected));
+            var tool = captured.get().getTools().stream().filter(item -> name.equals(item.getName()))
+                .findFirst().orElseThrow();
+            var result = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                .input(arguments).build()).block();
+            assertThat(result).isEqualTo(expected);
+        }
+        assertThat(copy.document()).isEqualTo(before);
+        assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
+            .contains("search_public_apis", "get_public_api");
+        assertThat(captured.get().getSystem()).contains("credentials: 'omit'", "get_public_api");
     }
 
     @Test

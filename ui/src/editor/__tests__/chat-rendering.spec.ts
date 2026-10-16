@@ -11,6 +11,64 @@ vi.mock('@halo-dev/components', () => ({
   VStatusDot: { props: ['animate'], template: '<span :data-animate="animate" />' },
 }))
 describe('streaming conversation rendering', () => {
+  it.each([
+    ['search_public_apis', '搜索公开接口'],
+    ['get_public_api', '读取接口文档'],
+  ])('renders %s while running, completed and restored from history', async (toolName, label) => {
+    let state = createUIMessageReducer()
+    state = applyUIMessageChunk(state, {
+      type: 'tool-input-start',
+      toolCallId: 'api',
+      toolName,
+    })
+    const wrapper = mount(ChatMessageParts, { props: { message: state.message, active: true } })
+    expect(wrapper.text()).toContain(label)
+    expect(wrapper.text()).toContain('进行中')
+    expect(wrapper.text()).not.toContain('处理页面')
+    expect(wrapper.find('.animate-spin').exists()).toBe(true)
+
+    state = applyUIMessageChunk(state, {
+      type: 'tool-input-available',
+      toolCallId: 'api',
+      toolName,
+      input: {},
+    })
+    state = applyUIMessageChunk(state, {
+      type: 'tool-output-available',
+      toolCallId: 'api',
+      toolName,
+      output: { items: [] },
+    })
+    await wrapper.setProps({ message: state.message, active: false })
+    expect(wrapper.text()).toContain(label)
+    expect(wrapper.text()).toContain('完成')
+    expect(wrapper.find('.animate-spin').exists()).toBe(false)
+    wrapper.unmount()
+
+    const restored = mount(ChatMessageParts, {
+      props: {
+        active: false,
+        message: {
+          id: 'history',
+          role: 'assistant',
+          parts: [
+            {
+              type: `tool-${toolName}`,
+              toolCallId: 'api',
+              toolName,
+              state: 'output-available',
+              input: {},
+              output: { summary: '读取完成' },
+            },
+          ],
+        },
+      },
+    })
+    expect(restored.text()).toContain(label)
+    expect(restored.text()).toContain('读取完成')
+    expect(restored.text()).not.toContain('处理页面')
+    restored.unmount()
+  })
   it('renders durable memory outcomes separately from page staging', async () => {
     const part = {
       type: 'tool-update_site_memory' as const,
