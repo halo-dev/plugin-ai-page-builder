@@ -81,7 +81,7 @@ function submit() {
                 ? 'border-accent bg-accent/10 text-accent'
                 : 'border-gray-200 text-gray-500 hover:bg-gray-50'
             "
-            title="开启后页面套用主题的页头页尾与基础样式"
+            v-tooltip="'开启后页面套用主题的页头页尾与基础样式'"
             @click="themeLayout = !themeLayout"
           >
             主题布局
