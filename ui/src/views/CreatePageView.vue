@@ -12,7 +12,7 @@ const router = useRouter()
   <VPageHeader title="新建页面">
     <template #icon><IconAddCircle /></template>
     <template #actions>
-      <VButton type="secondary" @click="router.push({ name: 'AiPageBuilderPages' })">
+      <VButton ghost @click="router.push({ name: 'AiPageBuilderPages' })">
         <template #icon><IconArrowLeft /></template>
         返回列表
       </VButton>
