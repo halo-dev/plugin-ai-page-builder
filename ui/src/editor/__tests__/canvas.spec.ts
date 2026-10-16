@@ -14,10 +14,8 @@ vi.mock('../../api/clients', () => ({
   pagePreviewUrl: (name: string) =>
     `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/${name}/preview`,
 }))
-vi.mock('@halo-dev/components', () => ({
-  VButton: { template: '<button><slot /></button>' },
-  VModal: { template: '<div><slot /><slot name="footer" /></div>' },
-  VSpace: { template: '<div><slot /></div>' },
+vi.mock('../../components/ImageReplaceDropdown.vue', () => ({
+  default: { template: '<div><slot /></div>' },
 }))
 
 const document: PageDocument = {

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
-import { VButton, VModal, VSpace } from '@halo-dev/components'
 import IconClose from '~icons/mingcute/close-line'
 import IconZoomIn from '~icons/mingcute/zoom-in-line'
 import IconZoomOut from '~icons/mingcute/zoom-out-line'
+import ImageReplaceDropdown from './ImageReplaceDropdown.vue'
 import type { PageDocument } from '../api/generated'
 import { pagePreviewUrl, renderPagePreview } from '../api/clients'
 import { errorMessage } from '../utils/error'
@@ -110,10 +110,6 @@ const selectedPath = shallowRef<ElementPath>()
 const selected = shallowRef<HTMLElement>()
 const outline = shallowRef<Record<string, string>>()
 const box = shallowRef<{ left: number; top: number; width: number; height: number }>()
-const attachmentOpen = shallowRef(false)
-const attachment = shallowRef('')
-const attachmentPath = shallowRef<ElementPath>()
-const attachmentDocument = shallowRef<PageDocument>()
 let originalRootState: { classes: Set<string>; attributes: Map<string, string | null> } | undefined
 let removeListeners = () => {}
 let contentObserver: ResizeObserver | undefined
@@ -393,17 +389,9 @@ function apply(edit: CanvasEdit, path = selectedPath.value) {
 function valueOf(event: Event): string {
   return (event.target as HTMLInputElement).value
 }
-function openAttachment(path?: ElementPath) {
-  attachmentPath.value = path
-  attachmentDocument.value = props.document
-  attachment.value = ''
-  attachmentOpen.value = true
-}
-function applyAttachment() {
-  if (!attachment.value || !editable.value || attachmentDocument.value !== props.document) return
-  if (attachmentPath.value)
-    apply({ type: 'attribute', name: 'src', value: attachment.value }, attachmentPath.value)
-  attachmentOpen.value = false
+function replaceImage(url: string) {
+  if (!editable.value) return
+  apply({ type: 'attribute', name: 'src', value: url })
 }
 watch(
   stage,
@@ -540,14 +528,15 @@ onBeforeUnmount(() => {
                     :value="selected.getAttribute('alt') || ''"
                     @change="apply({ type: 'attribute', name: 'alt', value: valueOf($event) })"
                 /></label>
-                <button
-                  type="button"
-                  class="apb-btn-outline mb-2 h-7 w-full text-xs"
-                  :disabled="!editable"
-                  @click="openAttachment(selectedPath)"
-                >
-                  替换图片
-                </button>
+                <ImageReplaceDropdown class="mb-2 block w-full" @select="replaceImage">
+                  <button
+                    type="button"
+                    class="apb-btn-outline h-7 w-full text-xs"
+                    :disabled="!editable"
+                  >
+                    替换图片
+                  </button>
+                </ImageReplaceDropdown>
               </template>
               <template v-if="selected.localName === 'a'">
                 <label class="mb-2 flex flex-col gap-1 text-xs text-gray-600"
@@ -661,21 +650,5 @@ onBeforeUnmount(() => {
         >
       </div>
     </div>
-    <VModal v-if="attachmentOpen" title="选择附件图片" :width="560" @close="attachmentOpen = false">
-      <!-- Wrap conditional content in a stable container for VModal's default slot. -->
-      <div>
-        <FormKit v-model="attachment" type="attachment" label="图片" :accepts="['image/*']" />
-      </div>
-      <template #footer
-        ><VSpace
-          ><VButton
-            type="secondary"
-            :disabled="!attachment || !editable || attachmentDocument !== document"
-            @click="applyAttachment"
-            >应用图片</VButton
-          ><VButton @click="attachmentOpen = false">取消</VButton></VSpace
-        ></template
-      >
-    </VModal>
   </div>
 </template>
