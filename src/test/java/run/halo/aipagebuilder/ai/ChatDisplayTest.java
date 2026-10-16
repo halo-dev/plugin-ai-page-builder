@@ -45,6 +45,49 @@ class ChatDisplayTest {
     }
 
     @Test
+    void retainsFailedPublicApiDetailsAndSummaryInHistory() {
+        var catalog = org.mockito.Mockito.mock(PublicApiCatalog.class);
+        var ids = java.util.List.of("GET /missing", "GET /unavailable", "GET /ambiguous");
+        var items = java.util.List.of(
+            PublicApiCatalog.failure(ids.get(0), "not_found", "未找到接口"),
+            PublicApiCatalog.failure(ids.get(1), "unavailable", "契约不可用"),
+            PublicApiCatalog.failure(ids.get(2), "ambiguous", "接口存在歧义"));
+        org.mockito.Mockito.when(catalog.details(ids))
+            .thenReturn(Map.of("items", items, "partial", true));
+        var output = new ApiReferenceTools(catalog)
+            .execute("get_public_api", Map.of("ids", ids)).block();
+        var display = new ChatDisplay();
+        display.accept(Map.of("type", "tool-input-start", "toolCallId", "api",
+            "toolName", "get_public_api"));
+        display.accept(Map.of("type", "tool-output-available", "toolCallId", "api",
+            "output", output));
+
+        var parts = display.snapshot("completed");
+        assertThat(parts.getFirst().status()).isEqualTo("error");
+        assertThat(parts.getFirst().summary()).isEqualTo("已读取 0/3 项接口文档，3 项失败：未找到接口");
+        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("raw-contract-marker", "items");
+    }
+
+    @Test
+    void retainsPartiallySuccessfulPublicApiSummaryInHistory() {
+        var catalog = org.mockito.Mockito.mock(PublicApiCatalog.class);
+        var ids = java.util.List.of("GET /posts", "GET /missing");
+        org.mockito.Mockito.when(catalog.details(ids)).thenReturn(Map.of("items", java.util.List.of(
+            Map.of("id", ids.get(0), "status", "ok", "responses", "raw-contract-marker"),
+            PublicApiCatalog.failure(ids.get(1), "not_found", "未找到接口")), "partial", true));
+        var output = new ApiReferenceTools(catalog)
+            .execute("get_public_api", Map.of("ids", ids)).block();
+        var display = new ChatDisplay();
+        display.accept(Map.of("type", "tool-output-available", "toolCallId", "api",
+            "toolName", "get_public_api", "output", output));
+
+        var parts = display.snapshot("completed");
+        assertThat(parts.getFirst().status()).isEqualTo("completed");
+        assertThat(parts.getFirst().summary()).isEqualTo("已读取 1/2 项接口文档，1 项失败：未找到接口");
+        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("raw-contract-marker", "items");
+    }
+
+    @Test
     void retainsMemoryOutcomeWithoutConfusingItWithPageStaging() {
         var display = new ChatDisplay();
         display.accept(Map.of("type", "tool-input-start", "toolCallId", "m",

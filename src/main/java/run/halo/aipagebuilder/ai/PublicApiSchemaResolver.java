@@ -1,13 +1,19 @@
 package run.halo.aipagebuilder.ai;
 
+import com.fasterxml.jackson.annotation.JsonValue;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.util.LRUMap;
+import io.swagger.v3.core.converter.AnnotatedType;
+import io.swagger.v3.core.converter.ModelConverter;
+import io.swagger.v3.core.converter.ModelConverterContext;
 import io.swagger.v3.core.converter.ModelConverterContextImpl;
-import io.swagger.v3.core.converter.ModelConverters;
 import io.swagger.v3.core.jackson.ModelResolver;
 import io.swagger.v3.core.util.AnnotationsUtils;
 import io.swagger.v3.core.util.ObjectMapperFactory;
+import io.swagger.v3.core.util.PrimitiveType;
+import io.swagger.v3.core.util.ReflectionUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.enums.Explode;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
@@ -18,6 +24,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.models.Components;
 import java.lang.annotation.Annotation;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -49,10 +57,129 @@ final class PublicApiSchemaResolver {
 
         Resolution() {
             mapper.setTypeFactory(mapper.getTypeFactory().withCache(new LRUMap<>(16, 200)));
-            var converters = new ModelConverters();
-            List.copyOf(converters.getConverters()).forEach(converters::removeConverter);
-            converters.addConverter(new ModelResolver(mapper));
-            context = new ModelConverterContextImpl(converters.getConverters());
+            context = new ModelConverterContextImpl(new LocalModelResolver()) {
+                private final Map<String, JavaType> modelTypes = new LinkedHashMap<>();
+
+                @Override
+                public io.swagger.v3.oas.models.media.Schema resolve(AnnotatedType type) {
+                    // ReferenceTypeUtils otherwise constructs Class/Type via global Json.mapper().
+                    type.type(mapper.constructType(type.getType()));
+                    return super.resolve(type);
+                }
+
+                @Override
+                public void defineModel(String name, io.swagger.v3.oas.models.media.Schema model,
+                    AnnotatedType type, String previousName) {
+                    if (type != null && type.getType() != null) {
+                        var javaType = mapper.constructType(type.getType());
+                        var previous = modelTypes.putIfAbsent(name, javaType);
+                        if (previous != null && !previous.equals(javaType)) {
+                            throw new IllegalArgumentException("Conflicting API schema name '"
+                                + name + "': " + previous.toCanonical() + " and "
+                                + javaType.toCanonical());
+                        }
+                    }
+                    super.defineModel(name, model, type, previousName);
+                }
+            };
+        }
+
+        private final class LocalModelResolver extends ModelResolver {
+            private final Set<JavaType> inspected = new LinkedHashSet<>();
+
+            LocalModelResolver() {
+                super(mapper);
+            }
+
+            @Override
+            public io.swagger.v3.oas.models.media.Schema resolve(AnnotatedType annotatedType,
+                ModelConverterContext converterContext, Iterator<ModelConverter> chain) {
+                // ModelResolver also recurses directly, bypassing ModelConverterContext.
+                var type = mapper.constructType(annotatedType.getType());
+                annotatedType.type(type);
+                if (annotatedType.getCtxAnnotations() != null) {
+                    for (var annotation : annotatedType.getCtxAnnotations()) {
+                        safeAnnotation(annotation);
+                    }
+                }
+                if (inspected.add(type)) {
+                    var bean = mapper.getSerializationConfig().introspect(type);
+                    safeAnnotation(bean.getClassInfo().getAnnotation(Schema.class));
+                    safeAnnotation(bean.getClassInfo().getAnnotation(ArraySchema.class));
+                    for (var property : bean.findProperties()) {
+                        var member = property.getPrimaryMember();
+                        if (member != null) {
+                            var schema = member.getAnnotation(Schema.class);
+                            if (schema != null && schema.hidden()
+                                || member.hasAnnotation(io.swagger.v3.oas.annotations.Hidden.class)) {
+                                continue;
+                            }
+                            for (var annotation : member.annotations()) {
+                                safeAnnotation(annotation);
+                            }
+                        }
+                    }
+                    if (type.isEnumType()) {
+                        // Match Swagger: enabled fields take precedence, but methods include false.
+                        var valueType = Arrays.stream(type.getRawClass().getDeclaredFields())
+                            .filter(field -> field.isAnnotationPresent(JsonValue.class)
+                                && field.getAnnotation(JsonValue.class).value())
+                            .map(java.lang.reflect.Field::getType).findFirst()
+                            .orElseGet(() -> ReflectionUtils
+                                .getAnnotatedMethods(type.getRawClass(), JsonValue.class).stream()
+                                .map(java.lang.reflect.Method::getReturnType).findFirst().orElse(null));
+                        if (valueType != null && !safeGlobalType(valueType)) {
+                            throw new IllegalArgumentException(
+                                "Cannot safely resolve API enum @JsonValue type: "
+                                    + valueType.getName());
+                        }
+                    }
+                }
+                return super.resolve(annotatedType, converterContext, chain);
+            }
+        }
+
+        private void safeAnnotation(Annotation annotation) {
+            if (annotation instanceof ArraySchema array) {
+                // ModelResolver has raw-Class and context-free paths for array implementations.
+                if (!safeGlobalType(array.schema().implementation())) {
+                    throw new IllegalArgumentException(
+                        "Cannot safely resolve API DTO @ArraySchema implementation");
+                }
+                safeAnnotation(array.schema());
+                safeAnnotation(array.arraySchema());
+                safeAnnotation(array.contains());
+                safeAnnotation(array.unevaluatedItems());
+                for (var item : array.prefixItems()) {
+                    safeAnnotation(item);
+                }
+            } else if (annotation instanceof Schema schema) {
+                // AnnotationsUtils resolves these Classes before consulting the local context.
+                if (!safeGlobalTypes(schema.not(), schema.additionalPropertiesSchema(),
+                    schema.contentSchema(), schema.propertyNames(), schema._if(), schema._else(),
+                    schema.then(), schema.unevaluatedProperties())
+                    || !safeGlobalTypes(schema.oneOf()) || !safeGlobalTypes(schema.anyOf())
+                    || !safeGlobalTypes(schema.allOf())
+                    || Arrays.stream(schema.dependentSchemas())
+                        .anyMatch(item -> !safeGlobalType(item.value()))
+                    || Arrays.stream(schema.patternProperties())
+                        .anyMatch(item -> !safeGlobalType(item.value()))
+                    || Arrays.stream(schema.properties())
+                        .anyMatch(item -> !safeGlobalType(item.value()))) {
+                    throw new IllegalArgumentException(
+                        "Cannot safely resolve API @Schema class-valued composition");
+                }
+            }
+        }
+
+        private boolean safeGlobalTypes(Class<?>... types) {
+            return Arrays.stream(types).allMatch(this::safeGlobalType);
+        }
+
+        private boolean safeGlobalType(Class<?> type) {
+            // Only bootstrap scalars may enter Swagger's raw-Class/global-cache shortcuts.
+            return type == Void.class || type.getClassLoader() == null
+                && PrimitiveType.fromType(mapper.constructType(type)) != null;
         }
 
         Map<String, Object> resolve(Operation operation) {
@@ -170,6 +297,13 @@ final class PublicApiSchemaResolver {
 
         private Map<String, Object> schema(Schema annotation, ArraySchema array) {
             if (AnnotationsUtils.hasArrayAnnotation(array)) {
+                safeAnnotation(array.schema());
+                safeAnnotation(array.arraySchema());
+                safeAnnotation(array.contains());
+                safeAnnotation(array.unevaluatedItems());
+                for (var item : array.prefixItems()) {
+                    safeAnnotation(item);
+                }
                 var result = json(AnnotationsUtils.getArraySchema(array, components, null,
                     false, null, false, context).orElseThrow());
                 var items = schema(array.schema());
@@ -182,13 +316,22 @@ final class PublicApiSchemaResolver {
         }
 
         private Map<String, Object> schema(Schema annotation) {
+            safeAnnotation(annotation);
             var explicit = AnnotationsUtils.getSchemaFromAnnotation(annotation, components,
                 null, false, null, context).map(this::json).orElseGet(LinkedHashMap::new);
             if (!annotation.ref().isBlank() || annotation.implementation() == Void.class) {
                 return normalize(explicit);
             }
-            var inferred = json(AnnotationsUtils.resolveSchemaFromType(annotation.implementation(),
-                components, null, false, annotation, null, context));
+            // Passing JavaType to PrimitiveType avoids TypeFactory.defaultInstance() caching DTOs.
+            var type = mapper.constructType(annotation.implementation());
+            var primitive = PrimitiveType.fromType(type);
+            var model = primitive == null
+                ? context.resolve(new AnnotatedType(type).components(components).resolveAsRef(true))
+                : primitive.createProperty();
+            if (model == null) {
+                throw new IllegalArgumentException("Cannot resolve API schema: " + type);
+            }
+            var inferred = json(model);
             if (!annotation.type().isBlank() && !"object".equals(annotation.type())
                 && !annotation.type().equals(inferred.get("type"))) {
                 // An explicit primitive type must not inherit object properties or a model ref.

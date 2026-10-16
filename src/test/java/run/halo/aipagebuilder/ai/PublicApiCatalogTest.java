@@ -23,9 +23,14 @@ import org.mockito.ArgumentCaptor;
 import org.pf4j.PluginStateListener;
 import org.springdoc.webflux.core.fn.SpringdocRouteBuilder;
 import org.springframework.context.ApplicationContext;
+import org.springframework.http.MediaType;
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
+import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.web.reactive.function.server.HandlerStrategies;
 import org.springframework.web.reactive.function.server.RequestPredicates;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.RouterFunctions;
+import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import run.halo.app.plugin.SpringPluginManager;
 
@@ -68,6 +73,63 @@ class PublicApiCatalogTest {
         assertThat(items(catalog.search("queryPosts", 8)).getFirst())
             .containsEntry("operationId", "queryPosts");
         assertThat(items(catalog.search("doesNotExist", 8))).isEmpty();
+    }
+
+    @Test
+    void excludesHiddenOperationsFromSearchAndDetails() {
+        var path = "/apis/api.example.halo.run/v1alpha1/internal";
+        var hidden = SpringdocRouteBuilder.route().GET(path,
+            request -> ServerResponse.ok().build(),
+            operation -> operation.operationId("internalOperation").hidden(true)).build();
+        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("hidden", hidden));
+        assertThat(items(catalog.search("", 8))).isEmpty();
+        assertThat(items(catalog.details(List.of("GET " + path))).getFirst())
+            .containsEntry("status", "not_found");
+    }
+
+    @Test
+    void preservesQueryAndMediaPredicatesAndMarksContractPartial() {
+        var path = "/apis/api.example.halo.run/v1alpha1/export";
+        var route = SpringdocRouteBuilder.route().GET(path,
+            RequestPredicates.queryParam("format", "json")
+                .and(RequestPredicates.accept(MediaType.APPLICATION_JSON)),
+            request -> ServerResponse.ok().build(), operation -> operation.operationId("exportItems")
+                .response(responseBuilder().implementation(Item.class))).build();
+        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("conditional", route));
+        var result = catalog.details(List.of("GET " + path));
+        var detail = items(result).getFirst();
+        assertThat(detail).containsEntry("status", "ok").containsEntry("partial", true);
+        assertThat(result).containsEntry("partial", true);
+        assertThat(detail.get("routeConditions")).isEqualTo(Map.of(
+            "queryParams", Map.of("format", "json"),
+            "produces", List.of("application/json")));
+        assertThat((List<?>) detail.get("warnings")).isNotEmpty();
+        var readers = HandlerStrategies.withDefaults().messageReaders();
+        var withoutQuery = ServerRequest.create(MockServerWebExchange.from(
+            MockServerHttpRequest.get(path).accept(MediaType.APPLICATION_JSON).build()), readers);
+        var withQuery = ServerRequest.create(MockServerWebExchange.from(
+            MockServerHttpRequest.get(path + "?format=json")
+                .accept(MediaType.APPLICATION_JSON).build()), readers);
+        assertThat(route.route(withoutQuery).hasElement().block()).isFalse();
+        assertThat(route.route(withQuery).hasElement().block()).isTrue();
+    }
+
+    @Test
+    void preservesRequestContentTypeAlongsideSchemaWarnings() {
+        var path = "/apis/api.example.halo.run/v1alpha1/search";
+        var route = SpringdocRouteBuilder.route().POST(path,
+            RequestPredicates.contentType(MediaType.APPLICATION_JSON),
+            request -> ServerResponse.ok().build(), operation -> operation.operationId("searchItems")
+                .parameter(org.springdoc.core.fn.builders.parameter.Builder.parameterBuilder()
+                    .name("scope"))).build();
+        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("search", route));
+        var detail = items(catalog.details(List.of("POST " + path))).getFirst();
+        assertThat(detail.get("routeConditions"))
+            .isEqualTo(Map.of("consumes", List.of("application/json")));
+        assertThat(detail).containsEntry("partial", true);
+        assertThat((List<?>) detail.get("warnings"))
+            .anySatisfy(warning -> assertThat(warning.toString()).contains("location is unspecified"))
+            .anySatisfy(warning -> assertThat(warning.toString()).contains("routeConditions"));
     }
 
     @Test

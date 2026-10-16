@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import org.pf4j.PluginStateListener;
 import org.pf4j.PluginWrapper;
+import org.springdoc.core.fn.RouterFunctionData;
 import org.springdoc.core.fn.builders.operation.Builder;
 import org.springdoc.webflux.core.visitor.RouterFunctionVisitor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -89,6 +90,16 @@ public class PublicApiCatalog {
                     try {
                         var detail = new LinkedHashMap<>(summary(id, route, false));
                         detail.putAll(new PublicApiSchemaResolver().resolve(route.operation()));
+                        if (!route.conditions().isEmpty()) {
+                            detail.put("routeConditions", route.conditions());
+                            detail.put("partial", true);
+                            var warnings = new ArrayList<Object>((List<?>)
+                                detail.getOrDefault("warnings", List.of()));
+                            warnings.add("Route predicates impose additional request conditions; "
+                                + "routeConditions contains visitor metadata, "
+                                + "not a complete parameter schema");
+                            detail.put("warnings", warnings);
+                        }
                         detail.put("status", "ok");
                         detail.put("anonymousAccess", "unverified");
                         items.add(detail);
@@ -164,6 +175,7 @@ public class PublicApiCatalog {
                     partial = true;
                     warn(warnings, "接口元数据无法读取：" + bounded(data.getPath(), 180));
                 }
+                if (operation != null && operation.hidden()) continue;
                 if (data.getMethods() == null) {
                     partial = true;
                     continue;
@@ -174,11 +186,29 @@ public class PublicApiCatalog {
                     // The same router can be exposed by more than one aggregate bean.
                     if (attribute != null && candidates.stream()
                         .anyMatch(candidate -> candidate.attribute() == attribute)) continue;
-                    candidates.add(new Discovered(method.name(), data.getPath(), operation, attribute));
+                    candidates.add(new Discovered(method.name(), data.getPath(), operation,
+                        attribute, conditions(data)));
                 }
             }
         }
         return new Scan(routes, partial, warnings);
+    }
+
+    private static Map<String, Object> conditions(RouterFunctionData data) {
+        var result = new LinkedHashMap<String, Object>();
+        if (data.getQueryParams() != null && !data.getQueryParams().isEmpty()) {
+            result.put("queryParams", Map.copyOf(data.getQueryParams()));
+        }
+        if (data.getHeaders() != null && data.getHeaders().length > 0) {
+            result.put("headers", List.of(data.getHeaders()));
+        }
+        if (data.getConsumes() != null && data.getConsumes().length > 0) {
+            result.put("consumes", List.of(data.getConsumes()));
+        }
+        if (data.getProduces() != null && data.getProduces().length > 0) {
+            result.put("produces", List.of(data.getProduces()));
+        }
+        return Map.copyOf(result);
     }
 
     static boolean publicPath(String path) {
@@ -256,7 +286,8 @@ public class PublicApiCatalog {
 
     private record Snapshot(long generation, long createdAt, List<Map<String, Object>> items,
                             boolean partial, List<String> warnings) { }
-    private record Discovered(String method, String path, Operation operation, Object attribute) { }
+    private record Discovered(String method, String path, Operation operation, Object attribute,
+                              Map<String, Object> conditions) { }
     private record Scan(Map<String, List<Discovered>> routes, boolean partial, List<String> warnings) { }
     private record Match(Map<String, Object> item, int score) { }
 }

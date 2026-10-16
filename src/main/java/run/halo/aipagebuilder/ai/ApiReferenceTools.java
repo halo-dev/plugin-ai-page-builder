@@ -61,15 +61,51 @@ public class ApiReferenceTools {
         for (var id : ids) {
             items.add(PublicApiCatalog.failure(id, "unavailable", "接口契约超过本次返回预算，请缩小接口选择"));
         }
+        var fallbacks = List.copyOf(items);
         result.put("items", items);
         for (int i = 0; i < raw.size(); i++) {
             var fallback = items.set(i, raw.get(i));
+            summarizeDetails(result, items);
             if (bytes(result) > 64 * 1024) {
                 items.set(i, fallback);
                 result.put("partial", true);
+                summarizeDetails(result, items);
             }
         }
+        for (int i = items.size() - 1; bytes(result) > 64 * 1024 && i >= 0; i--) {
+            items.set(i, fallbacks.get(i));
+            result.put("partial", true);
+            summarizeDetails(result, items);
+        }
         return result;
+    }
+
+    private static void summarizeDetails(Map<String, Object> result, List<Object> items) {
+        long succeeded = items.stream()
+            .filter(item -> item instanceof Map<?, ?> value && "ok".equals(value.get("status")))
+            .count();
+        long failed = items.size() - succeeded;
+        var summary = "已读取 " + succeeded + "/" + items.size() + " 项接口文档";
+        if (failed > 0) {
+            summary += "，" + failed + " 项失败";
+            var reason = items.stream()
+                .filter(item -> item instanceof Map<?, ?> value
+                    && !"ok".equals(value.get("status")))
+                .map(item -> ((Map<?, ?>) item).get("error"))
+                .filter(String.class::isInstance).map(String.class::cast)
+                .findFirst().orElse("");
+            if (!reason.isBlank()) {
+                summary += "：" + reason.substring(0, Math.min(200, reason.length()));
+            }
+        } else if (Boolean.TRUE.equals(result.get("partial"))) {
+            summary += "（契约不完整）";
+        }
+        result.put("summary", summary);
+        if (succeeded == 0) {
+            result.put("error", summary);
+        } else {
+            result.remove("error");
+        }
     }
 
     private static int bytes(Map<String, Object> result) {

@@ -3,6 +3,11 @@ package run.halo.aipagebuilder.ai;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.type.TypeFactory;
+import com.fasterxml.jackson.databind.util.LookupCache;
+import io.swagger.v3.core.util.Json;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.Explode;
@@ -15,11 +20,13 @@ import io.swagger.v3.oas.annotations.media.ExampleObject;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-class PublicApiSchemaResolverTest {
+public class PublicApiSchemaResolverTest {
     private final PublicApiSchemaResolver resolver = new PublicApiSchemaResolver();
 
     @Test
@@ -172,6 +179,267 @@ class PublicApiSchemaResolverTest {
         assertThat(resolve("empty")).doesNotContainKey("partial");
     }
 
+    @Test
+    void rejectsDifferentTypesWithTheSameComponentName() {
+        assertThatThrownBy(() -> resolve("conflictingItems"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("Conflicting API schema name 'Item'")
+            .hasMessageContaining(Request.Item.class.getName())
+            .hasMessageContaining(Response.Item.class.getName());
+        assertThatThrownBy(() -> resolve("conflictingAliases"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("Conflicting API schema name 'Alias'");
+    }
+
+    @Test
+    void resolvesCoreHaloContentAndSearchModels() {
+        for (var type : List.of(run.halo.app.core.extension.content.Post.class,
+            run.halo.app.core.extension.content.Category.class,
+            run.halo.app.search.SearchOption.class, run.halo.app.search.SearchResult.class)) {
+            var operation = org.springdoc.core.fn.builders.operation.Builder.operationBuilder()
+                .operationId("coreModel")
+                .response(org.springdoc.core.fn.builders.apiresponse.Builder.responseBuilder()
+                    .implementation(type)).build().getOperation();
+            var contract = resolver.resolve(operation);
+            assertThat(map(map(contract.get("components")).get("schemas")))
+                .as(type.getName()).containsKey(type.getSimpleName());
+            assertThat(contract).doesNotContainKey("partial");
+        }
+    }
+
+    @Test
+    void keepsPluginTypesOutOfGlobalCachesOnSuccessAndFailure() throws Exception {
+        for (var fixture : List.of("pluginResponse", "pluginArray", "pluginNested",
+            "unsafeComposition", "unsafeArrayComposition", "unsafeDtoArray",
+            "unsafeEnumValue", "unsafeDisabledEnumValue", "unsafeDtoComposition",
+            "unsafeSchemaProperties")) {
+            var loader = new FixtureClassLoader();
+            var fixtures = loader.loadClass(PluginFixtures.class.getName());
+            var operation = fixtures.getDeclaredMethod(fixture).getAnnotation(Operation.class);
+            assertNoPluginTypesInGlobalCaches(loader);
+            if (fixture.startsWith("unsafe")) {
+                assertThatThrownBy(() -> resolver.resolve(operation))
+                    .as(fixture).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Cannot safely resolve API");
+            } else {
+                var result = resolver.resolve(operation);
+                var schemas = map(map(result.get("components")).get("schemas"));
+                assertThat(schemas).as(fixture).containsKey("PluginNode");
+                assertThat(map(map(schemas.get("PluginNode")).get("properties")))
+                    .containsKeys("title", "next");
+                assertThat(result).doesNotContainKey("partial");
+            }
+            assertNoPluginTypesInGlobalCaches(loader);
+        }
+    }
+
+    @Test
+    void allowsBootstrapSchemasAndIgnoresHiddenPropertiesWithoutCachingPluginTypes()
+        throws Exception {
+        var loader = new FixtureClassLoader();
+        var fixtures = loader.loadClass(PluginFixtures.class.getName());
+        assertNoPluginTypesInGlobalCaches(loader);
+        var contract = resolver.resolve(fixtures.getDeclaredMethod("safeAnnotations")
+            .getAnnotation(Operation.class));
+        var schemas = map(map(contract.get("components")).get("schemas"));
+        var properties = map(map(schemas.get("PluginSafeAnnotations")).get("properties"));
+        assertThat(properties).containsOnlyKeys("values");
+        assertThat(map(map(properties.get("values")).get("items")))
+            .containsEntry("type", "string");
+        var composition = resolver.resolve(fixtures.getDeclaredMethod("primitiveComposition")
+            .getAnnotation(Operation.class));
+        var response = map(map(composition.get("responses")).get("default"));
+        var schema = map(map(map(response.get("content")).get("*/*")).get("schema"));
+        assertThat((List<?>) schema.get("oneOf")).hasSize(2);
+        assertThat(map(((List<?>) schema.get("oneOf")).getFirst()))
+            .containsEntry("type", "string");
+        assertThat(map(((List<?>) schema.get("oneOf")).get(1)))
+            .containsEntry("type", "integer");
+        assertNoPluginTypesInGlobalCaches(loader);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void assertNoPluginTypesInGlobalCaches(ClassLoader loader) throws Exception {
+        var field = TypeFactory.class.getDeclaredField("_typeCache");
+        field.setAccessible(true);
+        for (var factory : List.of(TypeFactory.defaultInstance(), Json.mapper().getTypeFactory())) {
+            var cache = (LookupCache<Object, JavaType>) field.get(factory);
+            var retained = new ArrayList<String>();
+            cache.contents((key, value) -> {
+                if (hasPluginType(value, loader)) {
+                    retained.add(value.toCanonical());
+                }
+            });
+            assertThat(retained).as("global cache plugin types").isEmpty();
+        }
+    }
+
+    private static boolean hasPluginType(JavaType type, ClassLoader loader) {
+        if (type.getRawClass().getClassLoader() == loader) {
+            return true;
+        }
+        for (int index = 0; index < type.containedTypeCount(); index++) {
+            if (hasPluginType(type.containedType(index), loader)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Reload fixture bytecode without compilation or GC timing; every iteration gets fresh classes.
+    private static final class FixtureClassLoader extends ClassLoader {
+        FixtureClassLoader() {
+            super(PublicApiSchemaResolverTest.class.getClassLoader());
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            if (!name.equals(PublicApiSchemaResolverTest.class.getName())
+                && !name.startsWith(PublicApiSchemaResolverTest.class.getName() + "$")) {
+                return super.loadClass(name, resolve);
+            }
+            var type = findLoadedClass(name);
+            if (type == null) {
+                try (var input = getResourceAsStream(name.replace('.', '/') + ".class")) {
+                    if (input == null) {
+                        throw new ClassNotFoundException(name);
+                    }
+                    var bytes = input.readAllBytes();
+                    type = defineClass(name, bytes, 0, bytes.length);
+                } catch (IOException exception) {
+                    throw new ClassNotFoundException(name, exception);
+                }
+            }
+            if (resolve) {
+                resolveClass(type);
+            }
+            return type;
+        }
+    }
+
+    static class Request {
+        static class Item {
+            public String query;
+        }
+    }
+
+    static class Response {
+        static class Item {
+            public int count;
+        }
+    }
+
+    @Schema(name = "Alias")
+    static class FirstAlias {
+        public String first;
+    }
+
+    @Schema(name = "Alias")
+    static class SecondAlias {
+        public int second;
+    }
+
+    public static class PluginNode {
+        public String title;
+        public PluginNode next;
+    }
+
+    public static class PluginEnvelope {
+        public List<PluginNode> nodes;
+        public Map<String, PluginNode> indexed;
+        @Schema(implementation = PluginNode.class)
+        public Object overridden;
+    }
+
+    public static class PluginArray {
+        @ArraySchema(schema = @Schema(implementation = PluginNode.class))
+        public List<Object> nodes;
+    }
+
+    public static class PluginComposition {
+        @Schema(oneOf = PluginNode.class)
+        public Object node;
+    }
+
+    public enum PluginEnum {
+        VALUE;
+
+        @JsonValue
+        public PluginNode value() {
+            return new PluginNode();
+        }
+    }
+
+    public enum PluginDisabledEnum {
+        VALUE;
+
+        @JsonValue(false)
+        public PluginNode value() {
+            return new PluginNode();
+        }
+    }
+
+    public static class PluginSafeAnnotations {
+        @ArraySchema(schema = @Schema(implementation = String.class))
+        public List<String> values;
+        @Schema(hidden = true, oneOf = PluginNode.class)
+        public Object internal;
+        @com.fasterxml.jackson.annotation.JsonIgnore
+        @Schema(oneOf = PluginNode.class)
+        public Object ignored;
+    }
+
+    public static class PluginFixtures {
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(implementation = PluginNode.class))))
+        void pluginResponse() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            array = @ArraySchema(schema = @Schema(implementation = PluginNode.class)))))
+        void pluginArray() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(implementation = PluginEnvelope.class))))
+        void pluginNested() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(oneOf = PluginNode.class))))
+        void unsafeComposition() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            array = @ArraySchema(schema = @Schema(allOf = PluginNode.class)))))
+        void unsafeArrayComposition() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(implementation = PluginArray.class))))
+        void unsafeDtoArray() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(implementation = PluginEnum.class))))
+        void unsafeEnumValue() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(implementation = PluginDisabledEnum.class))))
+        void unsafeDisabledEnumValue() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(implementation = PluginSafeAnnotations.class))))
+        void safeAnnotations() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(oneOf = {String.class, Integer.class}))))
+        void primitiveComposition() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(
+            schema = @Schema(implementation = PluginComposition.class))))
+        void unsafeDtoComposition() { }
+
+        @Operation(responses = @ApiResponse(content = @Content(schema = @Schema(
+            properties = @io.swagger.v3.oas.annotations.StringToClassMapItem(
+                key = "node", value = PluginNode.class)))))
+        void unsafeSchemaProperties() { }
+    }
+
     private Map<String, Object> resolve(String method) throws Exception {
         return resolver.resolve(Fixtures.class.getDeclaredMethod(method)
             .getAnnotation(Operation.class));
@@ -199,6 +467,18 @@ class PublicApiSchemaResolverTest {
     }
 
     static class Fixtures {
+        @Operation(requestBody = @RequestBody(content = @Content(
+            schema = @Schema(implementation = Request.Item.class))),
+            responses = @ApiResponse(content = @Content(
+                schema = @Schema(implementation = Response.Item.class))))
+        void conflictingItems() { }
+
+        @Operation(requestBody = @RequestBody(content = @Content(
+            schema = @Schema(implementation = FirstAlias.class))),
+            responses = @ApiResponse(content = @Content(
+                schema = @Schema(implementation = SecondAlias.class))))
+        void conflictingAliases() { }
+
         @Operation(parameters = {
             @Parameter(name = "tags", in = ParameterIn.QUERY, required = true,
                 style = ParameterStyle.FORM, explode = Explode.FALSE,

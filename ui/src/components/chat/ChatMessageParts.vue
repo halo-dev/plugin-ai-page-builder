@@ -80,7 +80,9 @@ const parts = computed(() =>
           status: failed
             ? part.toolName === 'update_site_memory'
               ? '未确认保存'
-              : '校验未通过'
+              : part.toolName === 'get_public_api'
+                ? '读取失败'
+                : '校验未通过'
             : done
               ? changing && output.staged === false
                 ? '内容未变化'
