@@ -156,21 +156,32 @@ function confirmUnpublish(item: PageSummary) {
 // title/description are persisted as a saved draft on 应用.
 const settingsDetail = ref<PageDetail>()
 const settingsSaving = ref(false)
+// Rapid clicks on different cards race their detail fetches; only the latest
+// request may open or replace the modal.
+let settingsGeneration = 0
 async function openSettings(item: PageSummary) {
+  const generation = ++settingsGeneration
   try {
-    settingsDetail.value = await queryClient.fetchQuery({
+    // Always refetch: another writer may have bumped the optimistic-lock version.
+    const detail = await queryClient.fetchQuery({
       queryKey: pageKeys.detail(item.name),
       queryFn: async () => (await aiPageBuilderApi.getPage({ name: item.name })).data,
-      staleTime: 30_000,
+      staleTime: 0,
     })
+    if (generation === settingsGeneration) settingsDetail.value = detail
   } catch (e) {
-    Toast.error(errorMessage(e))
+    if (generation === settingsGeneration) Toast.error(errorMessage(e))
   }
 }
-function updateSettingsDetail(result: PageDetail) {
-  settingsDetail.value = result
+function cacheSettingsDetail(result: PageDetail) {
   queryClient.setQueryData(pageKeys.detail(result.page.name), result)
   void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+}
+// A late response must not revive a closed modal or replace another page's
+// session; the cache is updated regardless so the list stays fresh.
+function applySettingsResult(result: PageDetail) {
+  cacheSettingsDetail(result)
+  if (settingsDetail.value?.page.name === result.page.name) settingsDetail.value = result
 }
 async function saveSettingsSlug(slug: string) {
   const current = settingsDetail.value
@@ -182,7 +193,7 @@ async function saveSettingsSlug(slug: string) {
       updatePageSlugRequest: { version: current.page.version, slug },
     })
   ).data
-  updateSettingsDetail(result)
+  applySettingsResult(result)
   return result
 }
 async function saveSettingsLayout(themeLayout: boolean) {
@@ -195,7 +206,7 @@ async function saveSettingsLayout(themeLayout: boolean) {
       updatePageLayoutRequest: { version: current.page.version, themeLayout },
     })
   ).data
-  updateSettingsDetail(result)
+  applySettingsResult(result)
   return result
 }
 async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'description'>>) {
@@ -217,9 +228,11 @@ async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'descri
         },
       })
     ).data
-    updateSettingsDetail(result)
-    settingsDetail.value = undefined
-    Toast.success('设置已保存')
+    cacheSettingsDetail(result)
+    if (settingsDetail.value?.page.name === current.page.name) {
+      settingsDetail.value = undefined
+      Toast.success('设置已保存')
+    }
   } catch (e) {
     Toast.error(errorMessage(e))
   } finally {
@@ -227,25 +240,32 @@ async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'descri
   }
 }
 function unpublishFromSettings() {
-  const current = settingsDetail.value
-  if (!current) return
+  const name = settingsDetail.value?.page.name
+  if (!name) return
   Dialog.warning({
     title: '取消发布此页面？',
     description: '访客将无法访问此页面。',
     confirmText: '确认',
     cancelText: '取消',
     onConfirm: async () => {
+      // Re-read: slug/layout saves may have bumped the version while the
+      // confirmation dialog was open.
+      const current = settingsDetail.value
+      if (current?.page.name !== name) return
+      settingsSaving.value = true
       try {
         const result = (
           await aiPageBuilderApi.unpublishPage({
-            name: current.page.name,
+            name,
             mutationRequest: { version: current.page.version },
           })
         ).data
-        updateSettingsDetail(result)
+        applySettingsResult(result)
         Toast.success('已取消发布')
       } catch (e) {
         Toast.error(errorMessage(e))
+      } finally {
+        settingsSaving.value = false
       }
     },
   })
@@ -402,6 +422,7 @@ function unpublishFromSettings() {
   />
   <PageSettings
     v-if="settingsDetail"
+    :key="settingsDetail.page.name"
     :document="settingsDetail.document"
     :slug="settingsDetail.page.slug"
     :theme-layout="settingsDetail.page.themeLayout"

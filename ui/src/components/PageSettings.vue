@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, useTemplateRef, watch } from 'vue'
+import { computed, reactive, ref, useTemplateRef, watch } from 'vue'
 import { Toast, VAlert, VButton, VModal, VSpace } from '@halo-dev/components'
 import type { PageDetail, PageDocument } from '../api/generated'
 import { errorMessage } from '../utils/error'
@@ -28,15 +28,23 @@ const saving = ref(false)
 const slugError = ref('')
 const layoutOn = ref(props.themeLayout)
 const layoutSaving = ref(false)
+// Serialize the modal's writes: every operation (slug, layout, apply,
+// unpublish via the disabled prop) shares the page's optimistic-lock version,
+// so no two of them may be in flight at once, and closing is blocked meanwhile.
+const busy = computed(() => saving.value || layoutSaving.value || props.disabled)
 watch(
   () => props.themeLayout,
   (value) => (layoutOn.value = value),
+)
+watch(
+  () => buffer.slug,
+  () => (slugError.value = ''),
 )
 // FormKit emits change before the v-model update lands, so take the target
 // value from update:model-value instead of reading the bound ref.
 async function toggleLayout(value: unknown) {
   const target = value === true
-  if (props.disabled || layoutSaving.value || target === props.themeLayout) return
+  if (busy.value || target === props.themeLayout) return
   layoutOn.value = target
   layoutSaving.value = true
   try {
@@ -49,7 +57,7 @@ async function toggleLayout(value: unknown) {
   }
 }
 async function submit() {
-  if (props.disabled || saving.value) return
+  if (busy.value) return
   const patch: Partial<Pick<PageDocument, 'title' | 'description'>> = {}
   if (buffer.title !== props.document.title) patch.title = buffer.title
   if (buffer.description !== (props.document.description || ''))
@@ -73,7 +81,7 @@ async function submit() {
 }
 </script>
 <template>
-  <VModal title="页面设置" :width="560" @close="!saving && emit('close')">
+  <VModal title="页面设置" :width="560" @close="!busy && emit('close')">
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
     <div>
       <VAlert v-if="slugError" type="error" :title="slugError" class="mb-4" />
@@ -114,7 +122,7 @@ async function submit() {
           :model-value="layoutOn"
           type="checkbox"
           name="themeLayout"
-          :disabled="disabled || saving || layoutSaving"
+          :disabled="busy"
           @update:model-value="toggleLayout"
         />
       </div>
@@ -124,14 +132,14 @@ async function submit() {
         <VSpace>
           <VButton
             type="secondary"
-            :loading="saving"
-            :disabled="disabled || saving"
+            :loading="saving || disabled"
+            :disabled="busy"
             @click="form?.node.submit()"
             >应用</VButton
           >
-          <VButton :disabled="saving" @click="emit('close')">取消</VButton>
+          <VButton :disabled="busy" @click="emit('close')">取消</VButton>
         </VSpace>
-        <VButton v-if="published" ghost :disabled="disabled || saving" @click="emit('unpublish')"
+        <VButton v-if="published" ghost :disabled="busy" @click="emit('unpublish')"
           >取消发布</VButton
         >
       </div>

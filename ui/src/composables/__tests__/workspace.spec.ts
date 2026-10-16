@@ -41,6 +41,7 @@ vi.mock('@halo-dev/components', () => ({
         h('button', { ...attrs, disabled: props.disabled }, slots.default?.()),
   }),
   VModal: defineComponent({
+    name: 'VModal',
     setup:
       (_, { slots }) =>
       () =>
@@ -383,10 +384,59 @@ describe('workspace integration', () => {
     expect(wrapper.text()).toContain('路径已存在')
     expect(wrapper.emitted('apply')).toBeUndefined()
     expect(wrapper.emitted('close')).toBeUndefined()
+    // Editing the slug clears the error before the next submit.
+    const slug = wrapper
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'slug')!
+    slug.vm.$emit('update:modelValue', 'company/new')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('路径已存在')
+    slug.vm.$emit('update:modelValue', 'company/about')
+    await flushPromises()
     wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
     expect(saveSlug).toHaveBeenNthCalledWith(2, 'company/about')
     expect(wrapper.emitted('apply')).toEqual([[{}]])
+    wrapper.unmount()
+  })
+  it('blocks submit and close while the layout save is in flight', async () => {
+    let resolveLayout!: (value: PageDetail) => void
+    const saveLayout = vi.fn<(themeLayout: boolean) => Promise<PageDetail | undefined>>(
+      () => new Promise((resolve) => (resolveLayout = resolve)),
+    )
+    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
+    const wrapper = mount(PageSettings, {
+      props: {
+        document: page.document,
+        slug: 'one',
+        themeLayout: true,
+        disabled: false,
+        published: false,
+        saveSlug,
+        saveLayout,
+      },
+      global: globals,
+    })
+    const fields = wrapper.findAllComponents({ name: 'FormKit' })
+    fields
+      .find((field) => field.attributes('name') === 'slug')!
+      .vm.$emit('update:modelValue', 'two')
+    fields
+      .find((field) => field.attributes('name') === 'themeLayout')!
+      .vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(saveLayout).toHaveBeenCalledWith(false)
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    expect(saveSlug).not.toHaveBeenCalled()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    wrapper.findComponent({ name: 'VModal' }).vm.$emit('close')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    resolveLayout(page)
+    await flushPromises()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    expect(saveSlug).toHaveBeenCalledWith('two')
     wrapper.unmount()
   })
   it('emits an empty settings patch when a legacy description is untouched', async () => {
