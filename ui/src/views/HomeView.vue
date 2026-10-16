@@ -22,9 +22,10 @@ import IconMore from '~icons/mingcute/more-2-line'
 import { pagePreviewUrl, aiPageBuilderApi } from '../api/clients'
 import { errorMessage } from '../utils/error'
 import { pageKeys, queryClient } from '../lib/query-client'
-import type { PageSummary } from '../api/generated'
+import type { PageDetail, PageDocument, PageSummary } from '../api/generated'
 import ClonePageModal from '../components/ClonePageModal.vue'
 import PagePreviewCard from '../components/PagePreviewCard.vue'
+import PageSettings from '../components/PageSettings.vue'
 import PublishPagePopper from '../components/PublishPagePopper.vue'
 import CreatePagePanel from '../components/create/CreatePagePanel.vue'
 
@@ -151,6 +152,104 @@ function confirmUnpublish(item: PageSummary) {
     onConfirm: () => unpublishMutation.mutate(item),
   })
 }
+// Settings modal edits the saved page directly: slug/layout apply immediately,
+// title/description are persisted as a saved draft on 应用.
+const settingsDetail = ref<PageDetail>()
+const settingsSaving = ref(false)
+async function openSettings(item: PageSummary) {
+  try {
+    settingsDetail.value = await queryClient.fetchQuery({
+      queryKey: pageKeys.detail(item.name),
+      queryFn: async () => (await aiPageBuilderApi.getPage({ name: item.name })).data,
+      staleTime: 30_000,
+    })
+  } catch (e) {
+    Toast.error(errorMessage(e))
+  }
+}
+function updateSettingsDetail(result: PageDetail) {
+  settingsDetail.value = result
+  queryClient.setQueryData(pageKeys.detail(result.page.name), result)
+  void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+}
+async function saveSettingsSlug(slug: string) {
+  const current = settingsDetail.value
+  if (!current) return undefined
+  if (slug === current.page.slug) return current
+  const result = (
+    await aiPageBuilderApi.updatePageSlug({
+      name: current.page.name,
+      updatePageSlugRequest: { version: current.page.version, slug },
+    })
+  ).data
+  updateSettingsDetail(result)
+  return result
+}
+async function saveSettingsLayout(themeLayout: boolean) {
+  const current = settingsDetail.value
+  if (!current) return undefined
+  if (themeLayout === current.page.themeLayout) return current
+  const result = (
+    await aiPageBuilderApi.updatePageLayout({
+      name: current.page.name,
+      updatePageLayoutRequest: { version: current.page.version, themeLayout },
+    })
+  ).data
+  updateSettingsDetail(result)
+  return result
+}
+async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'description'>>) {
+  const current = settingsDetail.value
+  if (!current) return
+  if (!Object.keys(patch).length) {
+    settingsDetail.value = undefined
+    return
+  }
+  settingsSaving.value = true
+  try {
+    const result = (
+      await aiPageBuilderApi.savePage({
+        name: current.page.name,
+        savePageRequest: {
+          version: current.page.version,
+          document: { ...current.document, ...patch },
+          source: 'manual',
+        },
+      })
+    ).data
+    updateSettingsDetail(result)
+    settingsDetail.value = undefined
+    Toast.success('设置已保存')
+  } catch (e) {
+    Toast.error(errorMessage(e))
+  } finally {
+    settingsSaving.value = false
+  }
+}
+function unpublishFromSettings() {
+  const current = settingsDetail.value
+  if (!current) return
+  Dialog.warning({
+    title: '取消发布此页面？',
+    description: '访客将无法访问此页面。',
+    confirmText: '确认',
+    cancelText: '取消',
+    onConfirm: async () => {
+      try {
+        const result = (
+          await aiPageBuilderApi.unpublishPage({
+            name: current.page.name,
+            mutationRequest: { version: current.page.version },
+          })
+        ).data
+        updateSettingsDetail(result)
+        Toast.success('已取消发布')
+      } catch (e) {
+        Toast.error(errorMessage(e))
+      }
+    },
+  })
+}
 </script>
 <template>
   <VPageHeader title="AI 页面构建">
@@ -230,15 +329,9 @@ function confirmUnpublish(item: PageSummary) {
                 <IconMore />
               </VButton>
               <template #popper>
-                <VDropdownItem v-close-popper :disabled="mutating" @click="cloneTarget = item">
-                  克隆页面
+                <VDropdownItem v-close-popper :disabled="mutating" @click="openSettings(item)">
+                  设置
                 </VDropdownItem>
-                <VDropdownItem
-                  v-close-popper
-                  :disabled="mutating"
-                  @click="exportMutation.mutate(item)"
-                  >导出草稿 ZIP</VDropdownItem
-                >
                 <PublishPagePopper
                   v-if="!item.publishedRevision"
                   :name="item.name"
@@ -266,6 +359,15 @@ function confirmUnpublish(item: PageSummary) {
                 >
                   取消发布
                 </VDropdownItem>
+                <VDropdownItem v-close-popper :disabled="mutating" @click="cloneTarget = item">
+                  克隆页面
+                </VDropdownItem>
+                <VDropdownItem
+                  v-close-popper
+                  :disabled="mutating"
+                  @click="exportMutation.mutate(item)"
+                  >导出草稿 ZIP</VDropdownItem
+                >
                 <VDropdownItem
                   v-close-popper
                   type="danger"
@@ -297,5 +399,18 @@ function confirmUnpublish(item: PageSummary) {
     :page="cloneTarget"
     @close="cloneTarget = undefined"
     @created="cloned"
+  />
+  <PageSettings
+    v-if="settingsDetail"
+    :document="settingsDetail.document"
+    :slug="settingsDetail.page.slug"
+    :theme-layout="settingsDetail.page.themeLayout"
+    :save-slug="saveSettingsSlug"
+    :save-layout="saveSettingsLayout"
+    :disabled="settingsSaving"
+    :published="!!settingsDetail.page.publishedRevision"
+    @close="settingsDetail = undefined"
+    @apply="applySettings"
+    @unpublish="unpublishFromSettings"
   />
 </template>
