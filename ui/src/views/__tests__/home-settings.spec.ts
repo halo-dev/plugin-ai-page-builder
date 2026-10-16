@@ -291,6 +291,88 @@ describe('page settings from the list', () => {
     })
     wrapper.unmount()
   })
+  it('keeps only edited fields when retrying after a conflict refresh', async () => {
+    mocks.save
+      .mockRejectedValueOnce({ response: { status: 409 }, message: 'Page changed' })
+      .mockResolvedValue({ data: detail('a', { version: 3 }) })
+    const wrapper = mountHome()
+    await flushPromises()
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    // Another session changed the slug and description; the refresh brings
+    // them in. The user only edited the title.
+    mocks.get.mockResolvedValue({
+      data: {
+        page: summary('a', { version: 2, slug: 'someone-elses-path' }),
+        document: {
+          mode: 'visual',
+          title: 'Page a',
+          description: 'other desc',
+          html: '',
+          css: '',
+          schemaVersion: 1,
+        },
+      },
+    })
+    const settings = wrapper.findComponent(PageSettings)
+    settings
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'title')!
+      .vm.$emit('update:modelValue', 'My title')
+    await flushPromises()
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    // The unedited slug/description must follow the refresh, not revert it.
+    expect(mocks.updateSlug).not.toHaveBeenCalled()
+    expect(mocks.save).toHaveBeenLastCalledWith({
+      name: 'a',
+      savePageRequest: {
+        version: 2,
+        document: expect.objectContaining({ title: 'My title', description: 'other desc' }),
+        source: 'manual',
+      },
+    })
+    wrapper.unmount()
+  })
+  it('ignores a conflict refresh that resolves after a newer save', async () => {
+    mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
+    const refresh = deferred<unknown>()
+    let getCalls = 0
+    mocks.get.mockImplementation(() => {
+      getCalls++
+      return getCalls === 1
+        ? Promise.resolve({ data: detail('a', { version: 1 }) })
+        : refresh.promise
+    })
+    mocks.updateLayout.mockResolvedValue({ data: detail('a', { version: 2, themeLayout: false }) })
+    const wrapper = mountHome()
+    await flushPromises()
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    const settings = wrapper.findComponent(PageSettings)
+    settings
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'slug')!
+      .vm.$emit('update:modelValue', 'taken-path')
+    await flushPromises()
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    // The conflict refresh (still v1) is in flight; the layout save lands v2.
+    expect(getCalls).toBe(2)
+    await settings.props('saveLayout')(false)
+    await flushPromises()
+    refresh.resolve({ data: detail('a', { version: 1 }) })
+    await flushPromises()
+    // The stale refresh must not roll the modal back: next save builds on v2.
+    await wrapper.findComponent(PageSettings).props('saveLayout')(true)
+    expect(mocks.updateLayout).toHaveBeenLastCalledWith({
+      name: 'a',
+      updatePageLayoutRequest: { version: 2, themeLayout: true },
+    })
+    wrapper.unmount()
+  })
   it('re-reads the latest version when unpublish is confirmed', async () => {
     mocks.list.mockResolvedValue({
       data: { items: [summary('a', { publishedRevision: 'r1' })], total: 1 },

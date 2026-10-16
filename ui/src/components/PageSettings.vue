@@ -42,6 +42,18 @@ watch(
   () => buffer.slug,
   () => (slugError.value = ''),
 )
+// A parent refresh (e.g. after a version conflict) swaps the document under
+// the form: fields the user never touched follow the fresh values, while
+// edited fields (buffer diverged from the old props) keep the user's input.
+watch(
+  () => [props.document, props.slug] as const,
+  ([doc, slug], [prevDoc, prevSlug]) => {
+    if (buffer.title === prevDoc.title) buffer.title = doc.title
+    if (buffer.description === (prevDoc.description || ''))
+      buffer.description = doc.description || ''
+    if (buffer.slug === (prevSlug ?? '')) buffer.slug = slug ?? ''
+  },
+)
 // FormKit emits change before the v-model update lands, so take the target
 // value from update:model-value instead of reading the bound ref.
 async function toggleLayout(value: unknown) {

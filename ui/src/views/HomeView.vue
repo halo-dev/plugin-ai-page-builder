@@ -202,8 +202,10 @@ async function refreshSettingsDetail(name: string, session: number) {
   try {
     const fresh = (await aiPageBuilderApi.getPage({ name })).data
     cacheSettingsDetail(fresh)
-    if (session === settingsSession && settingsDetail.value?.page.name === name)
-      settingsDetail.value = fresh
+    if (session === settingsSession && settingsDetail.value?.page.name === name) {
+      // A newer save may have landed while the refresh was in flight.
+      if (settingsDetail.value.page.version <= fresh.page.version) settingsDetail.value = fresh
+    }
   } catch {
     // Keep the stale snapshot; reopening the modal always refetches.
   }
