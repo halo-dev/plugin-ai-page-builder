@@ -13,7 +13,6 @@ const routes: (RouteRecordRaw | RouteRecordAppend)[] = [
       component: RouterView,
       meta: {
         title: 'AI 页面构建',
-        searchable: true,
         permissions: ['*'],
         menu: { name: 'AI 页面构建', group: 'content', icon: markRaw(IconGrid), priority: 30 },
       },
@@ -22,6 +21,10 @@ const routes: (RouteRecordRaw | RouteRecordAppend)[] = [
           path: '',
           name: 'AiPageBuilderPages',
           component: () => import('./views/HomeView.vue'),
+          // Global search pushes the whole route record, which vue-router
+          // resolves by name, so searchable must live on this leaf route;
+          // putting it on the RouterView parent would render an empty outlet.
+          meta: { title: 'AI 页面构建', searchable: true, permissions: ['*'] },
         },
         {
           path: 'new',

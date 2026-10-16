@@ -36,13 +36,21 @@ const error = ref('')
 const slugValid = computed(() => SLUG_PATTERN.test(slug.value) && slug.value.length <= 200)
 const previewUrl = computed(() => `${window.location.origin}/${slug.value}`)
 
+// Authoritative slug/version: whichever of props or this popper's own synced
+// state is newer, so display and publish always agree on the same base.
+function currentBase() {
+  return synced.value && synced.value.version > props.version
+    ? synced.value
+    : { slug: props.slug ?? null, version: props.version }
+}
+
 watch(shown, (open) => {
   // Never reset mid-request: reopening while a publish is in flight must not
   // clobber the slug the request snapshot below is based on.
   if (!open || pending.value) return
   // The slug may have changed through Page Settings while the popper was
-  // closed; re-sync from the latest props on every open.
-  slug.value = props.slug || synced.value?.slug || randomSlug()
+  // closed; re-sync from the freshest known state on every open.
+  slug.value = currentBase().slug || randomSlug()
   error.value = ''
 })
 
@@ -53,10 +61,7 @@ async function publish() {
   emit('pending', true)
   error.value = ''
   try {
-    const base =
-      synced.value && synced.value.version > props.version
-        ? synced.value
-        : { slug: props.slug ?? null, version: props.version }
+    const base = currentBase()
     let version = base.version
     if (requested !== base.slug) {
       const updated = (
