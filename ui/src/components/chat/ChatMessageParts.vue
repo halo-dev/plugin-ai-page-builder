@@ -62,6 +62,8 @@ const parts = computed(() =>
       read_content: '读取正文',
       search_attachments: '搜索附件',
       fetch_webpage: '读取网页信息',
+      search_public_apis: '搜索公开接口',
+      get_public_api: '读取接口文档',
       ask_user: '确认页面需求',
       update_site_memory: '记忆业务资料',
     }
@@ -78,7 +80,9 @@ const parts = computed(() =>
           status: failed
             ? part.toolName === 'update_site_memory'
               ? '未确认保存'
-              : '校验未通过'
+              : part.toolName === 'get_public_api'
+                ? '读取失败'
+                : '校验未通过'
             : done
               ? changing && output.staged === false
                 ? '内容未变化'

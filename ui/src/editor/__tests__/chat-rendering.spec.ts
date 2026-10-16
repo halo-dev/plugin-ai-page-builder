@@ -7,10 +7,128 @@ import {
 } from '@halo-dev/ai-foundation-sdk'
 import ChatMarkdown from '../../components/chat/ChatMarkdown.vue'
 import ChatMessageParts from '../../components/chat/ChatMessageParts.vue'
+import { conversationMessages } from '../../composables/usePageChat'
+
+vi.mock('../../api/clients', () => ({}))
+vi.mock('../../api/stream', () => ({}))
 vi.mock('@halo-dev/components', () => ({
   VStatusDot: { props: ['animate'], template: '<span :data-animate="animate" />' },
 }))
 describe('streaming conversation rendering', () => {
+  it.each([
+    ['search_public_apis', '搜索公开接口'],
+    ['get_public_api', '读取接口文档'],
+  ])('renders %s while running, completed and restored from history', async (toolName, label) => {
+    let state = createUIMessageReducer()
+    state = applyUIMessageChunk(state, {
+      type: 'tool-input-start',
+      toolCallId: 'api',
+      toolName,
+    })
+    const wrapper = mount(ChatMessageParts, { props: { message: state.message, active: true } })
+    expect(wrapper.text()).toContain(label)
+    expect(wrapper.text()).toContain('进行中')
+    expect(wrapper.text()).not.toContain('处理页面')
+    expect(wrapper.find('.animate-spin').exists()).toBe(true)
+
+    state = applyUIMessageChunk(state, {
+      type: 'tool-input-available',
+      toolCallId: 'api',
+      toolName,
+      input: {},
+    })
+    state = applyUIMessageChunk(state, {
+      type: 'tool-output-available',
+      toolCallId: 'api',
+      toolName,
+      output: { items: [] },
+    })
+    await wrapper.setProps({ message: state.message, active: false })
+    expect(wrapper.text()).toContain(label)
+    expect(wrapper.text()).toContain('完成')
+    expect(wrapper.find('.animate-spin').exists()).toBe(false)
+    wrapper.unmount()
+
+    const restored = mount(ChatMessageParts, {
+      props: {
+        active: false,
+        message: {
+          id: 'history',
+          role: 'assistant',
+          parts: [
+            {
+              type: `tool-${toolName}`,
+              toolCallId: 'api',
+              toolName,
+              state: 'output-available',
+              input: {},
+              output: { summary: '读取完成' },
+            },
+          ],
+        },
+      },
+    })
+    expect(restored.text()).toContain(label)
+    expect(restored.text()).toContain('读取完成')
+    expect(restored.text()).not.toContain('处理页面')
+    restored.unmount()
+  })
+  it.each([
+    {
+      status: 'error',
+      summary: '已读取 0/3 项接口文档，3 项失败：未找到接口',
+      items: [
+        { id: 'GET /missing', status: 'not_found', error: '未找到接口' },
+        { id: 'GET /unavailable', status: 'unavailable', error: '契约不可用' },
+        { id: 'GET /ambiguous', status: 'ambiguous', error: '接口存在歧义' },
+      ],
+    },
+    {
+      status: 'completed',
+      summary: '已读取 1/2 项接口文档，1 项失败：未找到接口',
+      items: [
+        { id: 'GET /posts', status: 'ok', responses: { '200': { description: 'Success' } } },
+        { id: 'GET /missing', status: 'not_found', error: '未找到接口' },
+      ],
+    },
+  ])('renders $status API details live and through history restoration', ({ status, summary, items }) => {
+    let state = createUIMessageReducer()
+    state = applyUIMessageChunk(state, {
+      type: 'tool-input-available',
+      toolCallId: 'api',
+      toolName: 'get_public_api',
+      input: { ids: items.map((item) => item.id) },
+    })
+    state = applyUIMessageChunk(state, {
+      type: 'tool-output-available',
+      toolCallId: 'api',
+      toolName: 'get_public_api',
+      output: { items, partial: true, summary, ...(status === 'error' ? { error: summary } : {}) },
+    })
+    const restored = conversationMessages([
+      {
+        runId: 'history',
+        actor: 'user',
+        createdAt: '2026-01-01T00:00:00Z',
+        prompt: '读取接口文档',
+        text: '',
+        tools: [],
+        status: 'completed',
+        parts: [{ type: 'tool', id: 'api', toolName: 'get_public_api', status, summary }],
+      },
+    ])[1]!
+    for (const message of [state.message, restored]) {
+      const wrapper = mount(ChatMessageParts, { props: { message, active: false } })
+      expect(wrapper.get('summary').text()).toContain('读取接口文档')
+      expect(wrapper.get('summary').text()).toContain(status === 'error' ? '读取失败' : '完成')
+      expect(wrapper.find('.text-red-500').exists()).toBe(status === 'error')
+      expect(wrapper.find('.text-emerald-600').exists()).toBe(status === 'completed')
+      expect(wrapper.get('details p').text()).toBe(summary)
+      expect(wrapper.get('details').attributes('open')).toBeUndefined()
+      expect(wrapper.text()).not.toContain('GET /')
+      wrapper.unmount()
+    }
+  })
   it('renders durable memory outcomes separately from page staging', async () => {
     const part = {
       type: 'tool-update_site_memory' as const,

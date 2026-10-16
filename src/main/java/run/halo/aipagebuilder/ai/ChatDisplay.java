@@ -45,10 +45,12 @@ final class ChatDisplay {
             if ("tool-output-available".equals(type)) {
                 var output = chunk.get("output") instanceof Map<?, ?> value ? value : Map.of();
                 boolean memory = PageMemoryTools.NAME.equals(name);
+                boolean apiDetails = "get_public_api".equals(name);
                 boolean invalid = Boolean.FALSE.equals(output.get("valid"))
-                    || memory && output.containsKey("error");
+                    || (memory || apiDetails) && output.containsKey("error");
                 status = invalid ? "error" : "completed";
-                summary = memory && output.get("summary") instanceof String message ? message
+                summary = (memory || apiDetails)
+                    && output.get("summary") instanceof String message ? message
                     : invalid ? String.valueOf(output.getOrDefault("error", null))
                     : Boolean.TRUE.equals(output.get("staged")) ? "修改已通过校验并暂存"
                     : Boolean.TRUE.equals(output.get("valid")) ? "内容未发生变化" : "读取完成";
