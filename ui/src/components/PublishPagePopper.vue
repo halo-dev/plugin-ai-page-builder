@@ -17,7 +17,11 @@ const props = withDefaults(
   }>(),
   { placement: 'bottom-end' },
 )
-const emit = defineEmits<{ published: [detail: PageDetail]; pending: [pending: boolean] }>()
+const emit = defineEmits<{
+  published: [detail: PageDetail]
+  updated: [detail: PageDetail]
+  pending: [pending: boolean]
+}>()
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/
 
@@ -33,31 +37,39 @@ const slugValid = computed(() => SLUG_PATTERN.test(slug.value) && slug.value.len
 const previewUrl = computed(() => `${window.location.origin}/${slug.value}`)
 
 watch(shown, (open) => {
-  if (!open) return
+  // Never reset mid-request: reopening while a publish is in flight must not
+  // clobber the slug the request snapshot below is based on.
+  if (!open || pending.value) return
   // The slug may have changed through Page Settings while the popper was
   // closed; re-sync from the latest props on every open.
-  slug.value = props.slug || randomSlug()
-  synced.value = null
+  slug.value = props.slug || synced.value?.slug || randomSlug()
   error.value = ''
 })
 
 async function publish() {
   if (pending.value || !slugValid.value) return
+  const requested = slug.value
   pending.value = true
   emit('pending', true)
   error.value = ''
   try {
-    const base = synced.value ?? { slug: props.slug ?? null, version: props.version }
+    const base =
+      synced.value && synced.value.version > props.version
+        ? synced.value
+        : { slug: props.slug ?? null, version: props.version }
     let version = base.version
-    if (slug.value !== base.slug) {
+    if (requested !== base.slug) {
       const updated = (
         await aiPageBuilderApi.updatePageSlug({
           name: props.name,
-          updatePageSlugRequest: { version, slug: slug.value },
+          updatePageSlugRequest: { version, slug: requested },
         })
       ).data
       version = updated.page.version
-      synced.value = { slug: slug.value, version }
+      synced.value = { slug: requested, version }
+      // Propagate the intermediate state so a close/reopen (or later editor
+      // mutations) never retries with the pre-update version.
+      emit('updated', updated)
     }
     const published = (
       await aiPageBuilderApi.publishPage({ name: props.name, mutationRequest: { version } })

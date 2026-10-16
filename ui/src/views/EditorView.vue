@@ -432,6 +432,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           :slug="detail.page.slug"
           :version="detail.page.version"
           @published="published"
+          @updated="published"
           @pending="publishPending = $event"
         >
           <button type="button" class="apb-btn-primary" :disabled="locked || dirty || !valid">

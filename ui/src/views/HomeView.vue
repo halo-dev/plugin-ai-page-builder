@@ -246,6 +246,7 @@ function confirmUnpublish(item: PageSummary) {
                   :version="item.version"
                   placement="left-start"
                   @published="published"
+                  @updated="published"
                 >
                   <VDropdownItem :disabled="mutating">发布</VDropdownItem>
                 </PublishPagePopper>
