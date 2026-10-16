@@ -18,6 +18,13 @@ const revisions: RevisionSummary[] = [
     source: 'manual',
     title: '未命名页面',
   },
+  {
+    name: 'rev-0',
+    createdAt: '2026-10-16T10:05:00Z',
+    createdBy: 'admin',
+    source: 'restore',
+    title: '恢复的版本',
+  },
 ]
 const revisionDocument: PageDocument = {
   schemaVersion: 2,
@@ -87,7 +94,7 @@ describe('HistoryPanel', () => {
     mockGetPageRevision.mockClear()
   })
 
-  it('auto-selects the latest revision and renders its preview iframe', async () => {
+  it('auto-selects the latest revision and renders its sandboxed preview iframe', async () => {
     const wrapper = mountPanel()
     await flushPromises()
     const iframe = wrapper.find('iframe')
@@ -95,17 +102,21 @@ describe('HistoryPanel', () => {
     expect(iframe.attributes('src')).toBe(
       '/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/about/revisions/rev-2/preview',
     )
+    // Same-origin inline previews must never reach the console via window.parent.
+    expect(iframe.attributes('sandbox')).toBe('allow-scripts')
     expect(wrapper.text()).toContain('图库')
   })
 
-  it('marks draft and published revisions with badges', async () => {
+  it('marks draft, published and restored revisions with badges', async () => {
     const wrapper = mountPanel()
     await flushPromises()
     const items = wrapper.findAll('nav button')
-    expect(items).toHaveLength(2)
+    expect(items).toHaveLength(3)
     expect(items[0]!.text()).toContain('当前草稿')
+    expect(items[0]!.text()).toContain('AI 生成')
     expect(items[1]!.text()).toContain('已发布')
     expect(items[1]!.text()).toContain('手动保存')
+    expect(items[2]!.text()).toContain('恢复')
   })
 
   it('shows source comparison on the diff tab', async () => {
@@ -119,6 +130,23 @@ describe('HistoryPanel', () => {
     expect(blocks.length).toBeGreaterThan(0)
     expect(wrapper.text()).toContain('当前标题')
     expect(wrapper.text()).toContain('图库')
+  })
+
+  it('shows an error with retry in the diff tab when the revision detail fails', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    // The query client retries once; fail both attempts for the next revision only.
+    mockGetPageRevision.mockRejectedValueOnce(new Error('boom'))
+    mockGetPageRevision.mockRejectedValueOnce(new Error('boom'))
+    const items = wrapper.findAll('nav button')
+    await items[2]!.trigger('click')
+    await flushPromises()
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await flushPromises()
+    const diffTab = wrapper.findAll('button[role="tab"]').find((tab) => tab.text() === '代码差异')!
+    await diffTab.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('版本内容加载失败')
   })
 
   it('emits restore with the selected revision name', async () => {

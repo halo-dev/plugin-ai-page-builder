@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/vue-query'
 import { Toast, VAlert, VButton, VEmpty, VLoading, VModal } from '@halo-dev/components'
 import IconSparkles from '~icons/mingcute/sparkles-line'
 import IconEdit from '~icons/mingcute/edit-2-line'
+import IconHistory from '~icons/mingcute/history-line'
 import IconLink from '~icons/mingcute/link-line'
 import IconExternal from '~icons/mingcute/external-link-line'
 import IconEye from '~icons/mingcute/eye-line'
@@ -67,14 +68,24 @@ const previewLink = computed(() =>
   selected.value ? revisionPreviewUrl(props.name, selected.value.name) : '',
 )
 const previewLoaded = shallowRef(false)
-watch(selected, () => (previewLoaded.value = false))
+// The iframe is recreated when the revision or tab changes; reset the loading veil for both.
+watch([selected, view], () => (previewLoaded.value = false))
+
+const SOURCE_LABELS: Record<string, string> = {
+  ai: 'AI 生成',
+  manual: '手动保存',
+  restore: '恢复',
+}
+const sourceLabel = (source: string) => SOURCE_LABELS[source] ?? source
+const sourceIcon = (source: string) =>
+  source === 'ai' ? IconSparkles : source === 'restore' ? IconHistory : IconEdit
 
 async function copyPreviewLink() {
   try {
     await navigator.clipboard.writeText(location.origin + previewLink.value)
     Toast.success('预览链接已复制，仅超级管理员可访问')
   } catch {
-    Toast.error('复制失败，请手动复制地址栏链接')
+    Toast.error('复制失败，请通过「在新窗口打开预览」后复制地址栏链接')
   }
 }
 function openPreview() {
@@ -126,9 +137,8 @@ function openPreview() {
               <span
                 class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600"
               >
-                <IconSparkles v-if="revision.source === 'ai'" />
-                <IconEdit v-else />
-                {{ revision.source === 'ai' ? 'AI 生成' : '手动保存' }} · {{ revision.createdBy }}
+                <component :is="sourceIcon(revision.source)" />
+                {{ sourceLabel(revision.source) }} · {{ revision.createdBy }}
               </span>
               <span
                 v-if="revision.name === draftRevision"
@@ -151,7 +161,7 @@ function openPreview() {
               <h3 class="truncate text-sm font-semibold text-gray-900">{{ selected.title }}</h3>
               <p class="truncate text-xs text-gray-500">
                 {{ new Date(selected.createdAt).toLocaleString() }} ·
-                {{ selected.source === 'ai' ? 'AI 生成' : '手动保存' }} · {{ selected.createdBy }}
+                {{ sourceLabel(selected.source) }} · {{ selected.createdBy }}
               </p>
             </div>
             <ApbSegmented v-model="view" :options="viewOptions" />
@@ -192,18 +202,31 @@ function openPreview() {
               <VLoading />
             </div>
             <FixedPreviewViewport :device="device" class="p-4">
-              <!-- 与编辑器「主题预览」同一信任级别：页面脚本需同源访问公开接口，故不加 sandbox。 -->
+              <!-- 内嵌预览必须隔离：同源无 sandbox 的 iframe 可通过 window.parent 操作已登录的
+                   Console。不透明源下脚本仍可运行，但无法携带凭据请求同源接口；需要完整
+                   保真（如依赖公开接口的页面）时使用「在新窗口打开预览」。 -->
               <iframe
                 :key="selected.name"
                 :src="previewLink"
                 class="block h-full w-full rounded-lg border-0 bg-white shadow-sm"
                 title="历史版本预览"
+                sandbox="allow-scripts"
+                referrerpolicy="no-referrer"
                 @load="previewLoaded = true"
               />
             </FixedPreviewViewport>
           </div>
           <div v-else class="min-h-0 flex-1 overflow-auto p-4">
             <VLoading v-if="detailQuery.isFetching.value" />
+            <VAlert
+              v-else-if="detailQuery.isError.value"
+              type="error"
+              title="版本内容加载失败"
+              description="无法获取该版本的源码，暂不能对比或恢复。"
+              ><template #actions
+                ><VButton @click="detailQuery.refetch()">重新加载</VButton></template
+              ></VAlert
+            >
             <template v-else-if="document"
               ><p class="mb-3 text-xs text-gray-500">当前编辑内容 → 选中版本</p>
               <p class="mb-3 text-xs text-gray-500">
