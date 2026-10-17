@@ -22,9 +22,10 @@ import IconMore from '~icons/mingcute/more-2-line'
 import { pagePreviewUrl, aiPageBuilderApi } from '../api/clients'
 import { errorMessage } from '../utils/error'
 import { pageKeys, queryClient } from '../lib/query-client'
-import type { PageSummary } from '../api/generated'
+import type { PageDetail, PageDocument, PageSummary } from '../api/generated'
 import ClonePageModal from '../components/ClonePageModal.vue'
 import PagePreviewCard from '../components/PagePreviewCard.vue'
+import PageSettings from '../components/PageSettings.vue'
 import PublishPagePopper from '../components/PublishPagePopper.vue'
 import CreatePagePanel from '../components/create/CreatePagePanel.vue'
 
@@ -151,6 +152,171 @@ function confirmUnpublish(item: PageSummary) {
     onConfirm: () => unpublishMutation.mutate(item),
   })
 }
+// Settings modal edits the saved page directly: slug/layout apply immediately,
+// title/description are persisted as a saved draft on 应用.
+const settingsDetail = ref<PageDetail>()
+const settingsSaving = ref(false)
+// Rapid clicks on different cards race their detail fetches; only the latest
+// request may open or replace the modal.
+let settingsGeneration = 0
+// Each modal session gets an id: a mutation started in one session must never
+// write its result into a later session, not even for the same page.
+let settingsSession = 0
+async function openSettings(item: PageSummary) {
+  const generation = ++settingsGeneration
+  try {
+    // Always refetch: another writer may have bumped the optimistic-lock version.
+    const detail = await queryClient.fetchQuery({
+      queryKey: pageKeys.detail(item.name),
+      queryFn: async () => (await aiPageBuilderApi.getPage({ name: item.name })).data,
+      staleTime: 0,
+    })
+    if (generation === settingsGeneration) {
+      settingsSession = generation
+      settingsDetail.value = detail
+    }
+  } catch (e) {
+    if (generation === settingsGeneration) Toast.error(errorMessage(e))
+  }
+}
+function cacheSettingsDetail(result: PageDetail) {
+  const key = pageKeys.detail(result.page.name)
+  const cached = queryClient.getQueryData<PageDetail>(key)
+  // A late response must not roll the cache back to an older version.
+  if (cached && cached.page.version > result.page.version) return
+  queryClient.setQueryData(key, result)
+  void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+}
+// Late results still update the cache, but only their own session's modal.
+function applySettingsResult(result: PageDetail, session: number) {
+  cacheSettingsDetail(result)
+  if (session === settingsSession) showSettingsResult(result)
+}
+// Within a session the modal's version stays monotonic: a late save response
+// must not overwrite a newer refresh (or vice versa).
+function showSettingsResult(result: PageDetail) {
+  if (
+    settingsDetail.value?.page.name === result.page.name &&
+    settingsDetail.value.page.version <= result.page.version
+  )
+    settingsDetail.value = result
+}
+const isConflict = (e: unknown) =>
+  (e as { response?: { status?: number } })?.response?.status === 409
+// After a version conflict the snapshot is stale; refetch so an in-modal retry
+// uses the current version. The keyed modal is not remounted, so the form
+// buffer survives.
+async function refreshSettingsDetail(name: string, session: number) {
+  try {
+    const fresh = (await aiPageBuilderApi.getPage({ name })).data
+    cacheSettingsDetail(fresh)
+    if (session === settingsSession) showSettingsResult(fresh)
+  } catch {
+    // Keep the stale snapshot; reopening the modal always refetches.
+  }
+}
+async function saveSettingsSlug(slug: string) {
+  const current = settingsDetail.value
+  if (!current) return undefined
+  if (slug === current.page.slug) return current
+  const session = settingsSession
+  try {
+    const result = (
+      await aiPageBuilderApi.updatePageSlug({
+        name: current.page.name,
+        updatePageSlugRequest: { version: current.page.version, slug },
+      })
+    ).data
+    applySettingsResult(result, session)
+    return result
+  } catch (e) {
+    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
+    throw e
+  }
+}
+async function saveSettingsLayout(themeLayout: boolean) {
+  const current = settingsDetail.value
+  if (!current) return undefined
+  if (themeLayout === current.page.themeLayout) return current
+  const session = settingsSession
+  try {
+    const result = (
+      await aiPageBuilderApi.updatePageLayout({
+        name: current.page.name,
+        updatePageLayoutRequest: { version: current.page.version, themeLayout },
+      })
+    ).data
+    applySettingsResult(result, session)
+    return result
+  } catch (e) {
+    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
+    throw e
+  }
+}
+async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'description'>>) {
+  const current = settingsDetail.value
+  if (!current) return
+  if (!Object.keys(patch).length) {
+    settingsDetail.value = undefined
+    return
+  }
+  const session = settingsSession
+  settingsSaving.value = true
+  try {
+    const result = (
+      await aiPageBuilderApi.savePage({
+        name: current.page.name,
+        savePageRequest: {
+          version: current.page.version,
+          document: { ...current.document, ...patch },
+          source: 'manual',
+        },
+      })
+    ).data
+    cacheSettingsDetail(result)
+    if (session === settingsSession && settingsDetail.value?.page.name === current.page.name)
+      settingsDetail.value = undefined
+    Toast.success('设置已保存')
+  } catch (e) {
+    Toast.error(errorMessage(e))
+    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
+  } finally {
+    settingsSaving.value = false
+  }
+}
+function unpublishFromSettings() {
+  const name = settingsDetail.value?.page.name
+  if (!name) return
+  const session = settingsSession
+  Dialog.warning({
+    title: '取消发布此页面？',
+    description: '访客将无法访问此页面。',
+    confirmText: '确认',
+    cancelText: '取消',
+    onConfirm: async () => {
+      // Re-read: slug/layout saves may have bumped the version while the
+      // confirmation dialog was open.
+      const current = settingsDetail.value
+      if (session !== settingsSession || current?.page.name !== name) return
+      settingsSaving.value = true
+      try {
+        const result = (
+          await aiPageBuilderApi.unpublishPage({
+            name,
+            mutationRequest: { version: current.page.version },
+          })
+        ).data
+        applySettingsResult(result, session)
+        Toast.success('已取消发布')
+      } catch (e) {
+        Toast.error(errorMessage(e))
+        if (isConflict(e)) void refreshSettingsDetail(name, session)
+      } finally {
+        settingsSaving.value = false
+      }
+    },
+  })
+}
 </script>
 <template>
   <VPageHeader title="AI 页面构建">
@@ -230,15 +396,9 @@ function confirmUnpublish(item: PageSummary) {
                 <IconMore />
               </VButton>
               <template #popper>
-                <VDropdownItem v-close-popper :disabled="mutating" @click="cloneTarget = item">
-                  克隆页面
+                <VDropdownItem v-close-popper :disabled="mutating" @click="openSettings(item)">
+                  设置
                 </VDropdownItem>
-                <VDropdownItem
-                  v-close-popper
-                  :disabled="mutating"
-                  @click="exportMutation.mutate(item)"
-                  >导出草稿 ZIP</VDropdownItem
-                >
                 <PublishPagePopper
                   v-if="!item.publishedRevision"
                   :name="item.name"
@@ -268,6 +428,15 @@ function confirmUnpublish(item: PageSummary) {
                 >
                   取消发布
                 </VDropdownItem>
+                <VDropdownItem v-close-popper :disabled="mutating" @click="cloneTarget = item">
+                  克隆页面
+                </VDropdownItem>
+                <VDropdownItem
+                  v-close-popper
+                  :disabled="mutating"
+                  @click="exportMutation.mutate(item)"
+                  >导出草稿 ZIP</VDropdownItem
+                >
                 <VDropdownItem
                   v-close-popper
                   type="danger"
@@ -299,5 +468,19 @@ function confirmUnpublish(item: PageSummary) {
     :page="cloneTarget"
     @close="cloneTarget = undefined"
     @created="cloned"
+  />
+  <PageSettings
+    v-if="settingsDetail"
+    :key="settingsDetail.page.name"
+    :document="settingsDetail.document"
+    :slug="settingsDetail.page.slug"
+    :theme-layout="settingsDetail.page.themeLayout"
+    :save-slug="saveSettingsSlug"
+    :save-layout="saveSettingsLayout"
+    :disabled="settingsSaving"
+    :published="!!settingsDetail.page.publishedRevision"
+    @close="settingsDetail = undefined"
+    @apply="applySettings"
+    @unpublish="unpublishFromSettings"
   />
 </template>
