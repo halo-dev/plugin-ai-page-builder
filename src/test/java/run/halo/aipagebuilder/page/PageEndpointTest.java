@@ -78,6 +78,58 @@ class PageEndpointTest {
         verifyNoInteractions(service, renderer);
     }
 
+    private static ServerRequest importRequest(byte[] bytes) {
+        var buffer = org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance.wrap(bytes);
+        return ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest
+                .post("/pages/import").contentType(MediaType.parseMediaType("application/zip"))
+                .body(reactor.core.publisher.Flux.just(buffer))),
+            HandlerStrategies.withDefaults().messageReaders());
+    }
+
+    @Test
+    void importsBinaryUploadWithAuthenticatedActor() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var document = PageArchive.read(bytes).document();
+        when(service.importPage(any(byte[].class), eq("admin"))).thenReturn(Mono.just(detail(document)));
+        assertThat(asAdmin(endpoint, importRequest(bytes)).block().statusCode()).isEqualTo(HttpStatus.OK);
+        verify(service).importPage(eq(bytes), eq("admin"));
+        verifyNoMoreInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "ROLE_editor"})
+    void importRequiresSuperAdministrator(String role) {
+        var request = importRequest(new byte[] {1});
+        var result = endpoint.endpoint().route(request).flatMap(handler -> handler.handle(request));
+        if (!role.isEmpty()) {
+            var authentication = new UsernamePasswordAuthenticationToken("editor", "",
+                List.of(new SimpleGrantedAuthority(role)));
+            result = result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication));
+        }
+        assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        verifyNoInteractions(service, renderer);
+    }
+
+    @Test
+    void oversizedUploadIsRejectedBeforeImport() {
+        var result = asAdmin(endpoint, importRequest(new byte[PageArchive.MAX_BYTES + 1]));
+        assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE));
+        verifyNoInteractions(service, renderer);
+    }
+
+    @Test
+    void emptyUploadIsRejectedBeforeImport() {
+        var request = ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest
+                .post("/pages/import").contentType(MediaType.parseMediaType("application/zip"))),
+            HandlerStrategies.withDefaults().messageReaders());
+        assertThatThrownBy(() -> asAdmin(endpoint, request).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(service, renderer);
+    }
+
     @Test
     void candidatePreviewUsesSameThemeAndCssAsGetWithoutSaving() {
         var resolver = mock(TemplateNameResolver.class);

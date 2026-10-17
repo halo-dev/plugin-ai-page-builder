@@ -9,6 +9,8 @@ import static org.springdoc.core.fn.builders.schema.Builder.schemaBuilder;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import org.springdoc.core.fn.builders.operation.Builder;
 import org.springdoc.webflux.core.fn.SpringdocRouteBuilder;
+import org.springframework.core.io.buffer.DataBufferLimitException;
+import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
@@ -67,6 +69,12 @@ public class PageEndpoint implements CustomEndpoint {
                 builder -> operation(builder, "createPage", PageDetail.class)
                     .requestBody(requestBodyBuilder().required(true)
                         .implementation(CreatePageRequest.class)))
+            .POST("/pages/import", request -> archiveBody(request)
+                    .flatMap(bytes -> actor().flatMap(actor -> json(service.importPage(bytes, actor)))),
+                builder -> operation(builder, "importPage", PageDetail.class)
+                    .requestBody(requestBodyBuilder().required(true).content(contentBuilder()
+                        .mediaType("application/zip")
+                        .schema(schemaBuilder().type("string").format("binary")))))
             .GET("/pages/{name}", request -> json(service.get(name(request))),
                 builder -> named(builder, "getPage", PageDetail.class))
             .PUT("/pages/{name}", request -> body(request, SavePageRequest.class)
@@ -90,7 +98,7 @@ public class PageEndpoint implements CustomEndpoint {
                 builder -> named(builder, "clonePage", PageDetail.class)
                     .requestBody(requestBodyBuilder().required(true).implementation(PageApi.ClonePageRequest.class)))
             .GET("/pages/{name}/export", request -> service.get(name(request)).flatMap(detail ->
-                    Mono.fromCallable(() -> PageExport.zip(detail.document()))
+                    Mono.fromCallable(() -> PageExport.zip(detail))
                         .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
                         .flatMap(bytes -> ServerResponse.ok().contentType(MediaType.parseMediaType("application/zip"))
                             .header("Content-Disposition", "attachment; filename=\"" + name(request) + ".zip\"")
@@ -195,6 +203,23 @@ public class PageEndpoint implements CustomEndpoint {
     private static org.springdoc.core.fn.builders.parameter.Builder nameParameter() {
         return parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
             .implementation(String.class).description("Stable page identifier");
+    }
+
+    private static Mono<byte[]> archiveBody(ServerRequest request) {
+        return DataBufferUtils.join(request.exchange().getRequest().getBody(), PageArchive.MAX_BYTES)
+            .map(buffer -> {
+                try {
+                    var bytes = new byte[buffer.readableByteCount()];
+                    buffer.read(bytes);
+                    return bytes;
+                } finally {
+                    DataBufferUtils.release(buffer);
+                }
+            })
+            .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "请选择 ZIP 文件")))
+            .onErrorMap(DataBufferLimitException.class, error ->
+                new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "ZIP 文件不能超过 4 MB"));
     }
 
     private static <T> Mono<T> body(ServerRequest request, Class<T> type) {
