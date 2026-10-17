@@ -70,7 +70,8 @@ const deviceOptions = [
 // or the adjacent list entry: a failed save can leave an orphan revision in the
 // chronologically sorted list, but spec.parentRevision always records the true parent.
 // The first revision has no parent, so an empty document is used as "before".
-const parentRevision = computed(() => detailQuery.data.value?.summary.parentRevision || undefined)
+// Taken from the list item (not the detail) so both detail queries can run in parallel.
+const parentRevision = computed(() => selected.value?.parentRevision || undefined)
 const previousDetailQuery = useQuery({
   queryKey: computed(() => pageKeys.revision(props.name, parentRevision.value || '')),
   queryFn: async () =>
