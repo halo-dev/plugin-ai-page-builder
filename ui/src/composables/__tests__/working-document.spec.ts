@@ -137,7 +137,7 @@ describe('working document', () => {
           js: 'document.body.dataset.ready = "yes"',
         },
       },
-      { signal: expect.any(AbortSignal), mute: true },
+      { signal: expect.any(AbortSignal) },
     )
     api.save.mockImplementation(async (args) => ({
       data: page(

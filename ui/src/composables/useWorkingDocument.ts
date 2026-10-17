@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, shallowRef } from 'vue'
-import { aiPageBuilderApi, aiPageBuilderChatApi, type SilentRequestConfig } from '../api/clients'
+import { aiPageBuilderApi, aiPageBuilderChatApi } from '../api/clients'
 import { errorMessage } from '../utils/error'
 import { pageKeys, queryClient } from '../lib/query-client'
 import type { PageDetail, PageDocument } from '../api/generated'
@@ -53,8 +53,6 @@ export function useWorkingDocument() {
     validationError.value = ''
     timer = setTimeout(async () => {
       controller = new AbortController()
-      // Failures surface in the inline validation banner; mute the global error toast.
-      const options: SilentRequestConfig = { signal: controller.signal, mute: true }
       try {
         await aiPageBuilderChatApi.validatePageContent(
           {
@@ -64,7 +62,10 @@ export function useWorkingDocument() {
               js: snapshot.js ?? '',
             },
           },
-          options,
+          // Not muted: a 401 here must still raise the login-expired dialog, since a
+          // failed validation disables save/publish and no other primary action could
+          // re-trigger authentication.
+          { signal: controller.signal },
         )
         if (request === sequence) validationState.value = 'valid'
       } catch (e) {
