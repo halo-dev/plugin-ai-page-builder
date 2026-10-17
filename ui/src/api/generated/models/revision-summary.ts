@@ -43,6 +43,12 @@ export interface RevisionSummary {
      * @type {string}
      * @memberof RevisionSummary
      */
+    'parentRevision'?: string;
+    /**
+     * 
+     * @type {string}
+     * @memberof RevisionSummary
+     */
     'source': string;
     /**
      * 

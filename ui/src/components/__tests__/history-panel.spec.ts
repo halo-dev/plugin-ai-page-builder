@@ -11,6 +11,7 @@ const revisions: RevisionSummary[] = [
     createdBy: 'admin',
     source: 'ai',
     title: '图库',
+    parentRevision: 'rev-1',
   },
   {
     name: 'rev-1',
@@ -18,6 +19,7 @@ const revisions: RevisionSummary[] = [
     createdBy: 'admin',
     source: 'manual',
     title: '未命名页面',
+    parentRevision: 'rev-0',
   },
   {
     name: 'rev-0',
@@ -67,7 +69,7 @@ const mockGetPageRevision = vi.fn<
   },
 }))
 const mockPreviewGet = vi.fn<(url: string, config?: unknown) => Promise<{ data: string }>>(
-  async () => ({ data: '<html><body>preview</body></html>' }),
+  async () => ({ data: '<html><head></head><body>preview</body></html>' }),
 )
 
 vi.mock('../../api/clients', () => ({
@@ -155,7 +157,10 @@ describe('HistoryPanel', () => {
     )
     const iframe = wrapper.find('iframe')
     expect(iframe.exists()).toBe(true)
-    expect(iframe.attributes('srcdoc')).toBe('<html><body>preview</body></html>')
+    // The base tag pins in-page anchors to about:srcdoc so they scroll in place.
+    expect(iframe.attributes('srcdoc')).toBe(
+      '<html><head><base href="about:srcdoc"></head><body>preview</body></html>',
+    )
     // Same-origin inline previews must never reach the console via window.parent:
     // same-origin for theme assets, but scripts stay disabled.
     expect(iframe.attributes('sandbox')).toBe('allow-same-origin')

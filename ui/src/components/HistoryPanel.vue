@@ -66,24 +66,21 @@ const deviceOptions = [
   { value: 'mobile', icon: IconMobile, title: '手机 390px' },
 ] as const
 
-// The diff tab compares against the revision's own previous version, not the current draft:
-// for the earliest revision there is no "before", so an empty document is used.
-const previousSummary = computed(() => {
-  const list = revisionsQuery.data.value
-  if (!selected.value || !list) return undefined
-  const index = list.findIndex((revision) => revision.name === selected.value!.name)
-  return index === -1 ? undefined : list[index + 1]
-})
+// The diff tab compares against the revision's own parent revision, not the current draft
+// or the adjacent list entry: a failed save can leave an orphan revision in the
+// chronologically sorted list, but spec.parentRevision always records the true parent.
+// The first revision has no parent, so an empty document is used as "before".
+const parentRevision = computed(() => detailQuery.data.value?.summary.parentRevision || undefined)
 const previousDetailQuery = useQuery({
-  queryKey: computed(() => pageKeys.revision(props.name, previousSummary.value?.name || '')),
+  queryKey: computed(() => pageKeys.revision(props.name, parentRevision.value || '')),
   queryFn: async () =>
     (
       await aiPageBuilderApi.getPageRevision({
         name: props.name,
-        revision: previousSummary.value!.name,
+        revision: parentRevision.value!,
       })
     ).data,
-  enabled: computed(() => !!previousSummary.value && view.value === 'diff'),
+  enabled: computed(() => !!parentRevision.value && view.value === 'diff'),
   queryClient,
 })
 const previousDocument = computed(() => previousDetailQuery.data.value?.document)
@@ -111,6 +108,18 @@ const previewQuery = useQuery({
   enabled: computed(() => !!selected.value && view.value === 'preview'),
   queryClient,
 })
+// srcdoc documents inherit the console's base URL, so in-page anchors (href="#section")
+// would resolve to the console and navigate the iframe away. Pin the base to about:srcdoc
+// so anchors scroll in place; root-absolute theme asset URLs are unaffected.
+const previewHtml = computed(() => {
+  const html = previewQuery.data.value
+  if (!html) return ''
+  const base = '<base href="about:srcdoc">'
+  const head = /<head[^>]*>/i.exec(html)
+  return head
+    ? html.slice(0, head.index + head[0].length) + base + html.slice(head.index + head[0].length)
+    : base + html
+})
 
 const SOURCE_LABELS: Record<string, string> = {
   ai: 'AI 生成',
@@ -137,7 +146,7 @@ function openPreview() {
 }
 function refetchDetails() {
   detailQuery.refetch()
-  if (previousSummary.value) previousDetailQuery.refetch()
+  if (parentRevision.value) previousDetailQuery.refetch()
 }
 </script>
 
@@ -285,7 +294,7 @@ function refetchDetails() {
                    可以同源加载，脚本不执行；需要完整交互保真时使用「在新窗口打开预览」。 -->
               <iframe
                 :key="selected.name"
-                :srcdoc="previewQuery.data.value"
+                :srcdoc="previewHtml"
                 class="block h-full w-full rounded-lg border-0 bg-white shadow-sm"
                 title="历史版本预览"
                 sandbox="allow-same-origin"
@@ -306,7 +315,7 @@ function refetchDetails() {
             >
             <template v-else-if="document"
               ><p class="mb-3 text-xs text-gray-500">
-                {{ previousSummary ? '上一版本 → 选中版本' : '首个版本，修改前无内容' }}
+                {{ parentRevision ? '上一版本 → 选中版本' : '首个版本，修改前无内容' }}
               </p>
               <p class="mb-3 text-xs text-gray-500">
                 标题：{{ previousDocument?.title || '无' }} → {{ document.title }}<br />描述：{{
