@@ -139,9 +139,12 @@ queryClient
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
-// First publish runs inside PublishPagePopper; block the AI panel while it is
-// in flight so a generation cannot commit against the pre-publish version.
+// First publish also saves title/path; lock editing until all writes finish.
 const publishPending = shallowRef(false)
+function onPublishPending(pending: boolean) {
+  publishPending.value = pending
+  busy.value = pending
+}
 const view = shallowRef<'visual' | 'source' | 'runtime'>('visual')
 const viewOptions = [
   { value: 'visual', label: '可视化', icon: IconEdit },
@@ -287,7 +290,7 @@ async function publish(unpublish = false) {
   }
 }
 function published(result: NonNullable<typeof detail.value>) {
-  detail.value = result
+  adopt(result)
   queryClient.setQueryData(pageKeys.detail(result.page.name), result)
 }
 async function restore(revision: string) {
@@ -429,11 +432,13 @@ function applySettings(value: Parameters<typeof patch>[0]) {
         <PublishPagePopper
           v-if="!detail.page.publishedRevision"
           :name="detail.page.name"
+          :title="detail.page.title"
           :slug="detail.page.slug"
           :version="detail.page.version"
+          :disabled="locked || dirty || !valid"
           @published="published"
           @updated="published"
-          @pending="publishPending = $event"
+          @pending="onPublishPending"
         >
           <button type="button" class="apb-btn-primary" :disabled="locked || dirty || !valid">
             <IconRocket class="text-sm" />

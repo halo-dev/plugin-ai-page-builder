@@ -26,6 +26,8 @@ public class PageChatCheckpoint extends AbstractExtension {
         private PageDocument document;
         private ChatApi.Turn turn;
         private boolean invalidUpdate;
+        private String slug;
+        private boolean invalidSlugUpdate;
         private boolean available;
         private int steps;
         private int toolCalls;

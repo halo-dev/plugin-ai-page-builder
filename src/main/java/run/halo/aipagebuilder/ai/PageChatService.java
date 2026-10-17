@@ -261,7 +261,8 @@ public class PageChatService {
         run.copy.questions(question -> ask(name, run, question));
         if (checkpoint != null) {
             var spec = checkpoint.getSpec();
-            run.copy.restore(spec.getDocument(), spec.isInvalidUpdate(), spec.getTurn().tools());
+            run.copy.restore(spec.getDocument(), spec.isInvalidUpdate(), spec.getSlug(),
+                spec.isInvalidSlugUpdate(), spec.getTurn().tools());
             run.questions.addAll(spec.getTurn().questions().stream()
                 .filter(question -> question.answeredAt() != null).toList());
             run.steers.addAll(spec.getTurn().steers());
@@ -581,12 +582,14 @@ public class PageChatService {
                 run.status = "committing";
             }
             return persistActive(name, run).then(Mono.defer(() -> {
-                if (Objects.equals(run.base.document(), run.copy.document())) {
+                var slugChanged = !Objects.equals(run.base.page().slug(), run.copy.slug());
+                if (Objects.equals(run.base.document(), run.copy.document()) && !slugChanged) {
                     return Mono.just(run.base);
                 }
                 run.saveStarted = true;
                 return pages.saveAi(name, run.request.version(), run.copy.document(),
-                    run.actor, run.request.runId(), run.base.page().draftRevision());
+                    run.actor, run.request.runId(), run.base.page().draftRevision(),
+                    slugChanged ? run.copy.slug() : null);
             })).flatMap(page -> {
                 run.status = "completed";
                 if (!Objects.equals(page.page().draftRevision(), run.base.page().draftRevision())) {
@@ -631,7 +634,9 @@ public class PageChatService {
                 snapshot.setRequest(run.request);
                 snapshot.setBaseRevision(run.base.page().draftRevision());
                 snapshot.setDocument(run.copy.document());
-                snapshot.setInvalidUpdate(run.copy.hasInvalidUpdate());
+                snapshot.setInvalidUpdate(run.copy.hasInvalidContentUpdate());
+                snapshot.setSlug(run.copy.slug());
+                snapshot.setInvalidSlugUpdate(run.copy.hasInvalidSlugUpdate());
                 snapshot.setTurn(run.turn());
                 snapshot.setSteps(run.copy.budget.steps());
                 snapshot.setToolCalls(run.copy.calls());
@@ -1066,7 +1071,8 @@ public class PageChatService {
             this.request = request;
             this.actor = actor;
             this.base = base;
-            this.copy = new PageWorkingCopy(base.document(), policy, themeContext);
+            this.copy = new PageWorkingCopy(base.document(), policy, themeContext,
+                base.page().slug(), base.page().publishedRevision() != null);
             this.copy.annotations(request.annotations() == null ? List.of() : request.annotations());
         }
 
