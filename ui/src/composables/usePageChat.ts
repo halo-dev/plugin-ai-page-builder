@@ -21,11 +21,12 @@ import type {
   PageChatSessionSummary,
   PageChatQuestion,
   PageChatAnswerItem,
+  PageChatRecovery,
 } from '../api/generated'
 
 import { authenticatedChatFetch } from '../api/stream'
 import type { PreparedPage } from '../editor/annotations'
-import { useStreamingPreview } from './useStreamingPreview'
+import { useStreamingPreview, type StreamingPreview } from './useStreamingPreview'
 
 const activeStatuses = ['running', 'committing', 'waiting_for_user']
 
@@ -90,6 +91,7 @@ export function conversationMessages(turns: ChatTurn[]): UIMessage[] {
         status: turn.status,
         error: turn.error,
         questions: turn.questions,
+        recovery: turn.recovery,
       },
     },
   ])
@@ -99,6 +101,8 @@ export function usePageChat(options: {
   name: string
   prepare: () => Promise<number | PreparedPage>
   baseline?: () => Pick<PageDetail['document'], 'html' | 'css' | 'js'> | undefined
+  dirty?: () => boolean
+  version?: () => number | undefined
   committed: (page: PageDetail) => void
   completed?: () => void
 }) {
@@ -113,6 +117,9 @@ export function usePageChat(options: {
   const statusMessage = shallowRef('')
   const error = shallowRef('')
   const notice = shallowRef('')
+  const recovery = shallowRef<PageChatRecovery>()
+  const checkpointPreview = shallowRef<StreamingPreview>()
+  const previewLoading = shallowRef(false)
   // Last used model survives reloads and is shared across pages.
   const modelName = useLocalStorage('ai-page-builder:model-name', '')
   const activeRun = shallowRef<ChatRun>()
@@ -152,6 +159,11 @@ export function usePageChat(options: {
       if (disposed || !activeRun.value) return
       if (part.type === 'data-page-committed') apply(part.data as PageDetail)
       if (part.type === 'data-page-staged') streamPreview.accept(part.data)
+      if (part.type === 'data-generation-recovery') {
+        const data = part.data as { message: string }
+        notice.value = data.message
+        streamPreview.restartAttempt()
+      }
       if (part.type === 'data-steer') {
         const data = part.data as { runId: string; index: number; text: string }
         if (data.runId === activeRun.value.runId)
@@ -231,6 +243,9 @@ export function usePageChat(options: {
     ).data
     if (disposed) return
     const switched = sessionId.value !== conversation.sessionId
+    if (switched || recovery.value?.checkpointVersion !== conversation.recovery?.checkpointVersion)
+      checkpointPreview.value = undefined
+    recovery.value = conversation.recovery ?? undefined
     sessionId.value = conversation.sessionId
     hasMore.value = conversation.hasMore
     nextBefore = conversation.nextBefore ?? undefined
@@ -250,8 +265,8 @@ export function usePageChat(options: {
     if (activeRun.value?.pendingQuestion) rememberQuestion(activeRun.value.pendingQuestion)
     if (last || switched) lastPrompt.value = last?.prompt || ''
     historicalAnnotations = !!last?.annotations?.length
-    if (last?.status === 'failed' || last?.status === 'interrupted')
-      error.value = last.error || '上次运行中断，可以重试。'
+    if (last && ['failed', 'interrupted', 'incomplete'].includes(last.status))
+      error.value = last.error || '上次运行中断，可以继续生成。'
   }
   const sessionBusy = computed(
     () => running.value || preparing.value || loading.value || loadingEarlier.value,
@@ -467,6 +482,8 @@ export function usePageChat(options: {
         modelName: modelName.value,
         sessionId: sessionId.value,
       }
+      checkpointPreview.value = undefined
+      recovery.value = undefined
       activeRun.value = { runId: request.runId, status: 'running' }
       lastPrompt.value = text
       chat.clearError()
@@ -475,6 +492,94 @@ export function usePageChat(options: {
       return !error.value
     } catch (e) {
       streamPreview.discard()
+      error.value = errorMessage(e)
+      if (activeRun.value) await reconcile()
+      return false
+    } finally {
+      preparing.value = false
+    }
+  }
+  const resumeBlocked = computed(() =>
+    options.dirty?.()
+      ? '当前有未保存的编辑，请先保存或撤销这些编辑，再检查恢复进度。'
+      : recovery.value?.blockedReason || '',
+  )
+  const canResume = computed(
+    () =>
+      available.value &&
+      recovered.value &&
+      !sessionBusy.value &&
+      !previewLoading.value &&
+      !!recovery.value?.canResume &&
+      !resumeBlocked.value,
+  )
+  async function loadCheckpoint() {
+    if (!sessionId.value) throw new Error('会话尚未加载。')
+    const id = sessionId.value
+    const currentRunId = activeRun.value?.runId
+    const checkpoint = (
+      await aiPageBuilderChatApi.getPageChatCheckpoint({
+        name: options.name,
+        sessionId: id,
+      })
+    ).data
+    if (disposed || id !== sessionId.value || currentRunId !== activeRun.value?.runId)
+      throw new Error('会话已变化，请重新载入。')
+    recovery.value = checkpoint.recovery
+    return checkpoint
+  }
+  async function viewCheckpoint() {
+    if (checkpointPreview.value) {
+      checkpointPreview.value = undefined
+      return
+    }
+    if (sessionBusy.value || previewLoading.value) return
+    previewLoading.value = true
+    try {
+      const saved = await loadCheckpoint()
+      checkpointPreview.value = {
+        runId: saved.recovery.sourceRunId,
+        toolCallId: 'checkpoint',
+        toolName: 'checkpoint',
+        source: '',
+        content: saved.document,
+        status: 'checkpoint',
+      }
+    } catch (e) {
+      error.value = errorMessage(e)
+    } finally {
+      previewLoading.value = false
+    }
+  }
+  async function resume() {
+    if (!canResume.value) return false
+    preparing.value = true
+    error.value = ''
+    notice.value = ''
+    try {
+      const saved = await loadCheckpoint()
+      if (resumeBlocked.value || !saved.recovery.canResume || options.dirty?.())
+        throw new Error(resumeBlocked.value || '恢复进度已变化，请重新载入。')
+      if (options.version && options.version() !== saved.request.version)
+        throw new Error('页面已变化，请重新载入后检查恢复进度。')
+      // Resuming must not run prepare(), which can save local edits and change the base revision.
+      request = {
+        ...saved.request,
+        sessionId: sessionId.value,
+        runId: crypto.randomUUID(),
+        resumeFromRunId: saved.recovery.sourceRunId,
+        checkpointVersion: saved.recovery.checkpointVersion,
+      }
+      checkpointPreview.value = undefined
+      recovery.value = undefined
+      activeRun.value = { runId: request.runId, status: 'running' }
+      streamPreview.seedBaseline(saved.document)
+      lastPrompt.value = request.prompt
+      chat.clearError()
+      await chat.sendMessage({ text: '继续生成' })
+      await reconcile()
+      return !error.value
+    } catch (e) {
       error.value = errorMessage(e)
       if (activeRun.value) await reconcile()
       return false
@@ -591,7 +696,14 @@ export function usePageChat(options: {
     deleteSession,
     loadEarlier,
     messages,
-    preview: streamPreview.preview,
+    preview: computed(() => streamPreview.preview.value || checkpointPreview.value),
+    recovery,
+    resumeBlocked,
+    canResume,
+    resume,
+    viewCheckpoint,
+    previewLoading,
+    viewingCheckpoint: computed(() => !!checkpointPreview.value),
     status: chat.status,
     loading,
     available,

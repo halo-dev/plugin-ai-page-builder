@@ -15,7 +15,7 @@ export interface StreamingPreview {
   toolName: string
   source: string
   content?: Content
-  status: 'generating' | 'validating' | 'waiting' | 'staged'
+  status: 'generating' | 'validating' | 'waiting' | 'staged' | 'checkpoint'
 }
 export function stagedPage(value: unknown, runId: string): StagedPage | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return
@@ -58,6 +58,7 @@ export function useStreamingPreview(options: {
   let latestSource = ''
   let controller: AbortController | undefined
   let previousMessageIds = new Set<string>()
+  let ignoredToolIds = new Set<string>()
   let discardedRun: string | undefined
   function cancelValidation() {
     sequence++
@@ -83,6 +84,7 @@ export function useStreamingPreview(options: {
     (runId) => {
       clear()
       discardedRun = undefined
+      ignoredToolIds = new Set()
       previousMessageIds = new Set((options.messages.value || []).map((message) => message.id))
       if (runId) baseline = options.baseline() ? { ...options.baseline()! } : undefined
     },
@@ -97,7 +99,9 @@ export function useStreamingPreview(options: {
       )
     const tools = parts.filter(
       (part): part is DeepReadonly<ToolPart> | ToolPart =>
-        'toolName' in part && ['update_current_page', 'patch_current_page'].includes(part.toolName),
+        'toolName' in part &&
+        !ignoredToolIds.has(part.toolCallId) &&
+        ['update_current_page', 'patch_current_page'].includes(part.toolName),
     )
     return tools[tools.length - 1]
   })
@@ -192,6 +196,23 @@ export function useStreamingPreview(options: {
     },
     { deep: true, flush: 'sync' },
   )
+  function seedBaseline(content: Content) {
+    baseline = { ...content }
+  }
+  function restartAttempt() {
+    cancelValidation()
+    clearTimeout(sourceTimer)
+    sourceTimer = undefined
+    // Keep only the server-validated content from completed tools; ignore truncated tool input.
+    baseline = accepted.value || baseline
+    preview.value = undefined
+    key = ''
+    ignoredToolIds = new Set(
+      (options.messages.value || []).flatMap((message) =>
+        message.parts.flatMap((part) => ('toolCallId' in part ? [part.toolCallId] : [])),
+      ),
+    )
+  }
   onScopeDispose(clear)
-  return { preview, accept, discard }
+  return { preview, accept, discard, seedBaseline, restartAttempt }
 }

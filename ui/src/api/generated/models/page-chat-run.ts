@@ -18,6 +18,9 @@
 import type { PageChatQuestion } from './page-chat-question';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { PageChatRecovery } from './page-chat-recovery';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { PageDetail } from './page-detail';
 
 /**
@@ -44,6 +47,12 @@ export interface PageChatRun {
      * @memberof PageChatRun
      */
     'pendingQuestion'?: PageChatQuestion;
+    /**
+     * 
+     * @type {PageChatRecovery}
+     * @memberof PageChatRun
+     */
+    'recovery'?: PageChatRecovery;
     /**
      * 
      * @type {string}

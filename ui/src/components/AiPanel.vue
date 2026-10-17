@@ -21,6 +21,8 @@ import type { StreamingPreview } from '../composables/useStreamingPreview'
 const props = defineProps<{
   pageName: string
   disabled: boolean
+  dirty?: boolean
+  pageVersion?: number
   prepare: () => Promise<number | PreparedPage>
   document: PageDetail['document']
   annotations: AnnotationDraft[]
@@ -59,6 +61,13 @@ const {
   loadEarlier,
   messages,
   preview,
+  recovery,
+  resumeBlocked,
+  canResume,
+  resume,
+  viewCheckpoint,
+  previewLoading,
+  viewingCheckpoint,
   loading,
   available,
   statusMessage,
@@ -86,12 +95,14 @@ const {
   name: props.pageName,
   prepare: props.prepare,
   baseline: () => props.document,
+  dirty: () => !!props.dirty,
+  version: () => props.pageVersion,
   committed: (page) => emit('committed', page),
   completed: () => emit('completed'),
 })
 function turnResult(role: string, metadata: unknown) {
   if (role !== 'assistant' || !metadata || typeof metadata !== 'object') return undefined
-  const { status, error, revision } = metadata as Record<string, unknown>
+  const { status, error, revision, recovery } = metadata as Record<string, unknown>
   if (status === 'completed' && typeof revision === 'string' && revision) {
     return { failed: false, text: '本轮草稿已保存', error: '' }
   }
@@ -100,14 +111,16 @@ function turnResult(role: string, metadata: unknown) {
       ? '运行失败'
       : status === 'cancelled'
         ? '已停止'
-        : status === 'interrupted'
-          ? '运行中断'
-          : ''
+        : status === 'incomplete'
+          ? '本轮未完成'
+          : status === 'interrupted'
+            ? '运行中断'
+            : ''
   if (!label) return undefined
   return {
     failed: status === 'failed' || status === 'interrupted',
-    text: `${label} · 本轮页面修改未保存`,
-    error: typeof error === 'string' ? error : '',
+    text: `${label} · ${recovery ? '进度已保留，草稿未更新' : '草稿未更新'}`,
+    error: recovery ? '' : typeof error === 'string' ? error : '',
   }
 }
 const visibleMessages = computed(() =>
@@ -460,7 +473,37 @@ const suggestions = [
         </div>
       </div>
       <div
-        v-if="error"
+        v-if="recovery && !running"
+        class="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
+        role="status"
+      >
+        <p>进度已保留，尚未写入草稿。继续生成会使用原模型，开始新一轮调用。</p>
+        <p v-if="resumeBlocked" class="mt-1">{{ resumeBlocked }}</p>
+        <p v-else-if="error" class="mt-1">{{ error }}</p>
+        <div class="mt-2 flex flex-wrap gap-3">
+          <button
+            type="button"
+            class="font-medium underline"
+            :disabled="disabled || !canResume"
+            @click="resume"
+          >
+            继续生成
+          </button>
+          <button
+            type="button"
+            class="underline"
+            :disabled="previewLoading || sessionBusy"
+            @click="viewCheckpoint"
+          >
+            {{ viewingCheckpoint ? '返回草稿' : '查看进度' }}
+          </button>
+          <button type="button" class="underline" :disabled="disabled || !canSend" @click="retry">
+            重新生成
+          </button>
+        </div>
+      </div>
+      <div
+        v-if="error && (!recovery || running)"
         class="mb-2 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-700"
         role="alert"
       >

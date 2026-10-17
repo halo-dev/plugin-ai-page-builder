@@ -15,6 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -34,6 +35,7 @@ import run.halo.aipagebuilder.page.PageApi;
 import run.halo.aipagebuilder.page.PageService;
 
 class PageChatServiceTest {
+    private final Map<String, run.halo.aipagebuilder.model.PageChatCheckpoint> checkpoints = new HashMap<>();
     private final ReactiveExtensionClient client = mock(ReactiveExtensionClient.class);
     private final PageService pages = mock(PageService.class);
     private final AiGateway gateway = mock(AiGateway.class);
@@ -47,6 +49,35 @@ class PageChatServiceTest {
 
     @BeforeEach
     void setup() {
+        var type = run.halo.aipagebuilder.model.PageChatCheckpoint.class;
+        when(client.fetch(eq(type), anyString())).thenAnswer(i -> Mono.defer(() ->
+            Mono.justOrEmpty(checkpoints.get(i.<String>getArgument(1))).map(JsonUtils::deepCopy)));
+        when(client.create(any(type))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
+            if (checkpoints.containsKey(value.getMetadata().getName())) throw new OptimisticLockingFailureException("CAS");
+            value.getMetadata().setVersion(1L);
+            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            return value;
+        }));
+        when(client.update(any(type))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
+            var previous = checkpoints.get(value.getMetadata().getName());
+            if (!previous.getMetadata().getVersion().equals(value.getMetadata().getVersion())) throw new OptimisticLockingFailureException("CAS");
+            value.getMetadata().setVersion(value.getMetadata().getVersion() + 1);
+            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            return value;
+        }));
+        when(client.delete(any(type))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
+            checkpoints.remove(value.getMetadata().getName());
+            return value;
+        }));
+        when(client.listAll(eq(type), any(), any())).thenAnswer(i -> Flux.defer(() -> {
+            ListOptions options = i.getArgument(1);
+            return Flux.fromIterable(checkpoints.values().stream().filter(value -> matches(
+                options.getFieldSelector().query(), field -> "spec.pageName".equals(field)
+                    ? value.getSpec().getPageName() : null)).map(JsonUtils::deepCopy).toList());
+        }));
         when(client.fetch(eq(PageChatSession.class), anyString())).thenAnswer(i -> Mono.defer(() ->
             Mono.justOrEmpty(stored.get(i.<String>getArgument(1))).map(JsonUtils::deepCopy)));
         when(client.create(any(PageChatSession.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
@@ -154,6 +185,63 @@ class PageChatServiceTest {
         verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
     }
 
+    @Test
+    void restartAndResumePreserveTheStagedSemanticPath() {
+        usePageWithoutPath();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.setSlug(Map.of("slug", "company/about")))
+                .thenMany(Flux.never());
+        });
+        service.start("page", request(), "admin").block();
+        var restarted = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class));
+        assertThat(restarted.result("page", runId).block().status()).isEqualTo("interrupted");
+        var saved = restarted.checkpoint("page", "page", "admin").block();
+        var next = UUID.randomUUID().toString();
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about")))
+            .thenReturn(Mono.just(fixture.changed));
+        doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            assertThat(copy.slug()).isEqualTo("company/about");
+            assertThat(copy.recoveryContext()).contains("company/about");
+            return Flux.empty();
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        restarted.start("page", resumeRequest(saved, next), "admin").block().blockLast();
+        assertThat(restarted.result("page", next).block().status()).isEqualTo("completed");
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void resumedPathValidationIsIndependentFromContentValidation(boolean invalidContent) {
+        usePageWithoutPath();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.setSlug(Map.of("slug", "UPPER")))
+                .then(invalidContent ? copy.edit(() -> copy.update(Map.of("html", "<script>bad()</script>"))) : Mono.empty())
+                .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
+        });
+        service.start("page", request(), "admin").block().blockLast();
+        var saved = service.checkpoint("page", "page", "admin").block();
+        var next = UUID.randomUUID().toString();
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("about")))
+            .thenReturn(Mono.just(fixture.changed));
+        doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            assertThat(copy.hasInvalidUpdate()).isTrue();
+            assertThat(copy.hasInvalidSlugUpdate()).isTrue();
+            assertThat(copy.hasInvalidContentUpdate()).isEqualTo(invalidContent);
+            return copy.edit(() -> copy.setSlug(Map.of("slug", "about")))
+                .doOnNext(ignored -> assertThat(copy.hasInvalidUpdate()).isEqualTo(invalidContent))
+                .then(copy.edit(() -> copy.update(Map.of("html", "<p>About</p>"))))
+                .doOnNext(ignored -> assertThat(copy.hasInvalidUpdate()).isFalse()).thenMany(Flux.empty());
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        service.start("page", resumeRequest(saved, next), "admin").block().blockLast();
+        assertThat(service.result("page", next).block().status()).isEqualTo("completed");
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("about"));
+    }
+
     private void usePageWithoutPath() {
         var base = fixture.base.page();
         when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(
@@ -179,7 +267,7 @@ class PageChatServiceTest {
             verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
             clock.advanceTimeBy(java.time.Duration.ofSeconds(1));
             var result = service.result("page", runId).block();
-            assertThat(result.status()).isEqualTo("failed");
+            assertThat(result.status()).isEqualTo("incomplete");
             assertThat(result.error()).isEqualTo(AiGenerationException.Reason.RUN_TIMEOUT.message);
             assertThat(service.session("page").block().turns().getFirst().error()).isEqualTo(result.error());
             assertThat(events).noneMatch(event -> "data-page-committed".equals(event.get("type")));
@@ -331,6 +419,76 @@ class PageChatServiceTest {
         assertThat(chat.cancel("page", runId).block().status()).isEqualTo("cancelled");
         assertThat(events.get().collectList().block()).extracting(event -> event.get("type"))
             .contains("abort");
+    }
+
+    @Test
+    void cancellationIsDurableBeforeAcknowledgementWhileCheckpointWriteIsPending() {
+        when(client.update(any(run.halo.aipagebuilder.model.PageChatCheckpoint.class)))
+            .thenReturn(Mono.never());
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.update(Map.of("html", "<p>pending checkpoint</p>")))
+                .thenMany(Flux.never());
+        });
+        service.start("page", request(), "admin").block();
+        assertThat(service.cancel("page", runId).block().status()).isEqualTo("cancelled");
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("cancelled");
+        assertThat(checkpoints).hasSize(1);
+        var restarted = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class));
+        var result = restarted.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("cancelled");
+        assertThat(result.recovery()).isNull();
+        assertThat(checkpoints).isEmpty();
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void failedCancellationPersistenceIsNotAcknowledgedAndCanBeRetried() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        service.start("page", request(), "admin").block();
+        var failures = new AtomicInteger();
+        when(client.update(any(PageChatSession.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            PageChatSession session = i.getArgument(0);
+            if (session.getSpec().getActive() != null
+                && "cancelled".equals(session.getSpec().getActive().status())
+                && failures.getAndIncrement() == 0) throw new IllegalStateException("storage unavailable");
+            session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            return session;
+        }));
+        assertThatThrownBy(() -> service.cancel("page", runId).block())
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("running");
+        assertThat(service.cancel("page", runId).block().status()).isEqualTo("cancelled");
+        assertThat(service.result("page", runId).block().status()).isEqualTo("cancelled");
+    }
+
+    @Test
+    void modelFailureDuringFailedCancellationPersistenceIsArchivedAsFailed() {
+        Sinks.Many<Map<String, Object>> model = Sinks.many().unicast().onBackpressureBuffer();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(model.asFlux());
+        service.start("page", request(), "admin").block();
+        var cancellationWrite = Sinks.<PageChatSession>one();
+        when(client.update(any(PageChatSession.class))).thenAnswer(i -> {
+            PageChatSession session = i.getArgument(0);
+            if (session.getSpec().getActive() != null
+                && "cancelled".equals(session.getSpec().getActive().status())) return cancellationWrite.asMono();
+            return Mono.fromSupplier(() -> {
+                session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+                stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+                return session;
+            });
+        });
+        var response = service.cancel("page", runId).toFuture();
+        assertThat(response).isNotDone();
+        model.tryEmitError(new AiGenerationException(AiGenerationException.Reason.CALL_FAILED));
+        cancellationWrite.tryEmitError(new IllegalStateException("storage unavailable"));
+        assertThat(response).isCompletedExceptionally();
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("failed");
+        assertThat(result.error()).isEqualTo(AiGenerationException.Reason.CALL_FAILED.message);
+        assertThat(result.recovery().canResume()).isTrue();
     }
 
     @Test
@@ -1031,6 +1189,207 @@ class PageChatServiceTest {
             questionInput().get("questions"), questionInput().get("questions"),
             questionInput().get("questions"), questionInput().get("questions")))))
             .hasMessageContaining("400");
+    }
+
+    @Test
+    void persistsValidatedEditsAndResumesWithFreshBudgetsWithoutCommittingPartialWork() {
+        org.mockito.Mockito.doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.update(Map.of("html", "<p>saved progress</p>")))
+                .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.STEP_LIMIT)));
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        service.start("page", request(), "admin").block().collectList().block();
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("incomplete");
+        assertThat(result.recovery().canResume()).isTrue();
+        assertThat(service.session("page").block().recovery()).isEqualTo(result.recovery());
+        var checkpoint = service.checkpoint("page", "page", "admin").block();
+        assertThat(checkpoint.document().html()).isEqualTo("<p>saved progress</p>");
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        var next = UUID.randomUUID().toString();
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), any()))
+            .thenReturn(Mono.just(fixture.changed));
+        org.mockito.Mockito.doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            assertThat(copy.document().html()).isEqualTo("<p>saved progress</p>");
+            assertThat(copy.calls()).isZero();
+            assertThat(copy.budget.steps()).isZero();
+            assertThat(i.<String>getArgument(2)).isEqualTo(request().prompt());
+            assertThat(copy.restored()).isTrue();
+            assertThat(copy.recoveryContext()).contains("Original request", "saved progress");
+            return Flux.empty();
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        service.start("page", resumeRequest(checkpoint, next), "admin").block().collectList().block();
+        assertThat(service.result("page", next).block().status()).isEqualTo("completed");
+        assertThat(checkpoints).isEmpty();
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), any());
+    }
+
+    @Test
+    void initialCheckpointFailureDoesNotPromiseRecoveryOrCallTheModel() {
+        when(client.create(any(run.halo.aipagebuilder.model.PageChatCheckpoint.class)))
+            .thenReturn(Mono.error(new IllegalStateException("storage unavailable")));
+        service.start("page", request(), "admin").block().collectList().block();
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("failed");
+        assertThat(result.error()).contains("进度保存失败", "重试").doesNotContain("从上次已保存");
+        assertThat(result.recovery()).isNull();
+        assertThat(checkpoints).isEmpty();
+        verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void checkpointFailurePreventsToolAcknowledgementAndDraftCommitButKeepsPreviousSnapshot() {
+        // Fail only snapshot writes, still allow making the last durable checkpoint available.
+        when(client.update(any(run.halo.aipagebuilder.model.PageChatCheckpoint.class))).thenAnswer(i -> {
+            run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
+            if (value.getSpec().getDocument().html().contains("not persisted")) return Mono.error(new IllegalStateException("storage"));
+            value.getMetadata().setVersion(value.getMetadata().getVersion() + 1);
+            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            return Mono.just(value);
+        });
+        org.mockito.Mockito.doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.update(Map.of("html", "<p>persisted</p>")))
+                .then(copy.edit(() -> copy.update(Map.of("html", "<p>not persisted</p>"))))
+                .onErrorResume(error -> Mono.empty()).thenMany(Flux.empty());
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        service.start("page", request(), "admin").block().collectList().block();
+        assertThat(service.result("page", runId).block().status()).isEqualTo("failed");
+        assertThat(service.checkpoint("page", "page", "admin").block().document().html())
+            .isEqualTo("<p>persisted</p>");
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void resumeRejectsChangedVersionOwnerModelAndStaleCheckpointWithoutCallingModel() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(
+            Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
+        service.start("page", request(), "admin").block().collectList().block();
+        var saved = service.checkpoint("page", "page", "admin").block();
+        var resume = resumeRequest(saved, UUID.randomUUID().toString());
+        org.mockito.Mockito.clearInvocations(gateway);
+        assertThatThrownBy(() -> service.start("page", resume, "other").block())
+            .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> service.start("page", new ChatApi.Request(resume.runId(), 1L,
+            "different-model", resume.prompt(), resume.baseHash(), resume.annotations(), "page",
+            runId, resume.checkpointVersion()), "admin").block()).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> service.start("page", new ChatApi.Request(resume.runId(), 1L,
+            resume.modelName(), resume.prompt(), resume.baseHash(), resume.annotations(), "page",
+            runId, -1L), "admin").block()).isInstanceOf(ResponseStatusException.class);
+        when(pages.get("page")).thenReturn(Mono.just(fixture.changed));
+        assertThat(service.checkpoint("page", "page", "admin").block().recovery().canResume()).isFalse();
+        assertThatThrownBy(() -> service.start("page", resume, "admin").block())
+            .isInstanceOf(ResponseStatusException.class);
+        verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void stickyInvalidUpdateSurvivesManualResumeAndCannotBeCommittedByStop() {
+        org.mockito.Mockito.doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.update(Map.of("html", "<p>valid</p>")))
+                .then(copy.edit(() -> copy.update(Map.of("html", "<script>bad()</script>"))))
+                .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        service.start("page", request(), "admin").block().collectList().block();
+        var saved = service.checkpoint("page", "page", "admin").block();
+        assertThat(saved.document().html()).isEqualTo("<p>valid</p>");
+        org.mockito.Mockito.doReturn(Flux.empty()).when(gateway).chat(anyString(), any(), anyString(), any());
+        var next = UUID.randomUUID().toString();
+        service.start("page", resumeRequest(saved, next), "admin").block().collectList().block();
+        assertThat(service.result("page", next).block().error())
+            .isEqualTo(AiGenerationException.Reason.INVALID_UPDATE.message);
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void restartExposesDurableProgressWithoutInvokingModelAndCancelledRunDeletesIt() {
+        org.mockito.Mockito.doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.update(Map.of("html", "<p>before restart</p>")))
+                .thenMany(Flux.never());
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        service.start("page", request(), "admin").block();
+        org.mockito.Mockito.clearInvocations(gateway);
+        var restarted = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class));
+        assertThat(restarted.result("page", runId).block().status()).isEqualTo("interrupted");
+        var saved = restarted.checkpoint("page", "page", "admin").block();
+        assertThat(saved.document().html()).isEqualTo("<p>before restart</p>");
+        assertThat(saved.recovery().canResume()).isTrue();
+        verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+        var next = UUID.randomUUID().toString();
+        var resume = resumeRequest(saved, next);
+        restarted.start("page", resume, "admin").block();
+        assertThat(restarted.start("page", resume, "admin").block()).isNotNull();
+        verify(gateway, times(1)).chat(anyString(), any(), anyString(), any());
+        restarted.cancel("page", next).block();
+        assertThat(checkpoints).isEmpty();
+    }
+
+    @Test
+    void resumedMemoryLoadsFreshFactsButDoesNotReuseHistoricalPromptAsWriteEvidence() {
+        var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
+        when(memories.load()).thenReturn(Mono.just(PageMemoryToolsTest.snapshot(1)));
+        var chat = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class), null, memories);
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(
+            Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
+        chat.start("page", new ChatApi.Request(runId, 1L, "model", "公司电话 0571-12345678"), "admin")
+            .block().blockLast();
+        var saved = chat.checkpoint("page", "page", "admin").block();
+        var next = UUID.randomUUID().toString();
+        org.mockito.Mockito.doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            assertThat(i.<String>getArgument(2)).contains("0571-12345678");
+            assertThat(copy.memoryReference()).doesNotContain(next + "/prompt", runId + "/prompt");
+            return copy.updateMemory(PageMemoryToolsTest.input(1, next + "/prompt", "0571-12345678"))
+                .doOnNext(output -> assertThat(output).containsKey("error"))
+                .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+        chat.start("page", resumeRequest(saved, next), "admin").block().blockLast();
+        verify(memories, times(2)).load();
+        verify(memories, never()).apply(any(), any(), any());
+    }
+
+    @Test
+    void sessionDeletionRemovesTheIndependentCheckpoint() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(
+            Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
+        service.start("page", request(), "admin").block().blockLast();
+        assertThat(checkpoints).hasSize(1);
+        service.deleteSession("page", "page", service.session("page").block().version()).block();
+        assertThat(checkpoints).isEmpty();
+        assertThat(service.session("page").block().recovery()).isNull();
+    }
+
+    @Test
+    void completedRunDoesNotExposeCheckpointWhileHaloGarbageCollectionIsPending() {
+        when(client.delete(any(run.halo.aipagebuilder.model.PageChatCheckpoint.class))).thenAnswer(i -> {
+            run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
+            value.getMetadata().setDeletionTimestamp(Instant.now());
+            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            return Mono.just(value);
+        });
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.update(Map.of("html", "<p>complete</p>"))).thenMany(Flux.empty());
+        });
+        service.start("page", request(), "admin").block().blockLast();
+        assertThat(checkpoints).hasSize(1);
+        assertThat(service.result("page", runId).block().recovery()).isNull();
+        assertThat(service.session("page").block().recovery()).isNull();
+        assertThatThrownBy(() -> service.checkpoint("page", "page", "admin").block())
+            .isInstanceOf(ResponseStatusException.class);
+    }
+
+    private ChatApi.Request resumeRequest(ChatApi.CheckpointDetail checkpoint, String next) {
+        var request = checkpoint.request();
+        return new ChatApi.Request(next, request.version(), request.modelName(), request.prompt(),
+            request.baseHash(), request.annotations(), "page", request.runId(),
+            checkpoint.recovery().checkpointVersion());
     }
 
     private void waitingGateway(Flux<Map<String, Object>> afterAnswer) {

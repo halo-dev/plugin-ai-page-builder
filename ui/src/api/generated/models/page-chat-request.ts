@@ -37,6 +37,12 @@ export interface PageChatRequest {
     'baseHash'?: string;
     /**
      * 
+     * @type {number}
+     * @memberof PageChatRequest
+     */
+    'checkpointVersion'?: number;
+    /**
+     * 
      * @type {string}
      * @memberof PageChatRequest
      */
@@ -47,6 +53,12 @@ export interface PageChatRequest {
      * @memberof PageChatRequest
      */
     'prompt': string;
+    /**
+     * 
+     * @type {string}
+     * @memberof PageChatRequest
+     */
+    'resumeFromRunId'?: string;
     /**
      * 
      * @type {string}

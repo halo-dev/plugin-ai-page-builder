@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, shallowRef } from 'vue'
 import {
+  Chat,
   applyUIMessageChunk,
   createUIMessageReducer,
   type UIMessage,
@@ -39,7 +40,95 @@ function setup() {
   }
   return { ...state, chunk, runId, messages }
 }
+describe('recovery with the real chat SDK', () => {
+  it('keeps both attempts in one assistant message with distinct text and tool parts', async () => {
+    const chunks: UIMessageChunk[] = [
+      { type: 'start', messageId: 'run-assistant' },
+      { type: 'text-start', id: 'attempt-1-text' },
+      { type: 'text-delta', id: 'attempt-1-text', delta: 'before' },
+      { type: 'text-end', id: 'attempt-1-text' },
+      { type: 'tool-input-start', toolCallId: 'attempt-1-tool', toolName: 'update_current_page' },
+      { type: 'tool-input-delta', toolCallId: 'attempt-1-tool', inputTextDelta: '{"html":"cut' },
+      {
+        type: 'data-generation-recovery',
+        name: 'generation-recovery',
+        id: 'recovery-1',
+        data: { attempt: 1 },
+      },
+      { type: 'start', messageId: 'run-assistant' },
+      { type: 'text-start', id: 'attempt-2-text' },
+      { type: 'text-delta', id: 'attempt-2-text', delta: 'after' },
+      { type: 'text-end', id: 'attempt-2-text' },
+      {
+        type: 'tool-input-available',
+        toolCallId: 'attempt-2-tool',
+        toolName: 'update_current_page',
+        input: { css: 'p{color:blue}' },
+      },
+      { type: 'finish', finishReason: 'stop' },
+    ]
+    const chat = new Chat({
+      transport: {
+        sendMessages: async () =>
+          (async function* () {
+            yield* chunks
+          })(),
+      },
+    })
+    await chat.sendMessage({ text: 'Build a page' })
+    const assistants = chat.messages.filter((message) => message.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(
+      assistants[0]!.parts.filter((part) => part.type === 'text').map((part) => part.text),
+    ).toEqual(['before', 'after'])
+    expect(
+      assistants[0]!.parts.flatMap((part) => ('toolCallId' in part ? [part.toolCallId] : [])),
+    ).toEqual(['attempt-1-tool', 'attempt-2-tool'])
+  })
+})
+
 describe('temporary streamed candidates', () => {
+  it('discards partial arguments at a recovery boundary and uses fresh tool ids with the validated baseline', async () => {
+    const state = setup()
+    state.chunk({
+      type: 'tool-input-available',
+      toolCallId: 'attempt-1-good',
+      toolName: 'update_current_page',
+      input: { html: '<p>Saved</p>' },
+    })
+    state.accept({
+      runId: 'run',
+      toolCallId: 'attempt-1-good',
+      baseHash: hash,
+      html: '<p>Saved</p>',
+      css: 'p{color:blue}',
+    })
+    state.chunk({
+      type: 'tool-input-start',
+      toolCallId: 'attempt-1-partial',
+      toolName: 'update_current_page',
+    })
+    state.chunk({
+      type: 'tool-input-delta',
+      toolCallId: 'attempt-1-partial',
+      inputTextDelta: '{"html":"<p>truncated',
+    })
+    state.restartAttempt()
+    expect(state.preview.value).toBeUndefined()
+    state.chunk({
+      type: 'tool-input-start',
+      toolCallId: 'attempt-2-partial',
+      toolName: 'update_current_page',
+    })
+    state.chunk({
+      type: 'tool-input-delta',
+      toolCallId: 'attempt-2-partial',
+      inputTextDelta: '{"css":"p{color:green}"}',
+    })
+    await vi.advanceTimersByTimeAsync(250)
+    expect(state.preview.value?.content).toEqual({ html: '<p>Saved</p>', css: 'p{color:green}' })
+    expect(state.preview.value?.source).not.toContain('truncated')
+  })
   it('accepts named staged events through the actual SDK reducer before showing a candidate', () => {
     const state = setup()
     state.chunk({

@@ -26,6 +26,8 @@ import type { CreatePageChatSessionRequest } from '../models';
 // @ts-ignore
 import type { PageChatAnswerRequest } from '../models';
 // @ts-ignore
+import type { PageChatCheckpointDetail } from '../models';
+// @ts-ignore
 import type { PageChatRequest } from '../models';
 // @ts-ignore
 import type { PageChatRun } from '../models';
@@ -292,6 +294,51 @@ export const AiPageBuilderChatApiAxiosParamCreator = function (configuration?: C
             if (size !== undefined) {
                 localVarQueryParameter['size'] = size;
             }
+
+
+    
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @param {string} name 
+         * @param {string} sessionId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getPageChatCheckpoint: async (name: string, sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('getPageChatCheckpoint', 'name', name)
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('getPageChatCheckpoint', 'sessionId', sessionId)
+            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/{name}/sessions/{sessionId}/checkpoint`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)))
+                .replace(`{${"sessionId"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication basicAuth required
+            // http basic authentication required
+            setBasicAuthToObject(localVarRequestOptions, configuration)
+
+            // authentication bearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
 
     
@@ -702,6 +749,19 @@ export const AiPageBuilderChatApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @param {string} name 
+         * @param {string} sessionId 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getPageChatCheckpoint(name: string, sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageChatCheckpointDetail>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getPageChatCheckpoint(name, sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderChatApi.getPageChatCheckpoint']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @param {string} name 
          * @param {string} runId 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -842,6 +902,15 @@ export const AiPageBuilderChatApiFactory = function (configuration?: Configurati
          */
         getPageChat(requestParameters: AiPageBuilderChatApiGetPageChatRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageChatSession> {
             return localVarFp.getPageChat(requestParameters.name, requestParameters.sessionId, requestParameters.before, requestParameters.size, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @param {AiPageBuilderChatApiGetPageChatCheckpointRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getPageChatCheckpoint(requestParameters: AiPageBuilderChatApiGetPageChatCheckpointRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageChatCheckpointDetail> {
+            return localVarFp.getPageChatCheckpoint(requestParameters.name, requestParameters.sessionId, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -1049,6 +1118,27 @@ export interface AiPageBuilderChatApiGetPageChatRequest {
 }
 
 /**
+ * Request parameters for getPageChatCheckpoint operation in AiPageBuilderChatApi.
+ * @export
+ * @interface AiPageBuilderChatApiGetPageChatCheckpointRequest
+ */
+export interface AiPageBuilderChatApiGetPageChatCheckpointRequest {
+    /**
+     * 
+     * @type {string}
+     * @memberof AiPageBuilderChatApiGetPageChatCheckpoint
+     */
+    readonly name: string
+
+    /**
+     * 
+     * @type {string}
+     * @memberof AiPageBuilderChatApiGetPageChatCheckpoint
+     */
+    readonly sessionId: string
+}
+
+/**
  * Request parameters for getPageChatRun operation in AiPageBuilderChatApi.
  * @export
  * @interface AiPageBuilderChatApiGetPageChatRunRequest
@@ -1234,6 +1324,17 @@ export class AiPageBuilderChatApi extends BaseAPI {
      */
     public getPageChat(requestParameters: AiPageBuilderChatApiGetPageChatRequest, options?: RawAxiosRequestConfig) {
         return AiPageBuilderChatApiFp(this.configuration).getPageChat(requestParameters.name, requestParameters.sessionId, requestParameters.before, requestParameters.size, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @param {AiPageBuilderChatApiGetPageChatCheckpointRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof AiPageBuilderChatApi
+     */
+    public getPageChatCheckpoint(requestParameters: AiPageBuilderChatApiGetPageChatCheckpointRequest, options?: RawAxiosRequestConfig) {
+        return AiPageBuilderChatApiFp(this.configuration).getPageChatCheckpoint(requestParameters.name, requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
