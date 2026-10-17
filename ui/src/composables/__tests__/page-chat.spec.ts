@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, shallowRef } from 'vue'
-import { conversationMessages, usePageChat } from '../usePageChat'
+import { conversationMessages, upsertQuestion, usePageChat } from '../usePageChat'
 import type { UIMessage } from '@halo-dev/ai-foundation-sdk'
 import type { ChatTurn } from '../../api/clients'
 import type { PageDetail, PageChatQuestion } from '../../api/generated'
@@ -176,6 +176,43 @@ describe('persistent page chat', () => {
     expect(state.messages.value[1]?.metadata).toMatchObject({ runId: 'old' })
     expect(state.messages.value[2]?.metadata).toMatchObject({ runId: 'waiting' })
     expect(state.questions.value).toEqual([question])
+  })
+  it('drops checkpoint-inherited questions when a resumed run asks again', async () => {
+    waitingConversation()
+    const inherited: PageChatQuestion = {
+      ...question,
+      id: 'inherited',
+      createdAt: '2025-12-31T00:00:00Z',
+      answers: [{ questionId: 'style', optionId: 'minimal' }],
+      answeredAt: '2025-12-31T00:00:01Z',
+    }
+    const fresh: PageChatQuestion = { ...question, id: 'fresh', createdAt: '2026-01-01T00:01:00Z' }
+    const resumedRun = { ...waitingRun, pendingQuestion: fresh }
+    api.chat.listPageChatSessions.mockResolvedValue({
+      data: { items: [{ sessionId: 'busy', activeRun: resumedRun }] },
+    })
+    api.chat.getPageChatRun.mockResolvedValue({ data: resumedRun })
+    api.chat.getPageChat.mockResolvedValue({
+      data: {
+        sessionId: 'busy',
+        activeRun: resumedRun,
+        turns: [
+          {
+            runId: 'waiting',
+            prompt: '设计页面',
+            text: '',
+            tools: [],
+            status: 'waiting_for_user',
+            createdAt: '2026-01-01T00:00:00Z',
+            questions: [inherited, fresh],
+          },
+        ],
+      },
+    })
+    const state = setup()
+    await state.recover()
+    expect(state.questions.value.map((item) => item.id)).toEqual(['fresh'])
+    expect(state.messages.value?.[1]?.metadata).toMatchObject({ questions: [fresh] })
   })
   it('recovers a waiting question and keeps editing and session actions locked', async () => {
     waitingConversation()
@@ -883,5 +920,23 @@ describe('checkpoint recovery', () => {
     await pending
     expect(state.preview.value).toBeUndefined()
     expect(committed).not.toHaveBeenCalled()
+  })
+})
+
+describe('upsertQuestion', () => {
+  const batch = (id: string): PageChatQuestion => ({
+    id,
+    createdAt: '2026-01-01T00:00:00Z',
+    questions: [{ id: 'style', title: '风格？', options: [], allowCustomAnswer: true }],
+  })
+  it('updates an existing question in place so pairing order survives a late answer response', () => {
+    const answered = { ...batch('q1'), answers: [{ questionId: 'style', optionId: 'minimal' }] }
+    const result = upsertQuestion([batch('q1'), batch('q2')], answered)
+    expect(result.map((item) => item.id)).toEqual(['q1', 'q2'])
+    expect(result[0]?.answers).toHaveLength(1)
+  })
+  it('appends genuinely new questions in arrival order', () => {
+    const result = upsertQuestion([batch('q1')], batch('q2'))
+    expect(result.map((item) => item.id)).toEqual(['q1', 'q2'])
   })
 })

@@ -1,4 +1,5 @@
 import { axiosInstance } from '@halo-dev/api-client'
+import type { AxiosRequestConfig } from 'axios'
 import {
   AiPageBuilderApi,
   AiPageBuilderAiV1alpha1ConsoleApi,
@@ -18,6 +19,13 @@ export const aiPageBuilderAiApi = new AiPageBuilderAiV1alpha1ConsoleApi(
   axiosInstance,
 )
 export const aiPageBuilderChatApi = new AiPageBuilderChatApi(undefined, '', axiosInstance)
+
+// The Console's global response interceptor toasts ProblemDetail failures unless the
+// request config sets `mute`; use this only for speculative calls whose failures are
+// already surfaced inline (mid-stream content validation). `mute` also skips the 401
+// login-expired dialog for that request, which speculative calls can safely defer to
+// the user's next real action — never mute requests whose failure blocks the editor.
+export type SilentRequestConfig = AxiosRequestConfig & { mute?: boolean }
 
 const chatParameters = AiPageBuilderChatApiAxiosParamCreator()
 

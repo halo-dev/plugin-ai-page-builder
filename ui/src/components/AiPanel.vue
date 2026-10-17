@@ -13,7 +13,7 @@ import IconChevron from '~icons/mingcute/right-line'
 import type { PageDetail, PageChatQuestion } from '../api/generated'
 import { usePageChat } from '../composables/usePageChat'
 import ChatComposer from './chat/ChatComposer.vue'
-import ChatMessageParts from './chat/ChatMessageParts.vue'
+import ChatMessageParts, { questionSlotCount } from './chat/ChatMessageParts.vue'
 import ChatQuestions from './chat/ChatQuestions.vue'
 import type { AnnotationDraft, PreparedPage } from '../editor/annotations'
 import type { StreamingPreview } from '../composables/useStreamingPreview'
@@ -124,29 +124,37 @@ function turnResult(role: string, metadata: unknown) {
   }
 }
 const visibleMessages = computed(() =>
-  (messages.value || []).map((message) => ({
-    id: message.id,
-    role: message.role,
-    result: turnResult(message.role, message.metadata),
-    message,
-    questions:
+  (messages.value || []).map((message) => {
+    const messageQuestions =
       message.role === 'assistant' &&
       activeRun.value &&
       message === messages.value?.[messages.value.length - 1]
         ? questions.value
-        : (message.metadata as { questions?: PageChatQuestion[] } | undefined)?.questions || [],
-    active:
-      running.value &&
-      !waitingForUser.value &&
-      !error.value &&
-      !turnResult(message.role, message.metadata) &&
-      message === messages.value?.[messages.value.length - 1],
-    annotations:
-      (
-        message.metadata as
-          { annotations?: { id: string; summary: string; comment: string }[] } | undefined
-      )?.annotations || [],
-  })),
+        : (message.metadata as { questions?: PageChatQuestion[] } | undefined)?.questions || []
+    // Questions pair with the message's ask_user calls in order and render where they
+    // were asked; anything unpaired (e.g. a turn cancelled while waiting, whose tool
+    // call never resolved) still renders after the message.
+    const slots = questionSlotCount(message.parts)
+    return {
+      id: message.id,
+      role: message.role,
+      result: turnResult(message.role, message.metadata),
+      message,
+      questions: messageQuestions,
+      fallbackQuestions: messageQuestions.slice(slots),
+      active:
+        running.value &&
+        !waitingForUser.value &&
+        !error.value &&
+        !turnResult(message.role, message.metadata) &&
+        message === messages.value?.[messages.value.length - 1],
+      annotations:
+        (
+          message.metadata as
+            { annotations?: { id: string; summary: string; comment: string }[] } | undefined
+        )?.annotations || [],
+    }
+  }),
 )
 watch(preview, (value) => emit('preview', value), { immediate: true })
 watch([running, loading], ([value, fetching]) => emit('running', value || fetching), {
@@ -380,9 +388,14 @@ const suggestions = [
             :message="message.message"
             :active="message.active"
             :waiting="waitingForUser && message === visibleMessages[visibleMessages.length - 1]"
+            :questions="message.questions"
+            :pending-question-id="waitingForUser ? pendingQuestion?.id : undefined"
+            :submitting="answering"
+            :answer-error="answerError"
+            @answer="answerQuestion"
           />
           <ChatQuestions
-            v-for="question in message.questions"
+            v-for="question in message.fallbackQuestions"
             :key="question.id"
             :question="question"
             :pending="waitingForUser && pendingQuestion?.id === question.id"

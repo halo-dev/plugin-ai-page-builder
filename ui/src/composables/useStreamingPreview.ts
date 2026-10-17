@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, shallowRef, watch, type Ref, type DeepReadonly } from 'vue'
 import type { ToolPart, UIMessage } from '@halo-dev/ai-foundation-sdk'
 import type { PageDocument } from '../api/generated'
-import { aiPageBuilderChatApi } from '../api/clients'
+import { aiPageBuilderChatApi, type SilentRequestConfig } from '../api/clients'
 
 type Content = Pick<PageDocument, 'html' | 'css' | 'js'>
 export interface StagedPage extends Content {
@@ -12,8 +12,6 @@ export interface StagedPage extends Content {
 export interface StreamingPreview {
   runId: string
   toolCallId: string
-  toolName: string
-  source: string
   content?: Content
   status: 'generating' | 'validating' | 'waiting' | 'staged' | 'checkpoint'
 }
@@ -54,8 +52,6 @@ export function useStreamingPreview(options: {
   let key = ''
   let sequence = 0
   let timer: ReturnType<typeof setTimeout> | undefined
-  let sourceTimer: ReturnType<typeof setTimeout> | undefined
-  let latestSource = ''
   let controller: AbortController | undefined
   let previousMessageIds = new Set<string>()
   let ignoredToolIds = new Set<string>()
@@ -67,9 +63,6 @@ export function useStreamingPreview(options: {
   }
   function clear() {
     cancelValidation()
-    clearTimeout(sourceTimer)
-    sourceTimer = undefined
-    latestSource = ''
     preview.value = undefined
     accepted.value = undefined
     baseline = undefined
@@ -115,8 +108,6 @@ export function useStreamingPreview(options: {
     preview.value = {
       runId: data.runId,
       toolCallId: data.toolCallId,
-      toolName: tool.value?.toolName || 'patch_current_page',
-      source: preview.value?.toolCallId === data.toolCallId ? preview.value.source : '',
       content: { html: data.html, css: data.css, js: data.js ?? '' },
       status: 'staged',
     }
@@ -129,8 +120,6 @@ export function useStreamingPreview(options: {
       const nextKey = `${runId}/${part.toolCallId}`
       if (nextKey !== key) {
         cancelValidation()
-        clearTimeout(sourceTimer)
-        sourceTimer = undefined
         baseline = accepted.value
           ? { html: accepted.value.html, css: accepted.value.css, js: accepted.value.js ?? '' }
           : baseline
@@ -138,8 +127,6 @@ export function useStreamingPreview(options: {
         preview.value = {
           runId,
           toolCallId: part.toolCallId,
-          toolName: part.toolName,
-          source: '',
           status: 'generating',
         }
       }
@@ -151,23 +138,6 @@ export function useStreamingPreview(options: {
         part.input && typeof part.input === 'object' && !Array.isArray(part.input)
           ? (part.input as Record<string, unknown>)
           : {}
-      const source =
-        part.toolName === 'patch_current_page'
-          ? JSON.stringify(input, null, 2)
-          : [
-              typeof input.html === 'string' ? `HTML\n${input.html}` : '',
-              typeof input.css === 'string' ? `CSS\n${input.css}` : '',
-              typeof input.js === 'string' ? `JS\n${input.js}` : '',
-            ]
-              .filter(Boolean)
-              .join('\n\n')
-      latestSource = (source || '').slice(0, 512 * 1024)
-      if (!sourceTimer)
-        sourceTimer = setTimeout(() => {
-          sourceTimer = undefined
-          if (preview.value?.toolCallId === part.toolCallId)
-            preview.value = { ...preview.value, source: latestSource }
-        }, 100)
       timer = setTimeout(async () => {
         if (token !== sequence) return
         if (
@@ -182,10 +152,11 @@ export function useStreamingPreview(options: {
         }
         preview.value = { ...preview.value!, status: 'validating' }
         controller = new AbortController()
+        const options: SilentRequestConfig = { signal: controller.signal, mute: true }
         try {
           await aiPageBuilderChatApi.validatePageContent(
             { validatePageContentRequest: candidate },
-            { signal: controller.signal },
+            options,
           )
           if (token === sequence)
             preview.value = { ...preview.value!, content: candidate, status: 'generating' }
@@ -201,8 +172,6 @@ export function useStreamingPreview(options: {
   }
   function restartAttempt() {
     cancelValidation()
-    clearTimeout(sourceTimer)
-    sourceTimer = undefined
     // Keep only the server-validated content from completed tools; ignore truncated tool input.
     baseline = accepted.value || baseline
     preview.value = undefined

@@ -62,6 +62,9 @@ export function useWorkingDocument() {
               js: snapshot.js ?? '',
             },
           },
+          // Not muted: a 401 here must still raise the login-expired dialog, since a
+          // failed validation disables save/publish and no other primary action could
+          // re-trigger authentication.
           { signal: controller.signal },
         )
         if (request === sequence) validationState.value = 'valid'

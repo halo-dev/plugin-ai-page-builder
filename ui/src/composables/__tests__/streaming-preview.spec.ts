@@ -127,7 +127,6 @@ describe('temporary streamed candidates', () => {
     })
     await vi.advanceTimersByTimeAsync(250)
     expect(state.preview.value?.content).toEqual({ html: '<p>Saved</p>', css: 'p{color:green}' })
-    expect(state.preview.value?.source).not.toContain('truncated')
   })
   it('accepts named staged events through the actual SDK reducer before showing a candidate', () => {
     const state = setup()
@@ -144,18 +143,17 @@ describe('temporary streamed candidates', () => {
     expect(state.preview.value?.status).toBe('staged')
     state.chunk({ type: 'data-page-committed', name: 'page-committed', id: 'run', data: {} })
   })
-  it('uses actual SDK partial JSON with Unicode and throttles escaped source before validation', async () => {
+  it('uses actual SDK partial JSON with Unicode before validation', async () => {
     const state = setup()
     state.chunk({ type: 'tool-input-start', toolCallId: 'one', toolName: 'update_current_page' })
     state.chunk({ type: 'tool-input-delta', toolCallId: 'one', inputTextDelta: '{"html":"<p>你好' })
     await vi.advanceTimersByTimeAsync(100)
-    expect(state.preview.value?.source).toContain('你好')
     expect(state.preview.value?.content).toBeUndefined()
     state.chunk({ type: 'tool-input-delta', toolCallId: 'one', inputTextDelta: '🌍</p>"}' })
     await vi.advanceTimersByTimeAsync(250)
     expect(validate).toHaveBeenLastCalledWith(
       { validatePageContentRequest: { html: '<p>你好🌍</p>', css: 'p{color:red}' } },
-      { signal: expect.any(AbortSignal) },
+      { signal: expect.any(AbortSignal), mute: true },
     )
     expect(state.preview.value?.content?.html).toBe('<p>你好🌍</p>')
   })
@@ -203,7 +201,7 @@ describe('temporary streamed candidates', () => {
     expect(state.preview.value?.status).toBe('waiting')
     expect(state.preview.value?.content?.html).toBe('<p>Newest</p>')
   })
-  it('shows patch source without applying it and accepts only staged data for the current run/tool', async () => {
+  it('never validates patches and accepts only staged data for the current run/tool', async () => {
     const state = setup()
     state.chunk({
       type: 'tool-input-available',
@@ -216,7 +214,7 @@ describe('temporary streamed candidates', () => {
     })
     await vi.advanceTimersByTimeAsync(250)
     expect(validate).not.toHaveBeenCalled()
-    expect(state.preview.value?.source).toContain('oldText')
+    expect(state.preview.value?.status).toBe('generating')
     state.accept({ runId: 'other', toolCallId: 'one', baseHash: hash, html: '<p>Bad</p>', css: '' })
     expect(state.preview.value?.content).toBeUndefined()
     state.accept({

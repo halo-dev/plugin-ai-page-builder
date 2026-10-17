@@ -6,7 +6,8 @@ import {
   type UIMessageChunk,
 } from '@halo-dev/ai-foundation-sdk'
 import ChatMarkdown from '../../components/chat/ChatMarkdown.vue'
-import ChatMessageParts from '../../components/chat/ChatMessageParts.vue'
+import ChatMessageParts, { questionSlotCount } from '../../components/chat/ChatMessageParts.vue'
+import type { PageChatQuestion } from '../../api/generated'
 import { conversationMessages } from '../../composables/usePageChat'
 
 vi.mock('../../api/clients', () => ({}))
@@ -181,6 +182,97 @@ describe('streaming conversation rendering', () => {
     expect(wrapper.text()).not.toContain('正在思考')
     expect(wrapper.text()).not.toContain('已结束')
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('renders the question panel where it was asked, with later activity streaming below', () => {
+    const question = {
+      id: 'q1',
+      createdAt: '2026-01-01T00:00:00Z',
+      questions: [
+        {
+          id: 'style',
+          title: '选择页面风格',
+          options: [{ id: 'minimal', label: '简洁' }],
+          allowCustomAnswer: false,
+        },
+      ],
+      answers: [{ questionId: 'style', optionId: 'minimal' }],
+    } as PageChatQuestion
+    const wrapper = mount(ChatMessageParts, {
+      props: {
+        active: true,
+        questions: [question],
+        message: {
+          id: 'm',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-ask_user',
+              toolCallId: 'ask',
+              toolName: 'ask_user',
+              state: 'output-available',
+              input: {},
+              output: { summary: '用户已回答问题' },
+            },
+            {
+              type: 'tool-read_theme_file',
+              toolCallId: 'read',
+              toolName: 'read_theme_file',
+              state: 'input-available',
+              input: {},
+            },
+          ],
+        },
+      },
+    })
+    const text = wrapper.text()
+    expect(text).toContain('已回答')
+    expect(text.indexOf('确认页面需求')).toBeLessThan(text.indexOf('选择页面风格'))
+    expect(text.indexOf('选择页面风格')).toBeLessThan(text.indexOf('读取主题文件'))
+    wrapper.unmount()
+  })
+  it('skips failed ask_user calls when pairing questions with tool parts', () => {
+    const question = {
+      id: 'q1',
+      createdAt: '2026-01-01T00:00:00Z',
+      questions: [
+        {
+          id: 'style',
+          title: '选择页面风格',
+          options: [{ id: 'minimal', label: '简洁' }],
+          allowCustomAnswer: false,
+        },
+      ],
+    } as PageChatQuestion
+    const parts = [
+      {
+        type: 'tool-ask_user' as const,
+        toolCallId: 'bad',
+        toolName: 'ask_user',
+        state: 'output-available' as const,
+        input: {},
+        output: { error: '问题格式不正确' },
+      },
+      {
+        type: 'tool-ask_user' as const,
+        toolCallId: 'ask',
+        toolName: 'ask_user',
+        state: 'input-available' as const,
+        input: {},
+      },
+    ]
+    expect(questionSlotCount(parts)).toBe(1)
+    const wrapper = mount(ChatMessageParts, {
+      props: {
+        active: true,
+        waiting: true,
+        questions: [question],
+        message: { id: 'm', role: 'assistant', parts },
+      },
+    })
+    const text = wrapper.text()
+    expect(wrapper.findAll('form[aria-label="助手的问题"]')).toHaveLength(1)
+    expect(text.indexOf('问题格式不正确')).toBeLessThan(text.indexOf('选择页面风格'))
     wrapper.unmount()
   })
   it('escapes HTML, blocks dangerous links and renders unfinished Markdown and code safely', async () => {
