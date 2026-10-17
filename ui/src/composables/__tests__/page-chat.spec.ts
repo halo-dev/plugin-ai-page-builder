@@ -389,6 +389,91 @@ describe('persistent page chat', () => {
     expect(state.error.value).toBe('')
     expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('one')
   })
+  it('falls back when the remembered session is deleted after listing sessions', async () => {
+    localStorage.setItem('ai-page-builder:last-session:one', 'two')
+    api.chat.listPageChatSessions.mockResolvedValueOnce({
+      data: { items: [{ sessionId: 'one' }, { sessionId: 'two' }] },
+    })
+    api.chat.getPageChat.mockRejectedValueOnce({ response: { status: 404 } })
+    const state = setup()
+    await state.recover()
+    expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(2)
+    expect(api.chat.getPageChat.mock.calls).toEqual([
+      [{ name: 'one', sessionId: 'two', size: 20 }],
+      [{ name: 'one', sessionId: 'one', size: 20 }],
+    ])
+    expect(state.sessions.value.map((session) => session.sessionId)).toEqual(['one'])
+    expect(state.sessionId.value).toBe('one')
+    expect(state.canSend.value).toBe(true)
+    expect(state.error.value).toBe('')
+    expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('one')
+  })
+  it.each(['running', 'committing', 'waiting_for_user'])(
+    'prioritizes a newly discovered %s session after the remembered session disappears',
+    async (status) => {
+      localStorage.setItem('ai-page-builder:last-session:one', 'two')
+      const activeRun = { runId: 'r', status }
+      api.chat.listPageChatSessions
+        .mockResolvedValueOnce({ data: { items: [{ sessionId: 'two' }] } })
+        .mockResolvedValue({
+          data: { items: [{ sessionId: 'one' }, { sessionId: 'busy', activeRun }] },
+        })
+      api.chat.getPageChat.mockRejectedValueOnce({ response: { status: 404 } }).mockResolvedValue({
+        data: { sessionId: 'busy', turns: [], hasMore: false, activeRun },
+      })
+      api.chat.getPageChatRun.mockResolvedValue({ data: activeRun })
+      const state = setup()
+      await state.recover()
+      expect(api.chat.getPageChat).toHaveBeenLastCalledWith({
+        name: 'one',
+        sessionId: 'busy',
+        size: 20,
+      })
+      expect(state.sessionId.value).toBe('busy')
+      expect(state.running.value).toBe(true)
+      expect(state.error.value).toBe('')
+      expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('busy')
+    },
+  )
+  it.each([undefined, 403, 500])(
+    'does not retry a session recovery error with status %s',
+    async (status) => {
+      localStorage.setItem('ai-page-builder:last-session:one', 'two')
+      api.chat.listPageChatSessions.mockResolvedValue({
+        data: { items: [{ sessionId: 'one' }, { sessionId: 'two' }] },
+      })
+      api.chat.getPageChat.mockRejectedValueOnce({ message: 'Unavailable', response: { status } })
+      const state = setup()
+      await state.recover()
+      expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(1)
+      expect(api.chat.getPageChat).toHaveBeenCalledTimes(1)
+      expect(state.error.value).toBe('Unavailable')
+      expect(state.canSend.value).toBe(false)
+      expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('two')
+    },
+  )
+  it('does not retry a missing default session', async () => {
+    api.chat.getPageChat.mockRejectedValue({ message: 'Page missing', response: { status: 404 } })
+    const state = setup()
+    await state.recover()
+    expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(1)
+    expect(api.chat.getPageChat).toHaveBeenCalledTimes(1)
+    expect(state.error.value).toBe('Page missing')
+  })
+  it('stops after one recovery retry if the replacement session also disappears', async () => {
+    localStorage.setItem('ai-page-builder:last-session:one', 'two')
+    api.chat.listPageChatSessions.mockResolvedValueOnce({
+      data: { items: [{ sessionId: 'one' }, { sessionId: 'two' }] },
+    })
+    api.chat.getPageChat.mockRejectedValue({ message: 'Not found', response: { status: 404 } })
+    const state = setup()
+    await state.recover()
+    expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(2)
+    expect(api.chat.getPageChat).toHaveBeenCalledTimes(2)
+    expect(state.error.value).toBe('Not found')
+    expect(state.canSend.value).toBe(false)
+    expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('two')
+  })
   it('keeps the last successful selection when switching fails', async () => {
     const state = setup()
     await state.recover()

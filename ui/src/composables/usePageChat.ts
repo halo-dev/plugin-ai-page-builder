@@ -395,7 +395,22 @@ export function usePageChat(options: {
       const previous = sessions.value.find(
         (item) => item.sessionId === (sessionId.value || lastSessionId.value),
       )
-      await loadConversation(active?.sessionId || previous?.sessionId || options.name)
+      const target = active?.sessionId || previous?.sessionId || options.name
+      try {
+        await loadConversation(target)
+      } catch (e) {
+        if (
+          target === options.name ||
+          (e as { response?: { status?: number } }).response?.status !== 404
+        )
+          throw e
+        await refreshSessions()
+        if (disposed) return
+        const replacement = sessions.value.find((item) =>
+          activeStatuses.includes(item.activeRun?.status || ''),
+        )
+        await loadConversation(replacement?.sessionId || options.name)
+      }
       if (activeRun.value) await reconcile()
     } catch (e) {
       error.value = errorMessage(e)
