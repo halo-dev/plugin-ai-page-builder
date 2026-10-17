@@ -50,6 +50,8 @@ const parts = computed(() =>
       read_current_page: '读取当前页面',
       get_theme_context: '读取主题样式',
       update_current_page: '更新页面内容',
+      update_page_title: '设置页面标题',
+      set_page_slug: '设置访问路径',
       patch_current_page: '局部修改页面',
       list_theme_files: '查找主题文件',
       read_theme_file: '读取主题文件',
