@@ -156,6 +156,10 @@ class PageEndpointTest {
         assertThat(response.headers().getCacheControl()).isEqualTo("no-store");
         assertThat(response.name()).isEqualTo("theme:custom-ai-page-builder");
         assertThat(response.model()).isEqualTo(getResponse.model());
+        assertThat(response.headers().getFirst("Content-Security-Policy"))
+            .contains("sandbox allow-scripts", "connect-src 'none'").doesNotContain("allow-same-origin");
+        assertThat(getResponse.headers().getFirst("Content-Security-Policy"))
+            .isEqualTo(response.headers().getFirst("Content-Security-Policy"));
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(view.title()).isEqualTo(candidate.title());
         assertThat(view.description()).isEqualTo(candidate.description());
@@ -183,13 +187,13 @@ class PageEndpointTest {
     void previewsPassStableNameAndSeparateSlugToRenderer() {
         var document = new PageDocument(1, "code", null, null, "", "", "About", "");
         when(service.get("about")).thenReturn(Mono.just(detail(document)));
-        when(renderer.render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document)))
+        when(renderer.preview(any(), eq("about"), eq("company/about-us"), eq(true), eq(document)))
             .thenReturn(ServerResponse.ok().build());
         assertThat(asAdmin(endpoint, request("/pages/about/preview")).block().statusCode())
             .isEqualTo(HttpStatus.OK);
         assertThat(asAdmin(endpoint, previewRequest(JsonUtils.objectToJson(document))).block().statusCode())
             .isEqualTo(HttpStatus.OK);
-        verify(renderer, times(2)).render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
+        verify(renderer, times(2)).preview(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
     }
 
     @Test
@@ -202,12 +206,12 @@ class PageEndpointTest {
                 new PageApi.RevisionSummary("rev-1", java.time.Instant.now(), "admin", "ai",
                     "Old title"),
                 revisionDocument)));
-        when(renderer.render(any(), eq("about"), eq("company/about-us"), eq(true),
+        when(renderer.preview(any(), eq("about"), eq("company/about-us"), eq(true),
             eq(revisionDocument))).thenReturn(ServerResponse.ok().build());
 
         assertThat(asAdmin(endpoint, request("/pages/about/revisions/rev-1/preview")).block()
             .statusCode()).isEqualTo(HttpStatus.OK);
-        verify(renderer).render(any(), eq("about"), eq("company/about-us"), eq(true),
+        verify(renderer).preview(any(), eq("about"), eq("company/about-us"), eq(true),
             eq(revisionDocument));
     }
 

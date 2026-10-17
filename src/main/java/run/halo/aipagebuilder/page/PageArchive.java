@@ -40,7 +40,9 @@ final class PageArchive {
         }
         JsonNode metadata;
         try {
-            metadata = JsonUtils.jsonToObject(files.get("page.json"), JsonNode.class);
+            var json = files.get("page.json");
+            metadata = JsonUtils.jsonToObject(json.startsWith("﻿") ? json.substring(1) : json,
+                JsonNode.class);
         } catch (RuntimeException error) {
             throw invalid("page.json 不是有效的 JSON");
         }
@@ -70,6 +72,9 @@ final class PageArchive {
             java.util.zip.ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 var name = entry.getName();
+                while (name.startsWith("./")) {
+                    name = name.substring(2);
+                }
                 if (names.size() >= 64 || !names.add(name)) {
                     throw invalid("ZIP 文件条目过多或包含重复文件");
                 }

@@ -137,7 +137,7 @@ public class PageEndpoint implements CustomEndpoint {
             .GET("/pages/{name}/revisions/{revision}/preview", request ->
                     service.get(name(request)).flatMap(detail ->
                         service.revisionDetail(name(request), request.pathVariable("revision"))
-                            .flatMap(revision -> renderer.render(request, detail.page().name(),
+                            .flatMap(revision -> renderer.preview(request, detail.page().name(),
                                 detail.page().slug() != null ? detail.page().slug()
                                     : detail.page().name(),
                                 detail.page().themeLayout(), revision.document()))),
@@ -155,7 +155,7 @@ public class PageEndpoint implements CustomEndpoint {
                     .requestBody(requestBodyBuilder().required(true)
                         .implementation(RestoreRequest.class)))
             .GET("/pages/{name}/preview", request -> service.get(name(request))
-                    .flatMap(detail -> renderer.render(request, detail.page().name(),
+                    .flatMap(detail -> renderer.preview(request, detail.page().name(),
                         detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
                         detail.page().themeLayout(), detail.document())),
                 builder -> builder.operationId("previewPage").tag("AiPageBuilder")
@@ -165,7 +165,7 @@ public class PageEndpoint implements CustomEndpoint {
                             .schema(schemaBuilder().type("string")))))
             .POST("/pages/{name}/preview", request -> body(request, PageDocument.class)
                     .flatMap(document -> service.get(name(request))
-                        .flatMap(detail -> renderer.render(request, detail.page().name(),
+                        .flatMap(detail -> renderer.preview(request, detail.page().name(),
                             detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
                             detail.page().themeLayout(), document))),
                 builder -> builder.operationId("previewPageDocument").tag("AiPageBuilder")

@@ -61,6 +61,33 @@ class PageArchiveTest {
         assertThat(imported.themeLayout()).isFalse();
     }
 
+    @Test
+    void acceptsMetadataBomWithoutChangingSourceFiles() throws Exception {
+        var files = files();
+        files.put("page.json", "﻿" + files.get("page.json"));
+        files.put("page.html", "﻿<p>Shared</p>");
+        var imported = PageArchive.read(zip(files));
+        assertThat(imported.document().title()).isEqualTo("共享页面");
+        assertThat(imported.document().html()).isEqualTo(files.get("page.html"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"./", "././"})
+    void acceptsRelativeRootPrefixes(String prefix) throws Exception {
+        var prefixed = new LinkedHashMap<String, String>();
+        prefixed.put(prefix, "");
+        files().forEach((name, value) -> prefixed.put(prefix + name, value));
+        assertThat(PageArchive.read(zip(prefixed))).isEqualTo(PageArchive.read(zip(files())));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"page.json", "page.html", "styles.css", "script.js"})
+    void rejectsDuplicatesAfterPathNormalization(String name) throws Exception {
+        var files = files();
+        files.put("./" + name, files.get(name));
+        assertInvalid(zip(files), "重复文件");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"page.json", "page.html", "styles.css", "script.js"})
     void rejectsMissingSourceFilesAndLegacyExports(String missing) throws Exception {
@@ -90,7 +117,7 @@ class PageArchiveTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"../page.html", "/page.html", "nested/../page.html", "C:/page.html",
-        "nested\\page.html"})
+        "nested\\page.html", "./../page.html", ".//page.html", "./C:/page.html"})
     void rejectsUnsafePaths(String path) throws Exception {
         var files = files();
         files.put(path, "ignored");
