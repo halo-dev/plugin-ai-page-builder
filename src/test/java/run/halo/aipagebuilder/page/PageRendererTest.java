@@ -111,6 +111,27 @@ class PageRendererTest {
             .isEqualTo("plugin:ai-page-builder:ai-page-builder-standalone");
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void previewsIsolateScriptsButPublicPagesRetainTheirRuntime(boolean themeLayout) {
+        var template = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";
+        when(resolver.resolveTemplateNameOrDefault(any(), eq(template)))
+            .thenReturn(Mono.just("plugin:ai-page-builder:" + template));
+        var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "", "Title", null,
+            "document.querySelector('p').textContent = 'Ready';");
+        var preview = (RenderingResponse) renderer.preview(request, "about", "about", themeLayout,
+            scripted).block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+            .isEqualTo("sandbox allow-scripts; connect-src 'none'; frame-src 'none'; "
+                + "object-src 'none'; worker-src 'none'; form-action 'none'");
+        var published = (RenderingResponse) renderer.render(request, "about", "about", themeLayout,
+            scripted).block();
+        assertThat(published.headers().getFirst("Content-Security-Policy")).isNull();
+        assertThat(preview.model()).isEqualTo(published.model());
+        assertThat(((PageRenderer.PageView) preview.model().get("aiPageBuilder")).html())
+            .contains("<script>");
+    }
+
     @Test
     void invalidPersistedContentIsRejectedBeforeTemplateRendering() {
         doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsafe content"))

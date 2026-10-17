@@ -78,6 +78,58 @@ class PageEndpointTest {
         verifyNoInteractions(service, renderer);
     }
 
+    private static ServerRequest importRequest(byte[] bytes) {
+        var buffer = org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance.wrap(bytes);
+        return ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest
+                .post("/pages/import").contentType(MediaType.parseMediaType("application/zip"))
+                .body(reactor.core.publisher.Flux.just(buffer))),
+            HandlerStrategies.withDefaults().messageReaders());
+    }
+
+    @Test
+    void importsBinaryUploadWithAuthenticatedActor() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var document = PageArchive.read(bytes).document();
+        when(service.importPage(any(byte[].class), eq("admin"))).thenReturn(Mono.just(detail(document)));
+        assertThat(asAdmin(endpoint, importRequest(bytes)).block().statusCode()).isEqualTo(HttpStatus.OK);
+        verify(service).importPage(eq(bytes), eq("admin"));
+        verifyNoMoreInteractions(service);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "ROLE_editor"})
+    void importRequiresSuperAdministrator(String role) {
+        var request = importRequest(new byte[] {1});
+        var result = endpoint.endpoint().route(request).flatMap(handler -> handler.handle(request));
+        if (!role.isEmpty()) {
+            var authentication = new UsernamePasswordAuthenticationToken("editor", "",
+                List.of(new SimpleGrantedAuthority(role)));
+            result = result.contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication));
+        }
+        assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        verifyNoInteractions(service, renderer);
+    }
+
+    @Test
+    void oversizedUploadIsRejectedBeforeImport() {
+        var result = asAdmin(endpoint, importRequest(new byte[PageArchive.MAX_BYTES + 1]));
+        assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE));
+        verifyNoInteractions(service, renderer);
+    }
+
+    @Test
+    void emptyUploadIsRejectedBeforeImport() {
+        var request = ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest
+                .post("/pages/import").contentType(MediaType.parseMediaType("application/zip"))),
+            HandlerStrategies.withDefaults().messageReaders());
+        assertThatThrownBy(() -> asAdmin(endpoint, request).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(service, renderer);
+    }
+
     @Test
     void candidatePreviewUsesSameThemeAndCssAsGetWithoutSaving() {
         var resolver = mock(TemplateNameResolver.class);
@@ -104,6 +156,10 @@ class PageEndpointTest {
         assertThat(response.headers().getCacheControl()).isEqualTo("no-store");
         assertThat(response.name()).isEqualTo("theme:custom-ai-page-builder");
         assertThat(response.model()).isEqualTo(getResponse.model());
+        assertThat(response.headers().getFirst("Content-Security-Policy"))
+            .contains("sandbox allow-scripts", "connect-src 'none'").doesNotContain("allow-same-origin");
+        assertThat(getResponse.headers().getFirst("Content-Security-Policy"))
+            .isEqualTo(response.headers().getFirst("Content-Security-Policy"));
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(view.title()).isEqualTo(candidate.title());
         assertThat(view.description()).isEqualTo(candidate.description());
@@ -131,13 +187,13 @@ class PageEndpointTest {
     void previewsPassStableNameAndSeparateSlugToRenderer() {
         var document = new PageDocument(1, "code", null, null, "", "", "About", "");
         when(service.get("about")).thenReturn(Mono.just(detail(document)));
-        when(renderer.render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document)))
+        when(renderer.preview(any(), eq("about"), eq("company/about-us"), eq(true), eq(document)))
             .thenReturn(ServerResponse.ok().build());
         assertThat(asAdmin(endpoint, request("/pages/about/preview")).block().statusCode())
             .isEqualTo(HttpStatus.OK);
         assertThat(asAdmin(endpoint, previewRequest(JsonUtils.objectToJson(document))).block().statusCode())
             .isEqualTo(HttpStatus.OK);
-        verify(renderer, times(2)).render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
+        verify(renderer, times(2)).preview(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
     }
 
     @Test
@@ -150,12 +206,12 @@ class PageEndpointTest {
                 new PageApi.RevisionSummary("rev-1", java.time.Instant.now(), "admin", "ai",
                     "Old title"),
                 revisionDocument)));
-        when(renderer.render(any(), eq("about"), eq("company/about-us"), eq(true),
+        when(renderer.preview(any(), eq("about"), eq("company/about-us"), eq(true),
             eq(revisionDocument))).thenReturn(ServerResponse.ok().build());
 
         assertThat(asAdmin(endpoint, request("/pages/about/revisions/rev-1/preview")).block()
             .statusCode()).isEqualTo(HttpStatus.OK);
-        verify(renderer).render(any(), eq("about"), eq("company/about-us"), eq(true),
+        verify(renderer).preview(any(), eq("about"), eq("company/about-us"), eq(true),
             eq(revisionDocument));
     }
 

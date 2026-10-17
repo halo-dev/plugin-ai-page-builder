@@ -5,13 +5,14 @@ import {
   AiPageBuilderAiV1alpha1ConsoleApi,
   AiPageBuilderChatApi,
   AiPageBuilderChatApiAxiosParamCreator,
+  Configuration,
   type PageChatRequest,
   type PageDocument,
 } from './generated'
 
 export const API_BASE = '/apis/console.api.aipagebuilder.halo.run/v1alpha1'
 
-export const aiPageBuilderApi = new AiPageBuilderApi(undefined, '', axiosInstance)
+export const aiPageBuilderApi = new AiPageBuilderApi(new Configuration(), '', axiosInstance)
 export const aiPageBuilderAiApi = new AiPageBuilderAiV1alpha1ConsoleApi(
   undefined,
   '',
