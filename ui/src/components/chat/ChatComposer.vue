@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 import IconArrowUp from '~icons/mingcute/arrow-up-line'
 import IconStop from '~icons/mingcute/stop-fill'
 
@@ -12,6 +12,7 @@ const props = defineProps<{
   canSteer?: boolean
   available: boolean
   placeholder?: string
+  autofocus?: boolean
 }>()
 const prompt = defineModel<string>('prompt', { required: true })
 const model = defineModel<string>('model', { required: true })
@@ -50,6 +51,9 @@ function keydown(event: KeyboardEvent) {
     if (!steerDisabled.value) emit('steer')
   } else if (!sendDisabled.value) emit('send')
 }
+onMounted(() => {
+  if (props.autofocus) input.value?.focus()
+})
 watch(prompt, async () => {
   await nextTick()
   resize()
