@@ -11,6 +11,8 @@ import { promptPresetGroups } from '../../data/promptPresets'
 import ChatComposer from '../chat/ChatComposer.vue'
 import ManualCreateModal from './ManualCreateModal.vue'
 
+defineProps<{ autofocus?: boolean }>()
+
 const router = useRouter()
 const prompt = ref('')
 // Same storage key as the editor chat, so the choice carries over.
@@ -63,7 +65,7 @@ function submit() {
       <ChatComposer
         v-model:prompt="prompt"
         v-model:model="model"
-        autofocus
+        :autofocus="autofocus"
         :disabled="createMutation.isPending.value"
         :can-send="!!prompt.trim()"
         :running="false"
