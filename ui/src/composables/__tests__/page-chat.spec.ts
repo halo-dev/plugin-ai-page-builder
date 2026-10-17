@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, shallowRef } from 'vue'
-import { conversationMessages, usePageChat } from '../usePageChat'
+import { conversationMessages, upsertQuestion, usePageChat } from '../usePageChat'
 import type { UIMessage } from '@halo-dev/ai-foundation-sdk'
 import type { ChatTurn } from '../../api/clients'
 import type { PageDetail, PageChatQuestion } from '../../api/generated'
@@ -727,5 +727,23 @@ describe('checkpoint recovery', () => {
     await pending
     expect(state.preview.value).toBeUndefined()
     expect(committed).not.toHaveBeenCalled()
+  })
+})
+
+describe('upsertQuestion', () => {
+  const batch = (id: string): PageChatQuestion => ({
+    id,
+    createdAt: '2026-01-01T00:00:00Z',
+    questions: [{ id: 'style', title: '风格？', options: [], allowCustomAnswer: true }],
+  })
+  it('updates an existing question in place so pairing order survives a late answer response', () => {
+    const answered = { ...batch('q1'), answers: [{ questionId: 'style', optionId: 'minimal' }] }
+    const result = upsertQuestion([batch('q1'), batch('q2')], answered)
+    expect(result.map((item) => item.id)).toEqual(['q1', 'q2'])
+    expect(result[0]?.answers).toHaveLength(1)
+  })
+  it('appends genuinely new questions in arrival order', () => {
+    const result = upsertQuestion([batch('q1')], batch('q2'))
+    expect(result.map((item) => item.id)).toEqual(['q1', 'q2'])
   })
 })

@@ -41,6 +41,17 @@ function turnQuestions(turn: ChatTurn): PageChatQuestion[] {
   })
 }
 
+// Update in place: questions pair with ask_user tool parts by array order, so a
+// late answer response must not move its question to the end of the list.
+export function upsertQuestion(
+  list: PageChatQuestion[],
+  question: PageChatQuestion,
+): PageChatQuestion[] {
+  return list.some((item) => item.id === question.id)
+    ? list.map((item) => (item.id === question.id ? question : item))
+    : [...list, question]
+}
+
 export function conversationMessages(turns: ChatTurn[]): UIMessage[] {
   return turns.flatMap((turn) => [
     {
@@ -140,7 +151,7 @@ export function usePageChat(options: {
   const pendingQuestion = computed(() => activeRun.value?.pendingQuestion)
   const questions = shallowRef<PageChatQuestion[]>([])
   function rememberQuestion(question: PageChatQuestion) {
-    questions.value = [...questions.value.filter((item) => item.id !== question.id), question]
+    questions.value = upsertQuestion(questions.value, question)
   }
   const lastPrompt = shallowRef('')
   const recovered = shallowRef(false)
