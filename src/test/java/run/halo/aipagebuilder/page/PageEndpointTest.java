@@ -204,7 +204,7 @@ class PageEndpointTest {
         when(service.revisionDetail("about", "rev-1"))
             .thenReturn(Mono.just(new PageApi.RevisionDetail(
                 new PageApi.RevisionSummary("rev-1", java.time.Instant.now(), "admin", "ai",
-                    "Old title"),
+                    "Old title", null),
                 revisionDocument)));
         when(renderer.preview(any(), eq("about"), eq("company/about-us"), eq(true),
             eq(revisionDocument))).thenReturn(ServerResponse.ok().build());
