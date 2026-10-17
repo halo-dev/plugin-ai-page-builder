@@ -78,6 +78,13 @@ public class PageService {
             request.themeLayout(), actor);
     }
 
+    public Mono<PageDetail> importPage(byte[] archive, String actor) {
+        return Mono.fromCallable(() -> PageArchive.read(archive))
+            .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+            .flatMap(imported -> createDocument(null, imported.document(),
+                imported.themeLayout(), actor));
+    }
+
     public Mono<PageDetail> clonePage(String name, PageApi.ClonePageRequest request, String actor) {
         return mutate(name, request.version(), source -> draftDetail(source).flatMap(detail -> {
             // Clone still requires an explicit slug even though create accepts a blank one.

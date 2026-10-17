@@ -318,6 +318,49 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
         },
         /**
          * 
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        importPage: async (body: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('importPage', 'body', body)
+            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/import`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication basicAuth required
+            // http basic authentication required
+            setBasicAuthToObject(localVarRequestOptions, configuration)
+
+            // authentication bearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+
+    
+            localVarHeaderParameter['Content-Type'] = 'application/zip';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @param {string} name Stable page identifier
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -911,6 +954,18 @@ export const AiPageBuilderApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @param {File} body 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async importPage(body: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageDetail>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.importPage(body, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.importPage']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @param {string} name Stable page identifier
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1117,6 +1172,15 @@ export const AiPageBuilderApiFactory = function (configuration?: Configuration, 
         },
         /**
          * 
+         * @param {AiPageBuilderApiImportPageRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        importPage(requestParameters: AiPageBuilderApiImportPageRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageDetail> {
+            return localVarFp.importPage(requestParameters.body, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @param {AiPageBuilderApiListPageRevisionsRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1320,6 +1384,20 @@ export interface AiPageBuilderApiGetPageRevisionRequest {
      * @memberof AiPageBuilderApiGetPageRevision
      */
     readonly revision: string
+}
+
+/**
+ * Request parameters for importPage operation in AiPageBuilderApi.
+ * @export
+ * @interface AiPageBuilderApiImportPageRequest
+ */
+export interface AiPageBuilderApiImportPageRequest {
+    /**
+     * 
+     * @type {File}
+     * @memberof AiPageBuilderApiImportPage
+     */
+    readonly body: File
 }
 
 /**
@@ -1617,6 +1695,17 @@ export class AiPageBuilderApi extends BaseAPI {
      */
     public getPageRevision(requestParameters: AiPageBuilderApiGetPageRevisionRequest, options?: RawAxiosRequestConfig) {
         return AiPageBuilderApiFp(this.configuration).getPageRevision(requestParameters.name, requestParameters.revision, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @param {AiPageBuilderApiImportPageRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof AiPageBuilderApi
+     */
+    public importPage(requestParameters: AiPageBuilderApiImportPageRequest, options?: RawAxiosRequestConfig) {
+        return AiPageBuilderApiFp(this.configuration).importPage(requestParameters.body, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

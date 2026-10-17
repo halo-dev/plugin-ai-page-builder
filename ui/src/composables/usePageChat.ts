@@ -108,6 +108,7 @@ export function usePageChat(options: {
 }) {
   const sessions = shallowRef<PageChatSessionSummary[]>([])
   const sessionId = shallowRef<string>()
+  const lastSessionId = useLocalStorage(`ai-page-builder:last-session:${options.name}`, '')
   const hasMore = shallowRef(false)
   const loadingEarlier = shallowRef(false)
   let nextBefore: string | undefined
@@ -247,6 +248,7 @@ export function usePageChat(options: {
       checkpointPreview.value = undefined
     recovery.value = conversation.recovery ?? undefined
     sessionId.value = conversation.sessionId
+    lastSessionId.value = conversation.sessionId
     hasMore.value = conversation.hasMore
     nextBefore = conversation.nextBefore ?? undefined
     chat.setMessages(conversationMessages(conversation.turns))
@@ -390,7 +392,25 @@ export function usePageChat(options: {
       const active = sessions.value.find((item) =>
         activeStatuses.includes(item.activeRun?.status || ''),
       )
-      await loadConversation(active?.sessionId || sessionId.value)
+      const previous = sessions.value.find(
+        (item) => item.sessionId === (sessionId.value || lastSessionId.value),
+      )
+      const target = active?.sessionId || previous?.sessionId || options.name
+      try {
+        await loadConversation(target)
+      } catch (e) {
+        if (
+          target === options.name ||
+          (e as { response?: { status?: number } }).response?.status !== 404
+        )
+          throw e
+        await refreshSessions()
+        if (disposed) return
+        const replacement = sessions.value.find((item) =>
+          activeStatuses.includes(item.activeRun?.status || ''),
+        )
+        await loadConversation(replacement?.sessionId || options.name)
+      }
       if (activeRun.value) await reconcile()
     } catch (e) {
       error.value = errorMessage(e)

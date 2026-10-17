@@ -19,6 +19,6 @@ const router = useRouter()
     </template>
   </VPageHeader>
   <div class="m-2 md:m-4">
-    <CreatePagePanel class="py-10" />
+    <CreatePagePanel autofocus class="py-10" />
   </div>
 </template>

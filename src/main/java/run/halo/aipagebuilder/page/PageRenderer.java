@@ -25,6 +25,16 @@ public class PageRenderer {
 
     public Mono<ServerResponse> render(ServerRequest request, String name, String slug,
         boolean themeLayout, PageDocument document) {
+        return render(request, name, slug, themeLayout, document, false);
+    }
+
+    public Mono<ServerResponse> preview(ServerRequest request, String name, String slug,
+        boolean themeLayout, PageDocument document) {
+        return render(request, name, slug, themeLayout, document, true);
+    }
+
+    private Mono<ServerResponse> render(ServerRequest request, String name, String slug,
+        boolean themeLayout, PageDocument document, boolean preview) {
         return Mono.defer(() -> {
             contentPolicy.validate(document);
             var rootId = "ai-page-builder-" + name;
@@ -32,10 +42,18 @@ public class PageRenderer {
                 renderHtml(document), contentPolicy.renderCss(document.css(), rootId));
             var templateName = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";
             return templateNameResolver.resolveTemplateNameOrDefault(request.exchange(), templateName)
-                .flatMap(template -> ServerResponse.ok().contentType(MediaType.TEXT_HTML)
-                    .cacheControl(CacheControl.noStore())
-                    .render(template, Map.of("aiPageBuilder", pageView,
-                        "_templateId", "plugin:ai-page-builder:" + templateName)));
+                .flatMap(template -> {
+                    var response = ServerResponse.ok().contentType(MediaType.TEXT_HTML)
+                        .cacheControl(CacheControl.noStore());
+                    if (preview) {
+                        // Preview scripts must not inherit the administrator's origin or issue API requests.
+                        response.header("Content-Security-Policy", "sandbox allow-scripts; "
+                            + "connect-src 'none'; frame-src 'none'; object-src 'none'; "
+                            + "worker-src 'none'; form-action 'none'");
+                    }
+                    return response.render(template, Map.of("aiPageBuilder", pageView,
+                        "_templateId", "plugin:ai-page-builder:" + templateName));
+                });
         });
     }
 
