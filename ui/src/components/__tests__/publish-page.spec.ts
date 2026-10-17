@@ -1,0 +1,275 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { computed, defineComponent, h, inject, provide, type InjectionKey } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
+import PublishPagePopper from '../PublishPagePopper.vue'
+import type { PageDetail } from '../../api/generated'
+
+const mocks = vi.hoisted(() => ({
+  get: vi.fn(),
+  save: vi.fn(),
+  slug: vi.fn(),
+  publish: vi.fn(),
+}))
+vi.mock('../../api/clients', () => ({
+  aiPageBuilderApi: {
+    getPage: mocks.get,
+    savePage: mocks.save,
+    updatePageSlug: mocks.slug,
+    publishPage: mocks.publish,
+  },
+}))
+vi.mock('../../utils/error', () => ({ errorMessage: (error: Error) => error.message }))
+vi.mock('@halo-dev/components', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    Toast: { success: vi.fn() },
+    VButton: defineComponent({
+      props: ['disabled'],
+      setup:
+        (props, { slots }) =>
+        () =>
+          h('button', { type: 'button', disabled: props.disabled }, slots.default?.()),
+    }),
+    VDropdown: defineComponent({
+      name: 'VDropdown',
+      props: ['shown'],
+      emits: ['update:shown'],
+      setup:
+        (_, { slots }) =>
+        () =>
+          h('div', slots.popper?.()),
+    }),
+  }
+})
+
+type Fields = Record<string, string>
+const formKey: InjectionKey<{
+  values: () => Fields
+  disabled: () => boolean
+  update: (name: string, value: string) => void
+}> = Symbol('form')
+// Model only the host FormKit contract; assertions exercise the rendered fields and API calls.
+const FormKit = defineComponent({
+  props: ['type', 'name', 'label', 'modelValue', 'disabled'],
+  emits: ['update:modelValue', 'node', 'submit'],
+  setup(props, { slots, emit }) {
+    if (props.type === 'form') {
+      provide(formKey, {
+        values: () => props.modelValue,
+        disabled: () => props.disabled,
+        update: (name, value) => emit('update:modelValue', { ...props.modelValue, [name]: value }),
+      })
+      const submit = () => emit('submit', props.modelValue)
+      emit('node', { submit })
+      const valid = computed(() => Object.values(props.modelValue as Fields).every(Boolean))
+      return () =>
+        h(
+          'form',
+          {
+            onSubmit: (event: Event) => {
+              event.preventDefault()
+              submit()
+            },
+          },
+          slots.default?.({ state: { valid: valid.value } }),
+        )
+    }
+    const form = inject(formKey)!
+    return () =>
+      h('label', [
+        props.label,
+        h('input', {
+          name: props.name,
+          value: form.values()[props.name],
+          disabled: form.disabled(),
+          onInput: (event: Event) =>
+            form.update(props.name, (event.target as HTMLInputElement).value),
+        }),
+      ])
+  },
+})
+
+function detail(version = 1, title = '关于我们', slug: string | null = 'about-us'): PageDetail {
+  return {
+    page: {
+      name: 'page',
+      title,
+      description: '',
+      slug,
+      version,
+      themeLayout: true,
+      draftRevision: `r${version}`,
+      updatedAt: '2026-10-16T00:00:00Z',
+      hasUnpublishedChanges: true,
+    },
+    document: {
+      schemaVersion: 1,
+      mode: 'code',
+      html: '<p>Keep this content</p>',
+      css: '',
+      js: '',
+      title,
+      description: '',
+    },
+  }
+}
+function popper(slug: string | null = 'about-us') {
+  return mount(PublishPagePopper, {
+    props: { name: 'page', title: '关于我们', slug, version: 1 },
+    global: { components: { FormKit } },
+  })
+}
+async function publish(wrapper: ReturnType<typeof popper>) {
+  await wrapper.get('button').trigger('click')
+  await flushPromises()
+}
+
+beforeEach(() => {
+  vi.resetAllMocks()
+  mocks.get.mockResolvedValue({ data: detail() })
+  mocks.save.mockResolvedValue({ data: detail(2, '公司介绍') })
+  mocks.slug.mockResolvedValue({ data: detail(3, '公司介绍', 'company/about') })
+  mocks.publish.mockResolvedValue({ data: detail(4, '公司介绍', 'company/about') })
+})
+
+describe('first publish confirmation', () => {
+  it('prefills the generated title and path and publishes without unnecessary saves', async () => {
+    const wrapper = popper()
+    expect(wrapper.get<HTMLInputElement>('[name=title]').element.value).toBe('关于我们')
+    expect(wrapper.get<HTMLInputElement>('[name=slug]').element.value).toBe('about-us')
+    expect(wrapper.text()).not.toContain('随机')
+    await publish(wrapper)
+    expect(mocks.get).not.toHaveBeenCalled()
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(mocks.slug).not.toHaveBeenCalled()
+    expect(mocks.publish).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 1 } })
+    expect(wrapper.emitted('published')).toHaveLength(1)
+  })
+
+  it('leaves a missing path empty and requires it before publishing', async () => {
+    const wrapper = popper(null)
+    expect(wrapper.get<HTMLInputElement>('[name=slug]').element.value).toBe('')
+    expect(wrapper.find('[title]').exists()).toBe(false)
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.publish).not.toHaveBeenCalled()
+    await wrapper.get('[name=slug]').setValue('company/about')
+    await publish(wrapper)
+    expect(mocks.slug).toHaveBeenCalledWith({
+      name: 'page',
+      updatePageSlugRequest: { version: 1, slug: 'company/about' },
+    })
+  })
+
+  it('saves user edits while preserving page content and chains the returned versions', async () => {
+    const wrapper = popper()
+    await wrapper.get('[name=title]').setValue(' 公司介绍 ')
+    await wrapper.get('[name=slug]').setValue('company/about')
+    await publish(wrapper)
+    expect(mocks.save).toHaveBeenCalledWith({
+      name: 'page',
+      savePageRequest: {
+        version: 1,
+        document: { ...detail().document, title: '公司介绍' },
+        source: 'manual',
+      },
+    })
+    expect(mocks.slug).toHaveBeenCalledWith({
+      name: 'page',
+      updatePageSlugRequest: { version: 2, slug: 'company/about' },
+    })
+    expect(mocks.publish).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 3 } })
+    expect(wrapper.emitted('updated')).toHaveLength(2)
+  })
+
+  it('retries publication with the saved version without resaving either field', async () => {
+    mocks.publish.mockRejectedValueOnce(new Error('暂时无法发布'))
+    const wrapper = popper()
+    await wrapper.get('[name=title]').setValue('公司介绍')
+    await wrapper.get('[name=slug]').setValue('company/about')
+    await publish(wrapper)
+    expect(wrapper.text()).toContain('暂时无法发布')
+    await publish(wrapper)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.slug).toHaveBeenCalledTimes(1)
+    expect(mocks.publish).toHaveBeenLastCalledWith({
+      name: 'page',
+      mutationRequest: { version: 3 },
+    })
+  })
+
+  it('keeps path conflicts editable and retries after the title has already been saved', async () => {
+    mocks.slug.mockRejectedValueOnce(new Error('访问路径已被占用'))
+    const wrapper = popper()
+    await wrapper.get('[name=title]').setValue('公司介绍')
+    await wrapper.get('[name=slug]').setValue('taken')
+    await publish(wrapper)
+    expect(wrapper.text()).toContain('访问路径已被占用')
+    expect(mocks.publish).not.toHaveBeenCalled()
+    await wrapper.get('[name=slug]').setValue('company/about')
+    await publish(wrapper)
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.slug).toHaveBeenLastCalledWith({
+      name: 'page',
+      updatePageSlugRequest: { version: 2, slug: 'company/about' },
+    })
+  })
+
+  it('does not publish after a stale-version title save fails', async () => {
+    mocks.get.mockResolvedValue({ data: detail(9, 'Someone else edited') })
+    mocks.save.mockRejectedValue(new Error('Page changed; reload before saving'))
+    const wrapper = popper()
+    await wrapper.get('[name=title]').setValue('公司介绍')
+    await publish(wrapper)
+    expect(mocks.save.mock.calls[0]![0].savePageRequest.version).toBe(1)
+    expect(mocks.slug).not.toHaveBeenCalled()
+    expect(mocks.publish).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Page changed')
+  })
+
+  it('resyncs on reopening and freezes both fields during publication', async () => {
+    const wrapper = popper()
+    await wrapper.setProps({ title: '公司介绍', slug: 'company/about', version: 3 })
+    wrapper.getComponent({ name: 'VDropdown' }).vm.$emit('update:shown', true)
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[name=title]').element.value).toBe('公司介绍')
+    expect(wrapper.get<HTMLInputElement>('[name=slug]').element.value).toBe('company/about')
+    let resolve!: (value: { data: PageDetail }) => void
+    mocks.publish.mockReturnValue(
+      new Promise((done) => {
+        resolve = done
+      }),
+    )
+    await publish(wrapper)
+    expect(wrapper.get('[name=title]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[name=slug]').attributes('disabled')).toBeDefined()
+    await publish(wrapper)
+    expect(mocks.publish).toHaveBeenCalledTimes(1)
+    resolve({ data: detail(4) })
+    await flushPromises()
+    expect(wrapper.emitted('pending')).toEqual([[true], [false]])
+  })
+
+  it('blocks an already-open form when the editor becomes dirty or busy', async () => {
+    const wrapper = popper()
+    await wrapper.setProps({ disabled: true })
+    expect(wrapper.get('[name=title]').attributes('disabled')).toBeDefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.publish).not.toHaveBeenCalled()
+    await wrapper.setProps({ disabled: false })
+    await publish(wrapper)
+    expect(mocks.publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not submit while confirming an IME composition', async () => {
+    const wrapper = popper()
+    await wrapper.get('[name=title]').trigger('keydown', { key: 'Enter', isComposing: true })
+    await flushPromises()
+    expect(mocks.publish).not.toHaveBeenCalled()
+    await wrapper.get('[name=title]').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(mocks.publish).toHaveBeenCalledTimes(1)
+  })
+})

@@ -106,7 +106,13 @@ onBeforeUnmount(() => {
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
     <div>
       <VAlert v-if="slugError" type="error" :title="slugError" class="mb-4" />
-      <FormKit ref="form" type="form" :actions="false" :disabled="disabled || saving" @submit="submit">
+      <FormKit
+        ref="form"
+        type="form"
+        :actions="false"
+        :disabled="disabled || saving"
+        @submit="submit"
+      >
         <FormKit
           v-model="buffer.title"
           type="text"

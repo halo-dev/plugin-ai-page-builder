@@ -402,8 +402,10 @@ function unpublishFromSettings() {
                 <PublishPagePopper
                   v-if="!item.publishedRevision"
                   :name="item.name"
+                  :title="item.title"
                   :slug="item.slug"
                   :version="item.version"
+                  :disabled="mutating"
                   placement="left-start"
                   @published="published"
                   @updated="published"

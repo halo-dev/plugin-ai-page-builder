@@ -3,6 +3,7 @@ import { defineComponent, h, reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import EditorView from '../../views/EditorView.vue'
 import PageSettings from '../../components/PageSettings.vue'
+import PublishPagePopper from '../../components/PublishPagePopper.vue'
 import RuntimePreview from '../../components/RuntimePreview.vue'
 import SourceEditor from '../../components/SourceEditor.vue'
 import type { PageDetail } from '../../api/generated'
@@ -93,7 +94,7 @@ const globals = {
       setup:
         (_, { slots }) =>
         () =>
-          h('div', slots.default?.()),
+          h('div', slots.default?.({ state: { valid: true } })),
     }),
     VCodemirror: true,
   },
@@ -119,6 +120,37 @@ async function editor() {
   return wrapper
 }
 describe('workspace integration', () => {
+  it('adopts a title saved during first publication and locks working edits until completion', async () => {
+    const wrapper = await editor()
+    const popper = wrapper.getComponent(PublishPagePopper)
+    const canvas = wrapper.findComponent({ name: 'VisualEditor' })
+    popper.vm.$emit('pending', true)
+    await flushPromises()
+    expect(canvas.props('disabled')).toBe(true)
+    canvas.vm.$emit('update:document', { ...page.document, title: 'Concurrent edit' })
+    const updated = {
+      page: { ...page.page, title: 'Published title', version: 2, draftRevision: 'r2' },
+      document: { ...page.document, title: 'Published title' },
+    }
+    popper.vm.$emit('updated', updated)
+    await flushPromises()
+    expect(wrapper.find('h1').text()).toBe('Published title')
+    expect(canvas.props('document')).toEqual(updated.document)
+    popper.vm.$emit('published', {
+      ...updated,
+      page: { ...updated.page, version: 3, publishedRevision: 'r2' },
+    })
+    popper.vm.$emit('pending', false)
+    await flushPromises()
+    expect(canvas.props('disabled')).toBe(false)
+    expect(
+      wrapper
+        .findAll('button')
+        .find((button) => button.text() === '保存')!
+        .attributes('disabled'),
+    ).toBeDefined()
+    wrapper.unmount()
+  })
   it('defaults to canvas and does not save merely opening or switching views', async () => {
     const wrapper = await editor()
     expect(wrapper.find('visual-editor-stub').exists()).toBe(true)

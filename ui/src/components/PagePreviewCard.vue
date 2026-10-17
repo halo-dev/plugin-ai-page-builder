@@ -100,9 +100,5 @@ onBeforeUnmount(() => {
         >打开编辑器 ↗</span
       >
     </button>
-    <span
-      class="pointer-events-none absolute bottom-2.5 left-2.5 rounded bg-white/90 px-1.5 py-0.5 text-[10px] text-gray-500"
-      >草稿预览</span
-    >
   </div>
 </template>
