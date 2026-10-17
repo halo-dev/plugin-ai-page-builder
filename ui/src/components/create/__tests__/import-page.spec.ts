@@ -70,6 +70,7 @@ describe('page archive import', () => {
   it('imports the selected file, invalidates page queries and opens the returned page', async () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const wrapper = modal()
+    expect(wrapper.text()).toContain('页面包可能包含 JavaScript 脚本')
     const file = new File(['zip'], 'page.ZIP', { type: 'application/octet-stream' })
     await select(wrapper, file)
     await submit(wrapper)

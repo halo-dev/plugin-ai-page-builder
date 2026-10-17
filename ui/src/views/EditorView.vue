@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, shallowRef, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  shallowRef,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { Dialog, Toast, VLoading } from '@halo-dev/components'
 import IconArrowLeft from '~icons/mingcute/arrow-left-line'
@@ -146,11 +153,20 @@ function onPublishPending(pending: boolean) {
   busy.value = pending
 }
 const view = shallowRef<'visual' | 'source' | 'runtime'>('visual')
+const runtimePreview = useTemplateRef<{ refresh: () => void }>('runtimePreview')
 const viewOptions = [
-  { value: 'visual', label: '可视化', icon: IconEdit },
+  { value: 'visual', label: '编辑', icon: IconEdit },
   { value: 'source', label: '源码', icon: IconCode },
-  { value: 'runtime', label: '运行', icon: IconPlay },
+  { value: 'runtime', label: '运行', icon: IconPlay, title: '运行已保存的草稿，脚本在沙箱中执行' },
 ] as const
+const publicUrl = computed(() =>
+  detail.value?.page.publishedRevision && detail.value.page.slug
+    ? `${window.location.origin}/${detail.value.page.slug}`
+    : '',
+)
+function openPublicPage() {
+  if (publicUrl.value) window.open(publicUrl.value, '_blank', 'noopener')
+}
 const mobilePanel = shallowRef<'chat' | 'canvas'>('canvas')
 const mobilePanelOptions = [
   { value: 'chat', label: '对话', icon: IconChat },
@@ -267,6 +283,12 @@ async function publish(unpublish = false) {
   if (!detail.value || locked.value || (!unpublish && (dirty.value || !valid.value))) return
   // First publish goes through the popper for the slug; this path is 更新发布/取消发布.
   if (!unpublish && !detail.value.page.publishedRevision) return
+  if (
+    !unpublish &&
+    detail.value.document.js &&
+    !(await confirm('发布包含脚本的页面？', '页面脚本会在访客浏览器中执行。请确认你信任这些内容。'))
+  )
+    return
   if (unpublish && !(await confirm('取消发布？', '访客将无法访问此页面。'))) return
   busy.value = true
   error.value = ''
@@ -436,6 +458,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           :slug="detail.page.slug"
           :version="detail.page.version"
           :disabled="locked || dirty || !valid"
+          :scripted="!!working?.js"
           @published="published"
           @updated="published"
           @pending="onPublishPending"
@@ -532,9 +555,41 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                   : '草稿'
               }}
             </span>
+            <span
+              v-if="working?.js"
+              class="apb-chip bg-purple-50 text-purple-700"
+              title="页面包含 JavaScript，发布后会在访客浏览器中执行"
+              >含脚本</span
+            >
+            <span
+              v-if="view === 'runtime' && dirty"
+              class="apb-chip bg-amber-50 text-amber-700"
+              title="运行预览只读取已保存的草稿，请先保存再查看最新修改"
+              >运行的是已保存草稿</span
+            >
+            <button
+              v-if="publicUrl"
+              type="button"
+              class="apb-chip max-w-44 bg-blue-50 text-blue-700 hover:bg-blue-100"
+              :title="`打开公开页面：${publicUrl}`"
+              @click="openPublicPage"
+            >
+              <IconExternal class="shrink-0 text-xs" />
+              <span class="truncate">/{{ detail.page.slug }}</span>
+            </button>
             <div class="ml-auto flex items-center gap-2">
               <button
-                v-if="rootStates.length"
+                v-if="view === 'runtime'"
+                type="button"
+                class="apb-icon-btn"
+                title="重新运行"
+                aria-label="重新运行"
+                @click="runtimePreview?.refresh()"
+              >
+                <IconRefresh class="text-base" />
+              </button>
+              <button
+                v-if="rootStates.length && view !== 'runtime'"
                 type="button"
                 class="apb-icon-btn"
                 :title="previewModeIcon.title"
@@ -575,11 +630,10 @@ function applySettings(value: Parameters<typeof patch>[0]) {
               />
               <RuntimePreview
                 v-if="view === 'runtime'"
+                ref="runtimePreview"
+                :src="pagePreviewUrl(detail.page.name)"
                 :document="detail.document"
-                :dirty="dirty"
                 :device="device"
-                :preview-css="themeContext?.previewCss || ''"
-                :root-state="rootState"
               />
               <VisualEditor
                 v-show="view === 'visual' && !streamPreview"
@@ -600,6 +654,12 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                 @change="patch"
               />
             </div>
+            <p
+              v-if="view === 'visual' && !streamPreview && working?.js"
+              class="pointer-events-none absolute bottom-6 left-6 z-[6] rounded-md border border-gray-200 bg-white/95 px-2.5 py-1.5 text-xs leading-5 text-gray-500 shadow-sm"
+            >
+              编辑画布不执行页面脚本，交互效果请在「运行」中查看
+            </p>
           </div>
         </section>
       </div>

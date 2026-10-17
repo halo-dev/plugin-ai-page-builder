@@ -58,6 +58,29 @@ class ContentPolicyTest {
         assertThatThrownBy(() -> policy.validateCss(css)).isInstanceOf(ResponseStatusException.class);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"opener", "OPENER", "nofollow Opener", "noopener opener"})
+    void rejectsOpenerRel(String rel) {
+        assertThatThrownBy(() -> policy.validateHtml(
+            "<a href='https://example.com' target='_blank' rel='" + rel + "'>x</a>"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("rel");
+    }
+
+    @Test
+    void sanitizeHtmlOutputsTheParsedDomAndAddsNoopenerToBlankLinks() {
+        var output = policy.sanitizeHtml(
+            "<DIV class=hero><a href='https://example.com' target='_blank'>go</a><p>Body");
+        assertThat(output)
+            .startsWith("<div class=\"hero\">")
+            .contains("rel=\"noopener\"")
+            .contains("<p>Body</p>");
+        assertThat(policy.sanitizeHtml(
+            "<a href='/x' target='_blank' rel='nofollow noopener'>x</a>"))
+            .contains("rel=\"nofollow noopener\"");
+        assertThatThrownBy(() -> policy.sanitizeHtml("<script>alert(1)</script>"))
+            .isInstanceOf(ResponseStatusException.class);
+    }
+
     @Test
     void reportsParseLocationForBrokenCss() {
         assertThatThrownBy(() -> policy.validateCss(".a { color: red"))

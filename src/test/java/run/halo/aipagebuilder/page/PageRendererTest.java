@@ -9,11 +9,16 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import org.jsoup.Jsoup;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
@@ -22,16 +27,21 @@ import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.app.theme.TemplateNameResolver;
+import run.halo.aipagebuilder.ai.PublicApiCatalog;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 
 class PageRendererTest {
     private final TemplateNameResolver resolver = mock(TemplateNameResolver.class);
+    private final PublicApiCatalog publicApiCatalog = mock(PublicApiCatalog.class);
     private final ContentPolicy policy = mock(ContentPolicy.class);
-    private final PageRenderer renderer = new PageRenderer(resolver, policy);
+    private final ExternalUrlSupplier externalUrlSupplier = requestBasedExternalUrl();
+    private final PageRenderer renderer =
+        new PageRenderer(resolver, policy, publicApiCatalog, externalUrlSupplier);
     private final ServerRequest request = ServerRequest.create(
-        MockServerWebExchange.from(MockServerHttpRequest.get("/p/about")),
+        MockServerWebExchange.from(MockServerHttpRequest.get("http://localhost/p/about")),
         HandlerStrategies.withDefaults().messageReaders());
     private final PageDocument document = new PageDocument(1, "code", "", Map.of(),
         "<p>About</p>", "p { color: red }", "About", "Description");
@@ -42,6 +52,7 @@ class PageRendererTest {
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.renderCss(document.css(), "ai-page-builder-about"))
             .thenReturn("#ai-page-builder-about p { color: red }");
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
         var response = (RenderingResponse) renderer.render(request, "about", "about/company", true, document).block();
         assertThat(response.name()).isEqualTo("plugin:ai-page-builder:ai-page-builder");
         assertThat(response.headers().getCacheControl()).isEqualTo("no-store");
@@ -61,7 +72,8 @@ class PageRendererTest {
         var interactive = new PageDocument(2, "code", null, null, "<p>Interactive</p>",
             "p {color: red} html.dark p {color: white}", "Title", null,
             "document.querySelector('#ai-page-builder-about p').textContent = 'Ready';");
-        var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy())
+        var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy(),
+            publicApiCatalog, externalUrlSupplier)
             .render(request, "about", "about/company", true, interactive).block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(response.name()).isEqualTo("theme:custom-ai-page-builder");
@@ -82,7 +94,8 @@ class PageRendererTest {
             "Title", null, js);
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
-        var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy())
+        var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy(),
+            publicApiCatalog, externalUrlSupplier)
             .render(request, "about", "about/company", true, interactive).block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         var body = Jsoup.parseBodyFragment(view.html()).body();
@@ -104,6 +117,7 @@ class PageRendererTest {
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder-standalone"));
         when(policy.renderCss(document.css(), "ai-page-builder-about"))
             .thenReturn("#ai-page-builder-about p { color: red }");
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
         var response = (RenderingResponse) renderer.render(request, "about", "about/company",
             false, document).block();
         assertThat(response.name()).isEqualTo("plugin:ai-page-builder:ai-page-builder-standalone");
@@ -117,13 +131,18 @@ class PageRendererTest {
         var template = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";
         when(resolver.resolveTemplateNameOrDefault(any(), eq(template)))
             .thenReturn(Mono.just("plugin:ai-page-builder:" + template));
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
+            "/apis/api.content.halo.run/v1alpha1/", "/apis/api.photo.halo.run/v1alpha1/"));
         var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "", "Title", null,
             "document.querySelector('p').textContent = 'Ready';");
+        when(policy.sanitizeHtml(scripted.html())).thenReturn(scripted.html());
         var preview = (RenderingResponse) renderer.preview(request, "about", "about", themeLayout,
             scripted).block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .isEqualTo("sandbox allow-scripts; connect-src 'none'; frame-src 'none'; "
-                + "object-src 'none'; worker-src 'none'; form-action 'none'");
+            .isEqualTo("sandbox allow-scripts; connect-src "
+                + "http://localhost/apis/api.content.halo.run/v1alpha1/ "
+                + "http://localhost/apis/api.photo.halo.run/v1alpha1/; "
+                + "frame-src 'none'; object-src 'none'; worker-src 'none'; form-action 'none'");
         var published = (RenderingResponse) renderer.render(request, "about", "about", themeLayout,
             scripted).block();
         assertThat(published.headers().getFirst("Content-Security-Policy")).isNull();
@@ -133,11 +152,124 @@ class PageRendererTest {
     }
 
     @Test
+    void previewsWithoutPublicApisBlockEveryConnection() {
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of());
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
+        var preview = (RenderingResponse) renderer.preview(request, "about", "about", true,
+            document).block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+            .contains("connect-src 'none'").doesNotContain("allow-same-origin");
+    }
+
+    @Test
+    void superAdministratorViewsStripScriptsAndFlagTheTemplate() {
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "", "Title", null,
+            "document.querySelector('p').textContent = 'Ready';");
+        when(policy.sanitizeHtml(scripted.html())).thenReturn(scripted.html());
+        var response = (RenderingResponse) renderer.render(request, "about", "about", true,
+            scripted, true).block();
+        var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
+        assertThat(view.scriptBlocked()).isTrue();
+        assertThat(view.html()).isEqualTo(scripted.html()).doesNotContain("<script");
+
+        var staticPage = new PageDocument(2, "code", null, null, "<p>Body</p>", "", "Title", null,
+            "");
+        when(policy.sanitizeHtml(staticPage.html())).thenReturn(staticPage.html());
+        var staticResponse = (RenderingResponse) renderer.render(request, "about", "about", true,
+            staticPage, true).block();
+        var staticView = (PageRenderer.PageView) staticResponse.model().get("aiPageBuilder");
+        assertThat(staticView.scriptBlocked()).isFalse();
+    }
+
+    @Test
+    void rendersTheSanitizedDomInsteadOfTheRawSource() {
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        var unclosed = new PageDocument(1, "code", null, null,
+            "<DIV class=hero><a href=\"https://example.com\" target=_blank>go</a><p>Body", "",
+            "Title", null);
+        var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy(),
+            publicApiCatalog, externalUrlSupplier).render(request, "about", "about", true, unclosed)
+            .block();
+        var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
+        assertThat(view.html())
+            .startsWith("<div class=\"hero\">")
+            .contains("rel=\"noopener\"")
+            .contains("<p>Body</p>");
+    }
+
+    @Test
+    void previewPolicyUsesTheConfiguredExternalUrlAsItsCspOrigin() {
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
+            "/apis/api.content.halo.run/v1alpha1/"));
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
+        var preview = (RenderingResponse) new PageRenderer(resolver, policy, publicApiCatalog,
+            fixedExternalUrl("https://pages.example.com/site"))
+            .preview(request, "about", "about", true, document).block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+            .startsWith("sandbox allow-scripts; connect-src "
+                + "https://pages.example.com/apis/api.content.halo.run/v1alpha1/;");
+    }
+
+    @Test
     void invalidPersistedContentIsRejectedBeforeTemplateRendering() {
         doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsafe content"))
             .when(policy).validate(document);
         assertThatThrownBy(() -> renderer.render(request, "about", "about/company", true, document).block())
             .isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(resolver);
+    }
+
+    private static ExternalUrlSupplier requestBasedExternalUrl() {
+        return new ExternalUrlSupplier() {
+            @Override
+            public URI get() {
+                return URI.create("/");
+            }
+
+            @Override
+            public URL getURL(HttpRequest request) {
+                try {
+                    return request.getURI().toURL();
+                } catch (MalformedURLException error) {
+                    throw new IllegalStateException(error);
+                }
+            }
+
+            @Override
+            public URL getRaw() {
+                return null;
+            }
+        };
+    }
+
+    private static ExternalUrlSupplier fixedExternalUrl(String value) {
+        var uri = URI.create(value);
+        return new ExternalUrlSupplier() {
+            @Override
+            public URI get() {
+                return uri;
+            }
+
+            @Override
+            public URL getURL(HttpRequest request) {
+                try {
+                    return uri.toURL();
+                } catch (MalformedURLException error) {
+                    throw new IllegalStateException(error);
+                }
+            }
+
+            @Override
+            public URL getRaw() {
+                return null;
+            }
+        };
     }
 }

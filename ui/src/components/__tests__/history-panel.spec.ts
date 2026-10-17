@@ -68,10 +68,6 @@ const mockGetPageRevision = vi.fn<
     document: documents[args.revision]!,
   },
 }))
-const mockPreviewGet = vi.fn<(url: string, config?: unknown) => Promise<{ data: string }>>(
-  async () => ({ data: '<html><head></head><body>preview</body></html>' }),
-)
-
 vi.mock('../../api/clients', () => ({
   aiPageBuilderApi: {
     // Arrow wrappers defer access: the factory runs before the consts are initialized.
@@ -80,9 +76,6 @@ vi.mock('../../api/clients', () => ({
   },
   revisionPreviewUrl: (name: string, revision: string) =>
     `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/${name}/revisions/${revision}/preview`,
-}))
-vi.mock('@halo-dev/api-client', () => ({
-  axiosInstance: { get: (url: string, config?: unknown) => mockPreviewGet(url, config) },
 }))
 // ui-shared's index pulls in pinia, which the console provides at runtime but tests lack.
 vi.mock('@halo-dev/ui-shared', () => ({
@@ -145,27 +138,31 @@ describe('HistoryPanel', () => {
     queryClient.clear()
     mockListPageRevisions.mockClear()
     mockGetPageRevision.mockClear()
-    mockPreviewGet.mockClear()
   })
 
-  it('auto-selects the latest revision and renders its sandboxed preview iframe', async () => {
+  it('auto-selects the latest revision and runs it in the sandboxed preview iframe', async () => {
     const wrapper = mountPanel()
     await flushPromises()
-    expect(mockPreviewGet).toHaveBeenCalledWith(
-      '/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/about/revisions/rev-2/preview',
-      expect.objectContaining({ responseType: 'text' }),
-    )
     const iframe = wrapper.find('iframe')
     expect(iframe.exists()).toBe(true)
-    // The base tag pins URL resolution to the preview's own URL, keeping theme assets
-    // working and in-page anchors inside the preview instead of the console.
-    expect(iframe.attributes('srcdoc')).toBe(
-      `<html><head><base href="${location.origin}/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/about/revisions/rev-2/preview"></head><body>preview</body></html>`,
+    // Same isolation as the "运行" tab: the preview endpoint sets its own sandbox CSP,
+    // and scripts never receive the console's origin.
+    expect(iframe.attributes('src')).toBe(
+      '/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/about/revisions/rev-2/preview',
     )
-    // Same-origin inline previews must never reach the console via window.parent:
-    // same-origin for theme assets, but scripts stay disabled.
-    expect(iframe.attributes('sandbox')).toBe('allow-same-origin')
+    expect(iframe.attributes('srcdoc')).toBeUndefined()
+    expect(iframe.attributes('sandbox')).toBe('allow-scripts')
     expect(wrapper.text()).toContain('图库')
+  })
+
+  it('switches the preview iframe when another revision is selected', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.findAll('nav button')[1]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('iframe').attributes('src')).toBe(
+      '/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/about/revisions/rev-1/preview',
+    )
   })
 
   it('marks draft, published and restored revisions with badges', async () => {

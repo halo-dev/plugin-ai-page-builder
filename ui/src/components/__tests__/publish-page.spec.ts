@@ -146,6 +146,14 @@ describe('first publish confirmation', () => {
     expect(wrapper.emitted('published')).toHaveLength(1)
   })
 
+  it('warns before first publishing a page that contains scripts', () => {
+    const wrapper = mount(PublishPagePopper, {
+      props: { name: 'page', title: '关于我们', slug: 'about-us', version: 1, scripted: true },
+      global: { components: { FormKit } },
+    })
+    expect(wrapper.text()).toContain('此页面包含脚本，发布后会在访客浏览器中自动执行')
+  })
+
   it('leaves a missing path empty and requires it before publishing', async () => {
     const wrapper = popper(null)
     expect(wrapper.get<HTMLInputElement>('[name=slug]').element.value).toBe('')

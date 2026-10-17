@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import org.pf4j.PluginStateListener;
@@ -48,6 +49,11 @@ public class PublicApiCatalog {
         this.manager = manager;
         this.clock = clock;
         manager.addPluginStateListener(listener);
+    }
+
+    /** Public API path prefixes that sandboxed previews may call; never Console API paths. */
+    public List<String> publicPathPrefixes() {
+        return snapshot().publicPathPrefixes();
     }
 
     public Map<String, Object> search(String query, int limit) {
@@ -138,7 +144,8 @@ public class PublicApiCatalog {
                 if (version == generation.get()) {
                     current = new Snapshot(version, clock.getAsLong(), items,
                         scan.partial() || items.stream().anyMatch(item ->
-                            !"declared".equals(item.get("contract"))), List.copyOf(scan.warnings()));
+                            !"declared".equals(item.get("contract"))), List.copyOf(scan.warnings()),
+                        scan.publicPathPrefixes());
                     snapshot = current;
                     return current;
                 }
@@ -155,6 +162,7 @@ public class PublicApiCatalog {
     private Scan scan() {
         var routes = new TreeMap<String, List<Discovered>>();
         var warnings = new ArrayList<String>();
+        var prefixes = new TreeSet<String>();
         boolean partial = false;
         var beans = manager.getRootContext().getBeansOfType(RouterFunction.class);
         for (var bean : beans.entrySet()) {
@@ -167,6 +175,7 @@ public class PublicApiCatalog {
             }
             for (var data : visitor.getRouterFunctionDatas()) {
                 if (!publicPath(data.getPath())) continue;
+                prefixes.add(pathPrefix(data.getPath()));
                 var attribute = data.getAttributes().get(OPERATION_ATTRIBUTE);
                 Operation operation = null;
                 try {
@@ -191,7 +200,17 @@ public class PublicApiCatalog {
                 }
             }
         }
-        return new Scan(routes, partial, warnings);
+        return new Scan(routes, partial, warnings, List.copyOf(prefixes));
+    }
+
+    /** Turns a public route path into the group/version prefix shared by its siblings. */
+    private static String pathPrefix(String path) {
+        var parts = path.split("/", -1);
+        // ["", "apis", group, version, ...]
+        if (parts.length > 4) {
+            return String.join("/", Arrays.copyOfRange(parts, 0, 4)) + "/";
+        }
+        return path.endsWith("/") ? path : path + "/";
     }
 
     private static Map<String, Object> conditions(RouterFunctionData data) {
@@ -285,9 +304,11 @@ public class PublicApiCatalog {
     }
 
     private record Snapshot(long generation, long createdAt, List<Map<String, Object>> items,
-                            boolean partial, List<String> warnings) { }
+                            boolean partial, List<String> warnings,
+                            List<String> publicPathPrefixes) { }
     private record Discovered(String method, String path, Operation operation, Object attribute,
                               Map<String, Object> conditions) { }
-    private record Scan(Map<String, List<Discovered>> routes, boolean partial, List<String> warnings) { }
+    private record Scan(Map<String, List<Discovered>> routes, boolean partial, List<String> warnings,
+                        List<String> publicPathPrefixes) { }
     private record Match(Map<String, Object> item, int score) { }
 }

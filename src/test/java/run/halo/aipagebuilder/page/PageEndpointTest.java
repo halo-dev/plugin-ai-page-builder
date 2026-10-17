@@ -11,9 +11,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpRequest;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpStatus;
@@ -29,13 +33,35 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.app.infra.utils.JsonUtils;
 import run.halo.app.theme.TemplateNameResolver;
+import run.halo.aipagebuilder.ai.PublicApiCatalog;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PageApi.PageDetail;
 
 class PageEndpointTest {
+    private static final ExternalUrlSupplier EXTERNAL_URLS = new ExternalUrlSupplier() {
+        @Override
+        public URI get() {
+            return URI.create("/");
+        }
+
+        @Override
+        public URL getURL(HttpRequest request) {
+            try {
+                return request.getURI().toURL();
+            } catch (MalformedURLException error) {
+                throw new IllegalStateException(error);
+            }
+        }
+
+        @Override
+        public URL getRaw() {
+            return null;
+        }
+    };
     private final PageService service = mock(PageService.class);
     private final PageRenderer renderer = mock(PageRenderer.class);
     private final PageEndpoint endpoint = new PageEndpoint(service, renderer);
@@ -133,7 +159,9 @@ class PageEndpointTest {
     @Test
     void candidatePreviewUsesSameThemeAndCssAsGetWithoutSaving() {
         var resolver = mock(TemplateNameResolver.class);
-        var renderingEndpoint = new PageEndpoint(service, new PageRenderer(resolver, new ContentPolicy()));
+        var renderingEndpoint = new PageEndpoint(service,
+            new PageRenderer(resolver, new ContentPolicy(), mock(PublicApiCatalog.class),
+                EXTERNAL_URLS));
         var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
         var candidate = new PageDocument(2, "code", null, null, "<p>Unsaved</p>", """
             :root {color: red}
@@ -231,7 +259,9 @@ class PageEndpointTest {
     @ValueSource(strings = {"html", "css", "schema"})
     void invalidCandidateIsRejectedBeforeThemeRendering(String invalidField) {
         var resolver = mock(TemplateNameResolver.class);
-        var renderingEndpoint = new PageEndpoint(service, new PageRenderer(resolver, new ContentPolicy()));
+        var renderingEndpoint = new PageEndpoint(service,
+            new PageRenderer(resolver, new ContentPolicy(), mock(PublicApiCatalog.class),
+                EXTERNAL_URLS));
         var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
         var candidate = new PageDocument("schema".equals(invalidField) ? 99 : 1, "code", null, null,
             "html".equals(invalidField) ? "<script>alert(1)</script>" : "<p>Unsaved</p>",

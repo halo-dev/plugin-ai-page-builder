@@ -73,6 +73,10 @@ class PublicApiCatalogTest {
         assertThat(items(catalog.search("queryPosts", 8)).getFirst())
             .containsEntry("operationId", "queryPosts");
         assertThat(items(catalog.search("doesNotExist", 8))).isEmpty();
+        assertThat(catalog.publicPathPrefixes()).containsExactly(
+            "/apis/api.content.halo.run/v1alpha1/",
+            "/apis/api.example.halo.run/v1alpha1/",
+            "/apis/api.halo.run/v1alpha1/");
     }
 
     @Test
@@ -85,6 +89,9 @@ class PublicApiCatalogTest {
         assertThat(items(catalog.search("", 8))).isEmpty();
         assertThat(items(catalog.details(List.of("GET " + path))).getFirst())
             .containsEntry("status", "not_found");
+        // Hidden operations stay callable from previews even though documentation hides them.
+        assertThat(catalog.publicPathPrefixes())
+            .containsExactly("/apis/api.example.halo.run/v1alpha1/");
     }
 
     @Test

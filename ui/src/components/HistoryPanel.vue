@@ -3,7 +3,6 @@ import { computed, shallowRef, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { Toast, VAlert, VButton, VEmpty, VLoading, VModal } from '@halo-dev/components'
 import { utils } from '@halo-dev/ui-shared'
-import { axiosInstance } from '@halo-dev/api-client'
 import IconSparkles from '~icons/mingcute/sparkles-line'
 import IconEdit from '~icons/mingcute/edit-2-line'
 import IconHistory from '~icons/mingcute/history-line'
@@ -90,39 +89,16 @@ const EMPTY_DOCUMENT: Pick<PageDocument, 'html' | 'css' | 'js'> = { html: '', cs
 const previewLink = computed(() =>
   selected.value ? revisionPreviewUrl(props.name, selected.value.name) : '',
 )
-// Fetch the rendered page through the authenticated client and inline it via srcdoc:
-// an opaque-origin iframe (sandbox without allow-same-origin) cannot load the theme's
-// CSS/fonts, which are only served same-origin without CORS headers.
-const previewQuery = useQuery({
-  queryKey: computed(() => [
-    ...pageKeys.revision(props.name, selected.value?.name || ''),
-    'preview-html',
-  ]),
-  queryFn: async () =>
-    (
-      await axiosInstance.get<string>(previewLink.value, {
-        responseType: 'text',
-        // Keep the raw HTML untouched; axios must not try to parse it.
-        transformResponse: [(data) => data],
-      })
-    ).data,
-  enabled: computed(() => !!selected.value && view.value === 'preview'),
-  queryClient,
-})
-// srcdoc documents inherit the console's base URL, so in-page anchors (href="#section")
-// would resolve to the console and navigate the iframe away. Pin the base to the preview's
-// own URL instead: theme assets keep resolving over HTTP(S), and anchors navigate the
-// iframe to the preview URL itself (a reload that lands on the section) rather than the
-// console. about:srcdoc cannot be the base — root-absolute URLs fail to resolve against it.
-const previewHtml = computed(() => {
-  const html = previewQuery.data.value
-  if (!html) return ''
-  const base = `<base href="${location.origin}${previewLink.value}">`
-  const head = /<head[^>]*>/i.exec(html)
-  return head
-    ? html.slice(0, head.index + head[0].length) + base + html.slice(head.index + head[0].length)
-    : base + html
-})
+// Load the revision preview directly, exactly like the "运行" tab: the server sets a
+// sandbox CSP (opaque origin, public APIs only), and the iframe adds allow-scripts without
+// allow-same-origin. Scripts run in isolation, and theme assets load via the CORS filter.
+const previewLoading = shallowRef(true)
+watch(
+  () => [selected.value?.name, view.value] as const,
+  () => {
+    if (view.value === 'preview') previewLoading.value = true
+  },
+)
 
 const SOURCE_LABELS: Record<string, string> = {
   ai: 'AI 生成',
@@ -272,36 +248,22 @@ function refetchDetails() {
           </header>
           <div v-if="view === 'preview'" class="relative flex min-h-0 flex-1 flex-col bg-gray-100">
             <div
-              v-if="previewQuery.isFetching.value"
+              v-if="previewLoading"
               class="absolute inset-0 z-10 flex items-center justify-center"
             >
               <VLoading />
             </div>
-            <VAlert
-              v-else-if="previewQuery.isError.value"
-              type="error"
-              title="预览加载失败"
-              class="m-4"
-              ><template #actions
-                ><VButton @click="previewQuery.refetch()">重新加载</VButton></template
-              ></VAlert
-            >
-            <FixedPreviewViewport
-              v-else-if="previewQuery.data.value"
-              :device="device"
-              fit="width"
-              class="p-4"
-            >
-              <!-- 内嵌预览必须隔离：同源无 sandbox 的 iframe 可通过 window.parent 操作已登录的
-                   Console。这里用 srcdoc + allow-same-origin（不放行脚本）：主题 CSS/字体
-                   可以同源加载，脚本不执行；需要完整交互保真时使用「在新窗口打开预览」。 -->
+            <FixedPreviewViewport :device="device" fit="width" class="p-4">
+              <!-- 与「运行」一致的隔离方式：iframe 只放行脚本、不放行同源，服务端预览响应
+                   另带 sandbox CSP，脚本在不透明源中执行，无法读取 Console 或站点数据。 -->
               <iframe
                 :key="selected.name"
-                :srcdoc="previewHtml"
+                :src="previewLink"
                 class="block h-full w-full rounded-lg border-0 bg-white shadow-sm"
                 title="历史版本预览"
-                sandbox="allow-same-origin"
+                sandbox="allow-scripts"
                 referrerpolicy="no-referrer"
+                @load="previewLoading = false"
               />
             </FixedPreviewViewport>
           </div>

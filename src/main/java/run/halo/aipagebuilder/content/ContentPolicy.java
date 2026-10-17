@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -67,6 +68,32 @@ public class ContentPolicy {
     }
 
     public void validateHtml(String html) {
+        parseAndValidateHtml(html);
+    }
+
+    /**
+     * Validates the fragment and returns the DOM serialization used for rendering.
+     * Rendering the parsed DOM instead of the original source prevents differences between
+     * Jsoup's parse and the browser's parse from introducing unchecked markup.
+     */
+    public String sanitizeHtml(String html) {
+        var body = parseAndValidateHtml(html);
+        for (var link : body.select("a[target=_blank]")) {
+            var rel = link.attr("rel");
+            var safe = false;
+            for (var token : rel.split("\\s+")) {
+                if ("noopener".equalsIgnoreCase(token) || "noreferrer".equalsIgnoreCase(token)) {
+                    safe = true;
+                }
+            }
+            if (!safe) {
+                link.attr("rel", rel.isBlank() ? "noopener" : rel + " noopener");
+            }
+        }
+        return body.html();
+    }
+
+    private Element parseAndValidateHtml(String html) {
         require(html != null && html.length() <= MAX_HTML, "正文不能超过 200 KB");
         require(!HTML_SHELL.matcher(html).find(), "仅支持正文片段，请移除 html/head/body 外壳");
         var body = Jsoup.parseBodyFragment(html).body();
@@ -79,6 +106,7 @@ public class ContentPolicy {
                 validateAttribute(attribute.getKey(), attribute.getValue());
             }
         }
+        return body;
     }
 
     public void validateCss(String css) {
@@ -240,6 +268,11 @@ public class ContentPolicy {
         }
         if ("target".equals(key)) {
             require(Set.of("_self", "_blank").contains(value), "不支持的链接 target");
+        }
+        if ("rel".equals(key)) {
+            for (var token : value.split("\\s+")) {
+                require(!"opener".equalsIgnoreCase(token), "不支持的链接 rel");
+            }
         }
     }
 
