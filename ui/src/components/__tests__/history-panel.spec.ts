@@ -157,9 +157,10 @@ describe('HistoryPanel', () => {
     )
     const iframe = wrapper.find('iframe')
     expect(iframe.exists()).toBe(true)
-    // The base tag pins in-page anchors to about:srcdoc so they scroll in place.
+    // The base tag pins URL resolution to the preview's own URL, keeping theme assets
+    // working and in-page anchors inside the preview instead of the console.
     expect(iframe.attributes('srcdoc')).toBe(
-      '<html><head><base href="about:srcdoc"></head><body>preview</body></html>',
+      `<html><head><base href="${location.origin}/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/about/revisions/rev-2/preview"></head><body>preview</body></html>`,
     )
     // Same-origin inline previews must never reach the console via window.parent:
     // same-origin for theme assets, but scripts stay disabled.

@@ -109,12 +109,14 @@ const previewQuery = useQuery({
   queryClient,
 })
 // srcdoc documents inherit the console's base URL, so in-page anchors (href="#section")
-// would resolve to the console and navigate the iframe away. Pin the base to about:srcdoc
-// so anchors scroll in place; root-absolute theme asset URLs are unaffected.
+// would resolve to the console and navigate the iframe away. Pin the base to the preview's
+// own URL instead: theme assets keep resolving over HTTP(S), and anchors navigate the
+// iframe to the preview URL itself (a reload that lands on the section) rather than the
+// console. about:srcdoc cannot be the base — root-absolute URLs fail to resolve against it.
 const previewHtml = computed(() => {
   const html = previewQuery.data.value
   if (!html) return ''
-  const base = '<base href="about:srcdoc">'
+  const base = `<base href="${location.origin}${previewLink.value}">`
   const head = /<head[^>]*>/i.exec(html)
   return head
     ? html.slice(0, head.index + head[0].length) + base + html.slice(head.index + head[0].length)
