@@ -2,6 +2,8 @@
 import { computed, shallowRef, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { Toast, VAlert, VButton, VEmpty, VLoading, VModal } from '@halo-dev/components'
+import { utils } from '@halo-dev/ui-shared'
+import { axiosInstance } from '@halo-dev/api-client'
 import IconSparkles from '~icons/mingcute/sparkles-line'
 import IconEdit from '~icons/mingcute/edit-2-line'
 import IconHistory from '~icons/mingcute/history-line'
@@ -64,12 +66,51 @@ const deviceOptions = [
   { value: 'mobile', icon: IconMobile, title: '手机 390px' },
 ] as const
 
+// The diff tab compares against the revision's own previous version, not the current draft:
+// for the earliest revision there is no "before", so an empty document is used.
+const previousSummary = computed(() => {
+  const list = revisionsQuery.data.value
+  if (!selected.value || !list) return undefined
+  const index = list.findIndex((revision) => revision.name === selected.value!.name)
+  return index === -1 ? undefined : list[index + 1]
+})
+const previousDetailQuery = useQuery({
+  queryKey: computed(() => pageKeys.revision(props.name, previousSummary.value?.name || '')),
+  queryFn: async () =>
+    (
+      await aiPageBuilderApi.getPageRevision({
+        name: props.name,
+        revision: previousSummary.value!.name,
+      })
+    ).data,
+  enabled: computed(() => !!previousSummary.value && view.value === 'diff'),
+  queryClient,
+})
+const previousDocument = computed(() => previousDetailQuery.data.value?.document)
+const EMPTY_DOCUMENT: Pick<PageDocument, 'html' | 'css' | 'js'> = { html: '', css: '', js: '' }
+
 const previewLink = computed(() =>
   selected.value ? revisionPreviewUrl(props.name, selected.value.name) : '',
 )
-const previewLoaded = shallowRef(false)
-// The iframe is recreated when the revision or tab changes; reset the loading veil for both.
-watch([selected, view], () => (previewLoaded.value = false))
+// Fetch the rendered page through the authenticated client and inline it via srcdoc:
+// an opaque-origin iframe (sandbox without allow-same-origin) cannot load the theme's
+// CSS/fonts, which are only served same-origin without CORS headers.
+const previewQuery = useQuery({
+  queryKey: computed(() => [
+    ...pageKeys.revision(props.name, selected.value?.name || ''),
+    'preview-html',
+  ]),
+  queryFn: async () =>
+    (
+      await axiosInstance.get<string>(previewLink.value, {
+        responseType: 'text',
+        // Keep the raw HTML untouched; axios must not try to parse it.
+        transformResponse: [(data) => data],
+      })
+    ).data,
+  enabled: computed(() => !!selected.value && view.value === 'preview'),
+  queryClient,
+})
 
 const SOURCE_LABELS: Record<string, string> = {
   ai: 'AI 生成',
@@ -79,6 +120,9 @@ const SOURCE_LABELS: Record<string, string> = {
 const sourceLabel = (source: string) => SOURCE_LABELS[source] ?? source
 const sourceIcon = (source: string) =>
   source === 'ai' ? IconSparkles : source === 'restore' ? IconHistory : IconEdit
+
+const fullTime = (value: string) => new Date(value).toLocaleString()
+const timeAgo = (value: string) => utils.date.timeAgo(value) ?? fullTime(value)
 
 async function copyPreviewLink() {
   try {
@@ -91,14 +135,25 @@ async function copyPreviewLink() {
 function openPreview() {
   window.open(previewLink.value, '_blank', 'noopener')
 }
+function refetchDetails() {
+  detailQuery.refetch()
+  if (previousSummary.value) previousDetailQuery.refetch()
+}
 </script>
 
 <template>
-  <VModal title="历史版本" :width="1280" @close="emit('close')">
+  <VModal
+    title="历史版本"
+    :width="1280"
+    height="calc(100vh - 20px)"
+    centered
+    :body-class="['!p-0']"
+    @close="emit('close')"
+  >
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
-    <div>
-      <VLoading v-if="revisionsQuery.isLoading.value" />
-      <VAlert v-if="revisionsQuery.isError.value" type="error" title="历史版本加载失败"
+    <div class="h-full">
+      <VLoading v-if="revisionsQuery.isLoading.value" class="m-4" />
+      <VAlert v-if="revisionsQuery.isError.value" type="error" title="历史版本加载失败" class="m-4"
         ><template #actions
           ><VButton @click="revisionsQuery.refetch()">重新加载</VButton></template
         ></VAlert
@@ -110,48 +165,57 @@ function openPreview() {
           !revisionsQuery.data.value?.length
         "
         title="暂无历史版本"
+        class="m-4"
       />
-      <div v-if="revisionsQuery.data.value?.length" class="flex h-[68vh] flex-col md:flex-row">
+      <div
+        v-if="revisionsQuery.data.value?.length"
+        class="flex h-full min-h-0 flex-col md:flex-row"
+      >
         <nav
-          class="max-h-44 shrink-0 overflow-auto border-b border-gray-100 md:max-h-none md:w-60 md:border-b-0 md:border-r"
+          class="max-h-44 shrink-0 overflow-auto border-b border-gray-100 p-1.5 md:max-h-none md:w-60 md:border-b-0 md:border-r"
           aria-label="历史版本列表"
         >
-          <button
-            v-for="revision in revisionsQuery.data.value"
-            :key="revision.name"
-            type="button"
-            class="relative flex w-full flex-col gap-1 border-b border-gray-100 px-4 py-3 text-left transition-colors hover:bg-gray-50"
-            :class="{ 'bg-gray-50': selected?.name === revision.name }"
-            :aria-pressed="selected?.name === revision.name"
-            @click="selected = revision"
-          >
-            <span
-              v-if="selected?.name === revision.name"
-              class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-gray-900"
-            />
-            <strong class="truncate text-[13px] text-gray-900">{{ revision.title }}</strong>
-            <span class="text-xs text-gray-500">{{
-              new Date(revision.createdAt).toLocaleString()
-            }}</span>
-            <span class="flex flex-wrap items-center gap-1.5">
+          <div class="flex flex-col gap-0.5">
+            <button
+              v-for="revision in revisionsQuery.data.value"
+              :key="revision.name"
+              type="button"
+              class="relative flex w-full flex-col gap-1 rounded-md px-2.5 py-2 text-left transition-colors"
+              :class="selected?.name === revision.name ? 'bg-gray-100' : 'hover:bg-gray-50'"
+              :aria-pressed="selected?.name === revision.name"
+              @click="selected = revision"
+            >
               <span
-                class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600"
-              >
-                <component :is="sourceIcon(revision.source)" />
-                {{ sourceLabel(revision.source) }} · {{ revision.createdBy }}
+                v-if="selected?.name === revision.name"
+                class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-gray-900"
+              />
+              <span class="flex items-center gap-1.5">
+                <strong class="min-w-0 flex-1 truncate text-[13px] font-medium text-gray-900">{{
+                  revision.title
+                }}</strong>
+                <span
+                  v-if="revision.name === draftRevision"
+                  class="shrink-0 rounded bg-blue-50 px-1 text-[10px] leading-4 text-blue-600"
+                  >当前草稿</span
+                >
+                <span
+                  v-if="revision.name === publishedRevision"
+                  class="shrink-0 rounded bg-green-50 px-1 text-[10px] leading-4 text-green-600"
+                  >已发布</span
+                >
               </span>
               <span
-                v-if="revision.name === draftRevision"
-                class="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-600"
-                >当前草稿</span
+                class="flex items-center gap-1 text-[11px] text-gray-400"
+                :title="fullTime(revision.createdAt)"
               >
-              <span
-                v-if="revision.name === publishedRevision"
-                class="rounded-full bg-green-50 px-1.5 py-0.5 text-[11px] text-green-600"
-                >已发布</span
-              >
-            </span>
-          </button>
+                <component :is="sourceIcon(revision.source)" class="shrink-0" />
+                <span class="truncate"
+                  >{{ sourceLabel(revision.source) }} · {{ timeAgo(revision.createdAt) }} ·
+                  {{ revision.createdBy }}</span
+                >
+              </span>
+            </button>
+          </div>
         </nav>
         <section v-if="selected" class="flex min-h-0 min-w-0 flex-1 flex-col">
           <header
@@ -159,9 +223,9 @@ function openPreview() {
           >
             <div class="min-w-0 flex-1 basis-40">
               <h3 class="truncate text-sm font-semibold text-gray-900">{{ selected.title }}</h3>
-              <p class="truncate text-xs text-gray-500">
-                {{ new Date(selected.createdAt).toLocaleString() }} ·
-                {{ sourceLabel(selected.source) }} · {{ selected.createdBy }}
+              <p class="truncate text-xs text-gray-500" :title="fullTime(selected.createdAt)">
+                {{ timeAgo(selected.createdAt) }} · {{ sourceLabel(selected.source) }} ·
+                {{ selected.createdBy }}
               </p>
             </div>
             <ApbSegmented v-model="view" :options="viewOptions" />
@@ -196,46 +260,61 @@ function openPreview() {
           </header>
           <div v-if="view === 'preview'" class="relative flex min-h-0 flex-1 flex-col bg-gray-100">
             <div
-              v-if="!previewLoaded"
+              v-if="previewQuery.isFetching.value"
               class="absolute inset-0 z-10 flex items-center justify-center"
             >
               <VLoading />
             </div>
-            <FixedPreviewViewport :device="device" class="p-4">
+            <VAlert
+              v-else-if="previewQuery.isError.value"
+              type="error"
+              title="预览加载失败"
+              class="m-4"
+              ><template #actions
+                ><VButton @click="previewQuery.refetch()">重新加载</VButton></template
+              ></VAlert
+            >
+            <FixedPreviewViewport
+              v-else-if="previewQuery.data.value"
+              :device="device"
+              fit="width"
+              class="p-4"
+            >
               <!-- 内嵌预览必须隔离：同源无 sandbox 的 iframe 可通过 window.parent 操作已登录的
-                   Console。不透明源下脚本仍可运行，但无法携带凭据请求同源接口；需要完整
-                   保真（如依赖公开接口的页面）时使用「在新窗口打开预览」。 -->
+                   Console。这里用 srcdoc + allow-same-origin（不放行脚本）：主题 CSS/字体
+                   可以同源加载，脚本不执行；需要完整交互保真时使用「在新窗口打开预览」。 -->
               <iframe
                 :key="selected.name"
-                :src="previewLink"
+                :srcdoc="previewQuery.data.value"
                 class="block h-full w-full rounded-lg border-0 bg-white shadow-sm"
                 title="历史版本预览"
-                sandbox="allow-scripts"
+                sandbox="allow-same-origin"
                 referrerpolicy="no-referrer"
-                @load="previewLoaded = true"
               />
             </FixedPreviewViewport>
           </div>
           <div v-else class="min-h-0 flex-1 overflow-auto p-4">
-            <VLoading v-if="detailQuery.isFetching.value" />
+            <VLoading v-if="detailQuery.isFetching.value || previousDetailQuery.isFetching.value" />
             <VAlert
-              v-else-if="detailQuery.isError.value"
+              v-else-if="detailQuery.isError.value || previousDetailQuery.isError.value"
               type="error"
               title="版本内容加载失败"
               description="无法获取该版本的源码，暂不能对比或恢复。"
               ><template #actions
-                ><VButton @click="detailQuery.refetch()">重新加载</VButton></template
+                ><VButton @click="refetchDetails">重新加载</VButton></template
               ></VAlert
             >
             <template v-else-if="document"
-              ><p class="mb-3 text-xs text-gray-500">当前编辑内容 → 选中版本</p>
+              ><p class="mb-3 text-xs text-gray-500">
+                {{ previousSummary ? '上一版本 → 选中版本' : '首个版本，修改前无内容' }}
+              </p>
               <p class="mb-3 text-xs text-gray-500">
-                标题：{{ current.title }} → {{ document.title }}<br />描述：{{
-                  current.description || '无'
+                标题：{{ previousDocument?.title || '无' }} → {{ document.title }}<br />描述：{{
+                  previousDocument?.description || '无'
                 }}
                 → {{ document.description || '无' }}
               </p>
-              <SourceComparison :before="current" :after="document"
+              <SourceComparison :before="previousDocument ?? EMPTY_DOCUMENT" :after="document"
             /></template>
           </div>
         </section>
