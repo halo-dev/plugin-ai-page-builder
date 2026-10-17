@@ -21,7 +21,9 @@ export const aiPageBuilderChatApi = new AiPageBuilderChatApi(undefined, '', axio
 
 // The Console's global response interceptor toasts ProblemDetail failures unless the
 // request config sets `mute`; use this for speculative calls whose failures are
-// already surfaced inline (e.g. mid-stream content validation).
+// already surfaced inline (e.g. mid-stream content validation). `mute` also skips
+// the 401 login-expired dialog and 5xx toasts for that request — acceptable here
+// because validation is speculative and the next real action re-triggers them.
 export type SilentRequestConfig = AxiosRequestConfig & { mute?: boolean }
 
 const chatParameters = AiPageBuilderChatApiAxiosParamCreator()

@@ -30,6 +30,17 @@ import { useStreamingPreview, type StreamingPreview } from './useStreamingPrevie
 
 const activeStatuses = ['running', 'committing', 'waiting_for_user']
 
+// A resumed run inherits the checkpoint's answered questions for task context
+// (PageChatService.reserve); they belong to the source turn and would otherwise
+// mispair with this turn's ask_user tool parts, which start empty on resume.
+function turnQuestions(turn: ChatTurn): PageChatQuestion[] {
+  const started = Date.parse(turn.createdAt)
+  return (turn.questions || []).filter((question) => {
+    const asked = Date.parse(question.createdAt)
+    return Number.isNaN(started) || Number.isNaN(asked) || asked >= started
+  })
+}
+
 export function conversationMessages(turns: ChatTurn[]): UIMessage[] {
   return turns.flatMap((turn) => [
     {
@@ -90,7 +101,7 @@ export function conversationMessages(turns: ChatTurn[]): UIMessage[] {
         revision: turn.revision,
         status: turn.status,
         error: turn.error,
-        questions: turn.questions,
+        questions: turnQuestions(turn),
         recovery: turn.recovery,
       },
     },
@@ -256,9 +267,10 @@ export function usePageChat(options: {
       activeRun.value = active && activeStatuses.includes(active.status) ? active : undefined
     const last = conversation.turns[conversation.turns.length - 1]
     const activeTurn = conversation.turns.find((turn) => turn.runId === activeRun.value?.runId)
-    if (refreshRun) questions.value = activeTurn?.questions || []
+    const activeTurnQuestions = activeTurn ? turnQuestions(activeTurn) : []
+    if (refreshRun) questions.value = activeTurnQuestions
     else
-      for (const question of activeTurn?.questions || []) {
+      for (const question of activeTurnQuestions) {
         const known = questions.value.find((item) => item.id === question.id)
         if (!known?.answers?.length || question.answers?.length) rememberQuestion(question)
       }

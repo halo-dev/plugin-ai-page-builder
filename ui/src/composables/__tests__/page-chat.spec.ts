@@ -176,6 +176,43 @@ describe('persistent page chat', () => {
     expect(state.messages.value[2]?.metadata).toMatchObject({ runId: 'waiting' })
     expect(state.questions.value).toEqual([question])
   })
+  it('drops checkpoint-inherited questions when a resumed run asks again', async () => {
+    waitingConversation()
+    const inherited: PageChatQuestion = {
+      ...question,
+      id: 'inherited',
+      createdAt: '2025-12-31T00:00:00Z',
+      answers: [{ questionId: 'style', optionId: 'minimal' }],
+      answeredAt: '2025-12-31T00:00:01Z',
+    }
+    const fresh: PageChatQuestion = { ...question, id: 'fresh', createdAt: '2026-01-01T00:01:00Z' }
+    const resumedRun = { ...waitingRun, pendingQuestion: fresh }
+    api.chat.listPageChatSessions.mockResolvedValue({
+      data: { items: [{ sessionId: 'busy', activeRun: resumedRun }] },
+    })
+    api.chat.getPageChatRun.mockResolvedValue({ data: resumedRun })
+    api.chat.getPageChat.mockResolvedValue({
+      data: {
+        sessionId: 'busy',
+        activeRun: resumedRun,
+        turns: [
+          {
+            runId: 'waiting',
+            prompt: '设计页面',
+            text: '',
+            tools: [],
+            status: 'waiting_for_user',
+            createdAt: '2026-01-01T00:00:00Z',
+            questions: [inherited, fresh],
+          },
+        ],
+      },
+    })
+    const state = setup()
+    await state.recover()
+    expect(state.questions.value.map((item) => item.id)).toEqual(['fresh'])
+    expect(state.messages.value?.[1]?.metadata).toMatchObject({ questions: [fresh] })
+  })
   it('recovers a waiting question and keeps editing and session actions locked', async () => {
     waitingConversation()
     const state = setup()

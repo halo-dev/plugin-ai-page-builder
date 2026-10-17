@@ -128,6 +128,21 @@ class ChatDisplayTest {
     }
 
     @Test
+    void retainsRejectedQuestionAsFailureSoHistoryPairsLikeTheLiveView() {
+        var display = new ChatDisplay();
+        display.accept(Map.of("type", "tool-input-start", "toolCallId", "bad", "toolName", "ask_user"));
+        display.accept(Map.of("type", "tool-output-available", "toolCallId", "bad",
+            "output", Map.of("error", "问题格式不正确")));
+        display.accept(Map.of("type", "tool-input-start", "toolCallId", "q", "toolName", "ask_user"));
+        display.accept(Map.of("type", "tool-output-available", "toolCallId", "q",
+            "output", Map.of("questions", java.util.List.of())));
+        var parts = display.snapshot("completed");
+        assertThat(parts).extracting(ChatApi.DisplayPart::status)
+            .containsExactly("error", "completed");
+        assertThat(parts.getFirst().summary()).isEqualTo("问题格式不正确");
+    }
+
+    @Test
     void boundsReasoningAndFinishesInterruptedTools() {
         var display = new ChatDisplay();
         display.accept(Map.of("type", "reasoning-delta", "id", "r", "delta", "思".repeat(20_000)));

@@ -46,8 +46,11 @@ final class ChatDisplay {
                 var output = chunk.get("output") instanceof Map<?, ?> value ? value : Map.of();
                 boolean memory = PageMemoryTools.NAME.equals(name);
                 boolean apiDetails = "get_public_api".equals(name);
+                // A rejected ask_user returns {error: ...} without recording a question;
+                // persist the failure so restored history pairs questions like the live view.
+                boolean askUser = "ask_user".equals(name);
                 boolean invalid = Boolean.FALSE.equals(output.get("valid"))
-                    || (memory || apiDetails) && output.containsKey("error");
+                    || (memory || apiDetails || askUser) && output.containsKey("error");
                 status = invalid ? "error" : "completed";
                 summary = (memory || apiDetails)
                     && output.get("summary") instanceof String message ? message
