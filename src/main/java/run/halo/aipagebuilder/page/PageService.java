@@ -434,7 +434,8 @@ public class PageService {
     private static RevisionSummary revisionSummary(ThemePageRevision revision) {
         return new RevisionSummary(revision.getMetadata().getName(),
             revision.getMetadata().getCreationTimestamp(), revision.getSpec().getCreatedBy(),
-            revision.getSpec().getSource(), revision.getSpec().getDocument().title());
+            revision.getSpec().getSource(), revision.getSpec().getDocument().title(),
+            revision.getSpec().getParentRevision());
     }
 
     private static ResponseStatusException badRequest(String reason) {

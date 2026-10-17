@@ -69,7 +69,7 @@ public final class PageApi {
     @Schema(name = "RevisionSummary", requiredProperties = {"name", "createdAt", "createdBy",
         "source", "title"})
     public record RevisionSummary(String name, Instant createdAt, String createdBy, String source,
-        String title) {
+        String title, String parentRevision) {
     }
 
     @Schema(name = "RevisionDetail", requiredProperties = {"summary", "document"})
