@@ -38,18 +38,6 @@ const status = computed(
       <IconSpinner v-else class="animate-spin" />
       {{ status }}
     </p>
-    <details
-      v-if="preview.status !== 'checkpoint'"
-      class="shrink-0 border-b border-gray-100 bg-white px-4 py-2 text-xs"
-      open
-    >
-      <summary class="cursor-pointer select-none text-gray-500">
-        {{ preview.toolName === 'patch_current_page' ? '局部修改源码' : 'HTML / CSS 源码' }}
-      </summary>
-      <pre
-        class="max-h-48 overflow-auto whitespace-pre-wrap break-all pt-2 font-mono text-gray-600"
-        >{{ preview.source || '等待工具输入…' }}</pre>
-    </details>
     <div class="flex min-h-0 flex-1 flex-col bg-gray-100 p-3">
       <FixedPreviewViewport v-if="source" :device="device">
         <iframe

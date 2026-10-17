@@ -540,8 +540,6 @@ export function usePageChat(options: {
       checkpointPreview.value = {
         runId: saved.recovery.sourceRunId,
         toolCallId: 'checkpoint',
-        toolName: 'checkpoint',
-        source: '',
         content: saved.document,
         status: 'checkpoint',
       }

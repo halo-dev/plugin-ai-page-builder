@@ -1,4 +1,5 @@
 import { axiosInstance } from '@halo-dev/api-client'
+import type { AxiosRequestConfig } from 'axios'
 import {
   AiPageBuilderApi,
   AiPageBuilderAiV1alpha1ConsoleApi,
@@ -17,6 +18,11 @@ export const aiPageBuilderAiApi = new AiPageBuilderAiV1alpha1ConsoleApi(
   axiosInstance,
 )
 export const aiPageBuilderChatApi = new AiPageBuilderChatApi(undefined, '', axiosInstance)
+
+// The Console's global response interceptor toasts ProblemDetail failures unless the
+// request config sets `mute`; use this for speculative calls whose failures are
+// already surfaced inline (e.g. mid-stream content validation).
+export type SilentRequestConfig = AxiosRequestConfig & { mute?: boolean }
 
 const chatParameters = AiPageBuilderChatApiAxiosParamCreator()
 
