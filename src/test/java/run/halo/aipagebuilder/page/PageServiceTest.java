@@ -112,6 +112,48 @@ class PageServiceTest {
     }
 
     @Test
+    void importsExportAsNewUnpublishedPageWithNoOriginalPathOrHistory() {
+        var importer = new PageService(client, new ContentPolicy());
+        var document = new PageDocument(2, "code", null, null, "<p>共享</p>", "p {color:red}",
+            "共享页面", "描述", "console.log('shared');");
+        var archive = PageExport.zip(PageExportTest.detail(document, false));
+        var first = importer.importPage(archive, "recipient").block();
+        var second = importer.importPage(archive, "recipient").block();
+        assertThat(first.document()).isEqualTo(document);
+        assertThat(first.page().themeLayout()).isFalse();
+        assertThat(first.page().slug()).isNull();
+        assertThat(first.page().publishedRevision()).isNull();
+        assertThat(first.page().name()).isNotEqualTo("original-id").isNotEqualTo(second.page().name());
+        assertThat(pages).hasSize(2);
+        assertThat(revisions).hasSize(2);
+        var revision = revisions.get(first.page().draftRevision());
+        assertThat(revision.getSpec().getParentRevision()).isNull();
+        assertThat(revision.getSpec().getCreatedBy()).isEqualTo("recipient");
+    }
+
+    @Test
+    void invalidImportedContentDoesNotCreatePageOrRevision() throws Exception {
+        var importer = new PageService(client, new ContentPolicy());
+        var files = PageArchiveTest.files();
+        files.put("page.html", "<script>alert(1)</script>");
+        var bytes = PageArchiveTest.zip(files);
+        assertThatThrownBy(() -> importer.importPage(bytes, "recipient").block())
+            .isInstanceOf(ResponseStatusException.class);
+        assertThat(pages).isEmpty();
+        assertThat(revisions).isEmpty();
+    }
+
+    @Test
+    void failedImportedPageCreationCleansUpInitialRevision() throws Exception {
+        when(client.create(any(ThemePage.class))).thenReturn(Mono.error(new IllegalStateException("failed")));
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        assertThatThrownBy(() -> service.importPage(bytes, "recipient").block())
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(pages).isEmpty();
+        assertThat(revisions).isEmpty();
+    }
+
+    @Test
     void aiSavesTitleContentAndSemanticPathInOnePageUpdate() {
         var created = service.create(new CreatePageRequest(null, "未命名页面"), "admin").block();
         var saved = service.saveAi(created.page().name(), created.page().version(), document("About"),

@@ -6,13 +6,17 @@ import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.jsoup.nodes.Entities;
-import run.halo.aipagebuilder.model.PageDocument;
+import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.page.PageApi.PageDetail;
 
 /** Source export intentionally leaves online assets and theme dependencies as references. */
 final class PageExport {
     private PageExport() { }
 
-    static byte[] zip(PageDocument document) {
+    static byte[] zip(PageDetail detail) {
+        var document = detail.document();
+        var metadata = new PageArchive.Metadata(PageArchive.FORMAT, 1, document.title(),
+            document.description(), detail.page().themeLayout());
         var html = "<!doctype html>\n<html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             + "<title>" + Entities.escape(document.title()) + "</title>"
@@ -20,11 +24,16 @@ final class PageExport {
             + document.html() + (document.js().isEmpty() ? "" : "\n<script src=\"script.js\"></script>")
             + "\n</body></html>\n";
         try (var bytes = new ByteArrayOutputStream(); var zip = new ZipOutputStream(bytes, StandardCharsets.UTF_8)) {
+            entry(zip, "page.json", JsonUtils.objectToJson(metadata));
+            entry(zip, "page.html", document.html());
             entry(zip, "index.html", html);
             entry(zip, "styles.css", document.css());
-            if (!document.js().isEmpty()) entry(zip, "script.js", document.js());
+            entry(zip, "script.js", document.js());
             entry(zip, "README.txt", "AI Page Builder 页面源码导出\n\n"
                 + "这是已保存草稿的 HTML/CSS/JavaScript，不含主题外壳、主题样式、附件文件、聊天或历史。\n"
+                + "可在新建页面时导入此 ZIP，创建新的未发布草稿。\n"
+                + "导入读取 page.json（format: ai-page-builder，version: 1）、page.html 正文、styles.css 和 script.js。\n"
+                + "page.json 保存 title、description、themeLayout；index.html 仅用于本地预览。\n"
                 + "图片、字体、相对路径和主题变量可能需要原站点环境；离线使用前请调整资源地址。\n"
                 + "主题亮暗根条件需由集成环境设置（如 html.dark），导出不会复制主题私有脚本。\n"
                 + "script.js 在直接打开或部署此源码时会执行；Console 运行预览的 iframe 沙箱不随源码包提供。\n");

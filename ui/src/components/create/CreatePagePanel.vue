@@ -10,6 +10,7 @@ import { pageKeys, queryClient } from '../../lib/query-client'
 import { promptPresetGroups } from '../../data/promptPresets'
 import ChatComposer from '../chat/ChatComposer.vue'
 import ManualCreateModal from './ManualCreateModal.vue'
+import ImportPageModal from './ImportPageModal.vue'
 
 defineProps<{ autofocus?: boolean }>()
 
@@ -21,6 +22,7 @@ const themeLayout = ref(true)
 const available = ref(true)
 const statusMessage = ref('')
 const manualOpen = ref(false)
+const importOpen = ref(false)
 
 onMounted(async () => {
   try {
@@ -109,7 +111,7 @@ function submit() {
         </div>
       </div>
     </div>
-    <div class="mt-6 text-center">
+    <div class="mt-6 flex justify-center gap-4">
       <button
         type="button"
         class="text-xs text-gray-400 underline hover:text-gray-600"
@@ -117,7 +119,15 @@ function submit() {
       >
         手动创建页面
       </button>
+      <button
+        type="button"
+        class="text-xs text-gray-400 underline hover:text-gray-600"
+        @click="importOpen = true"
+      >
+        导入页面
+      </button>
     </div>
     <ManualCreateModal v-if="manualOpen" @close="manualOpen = false" />
+    <ImportPageModal v-if="importOpen" @close="importOpen = false" />
   </div>
 </template>
