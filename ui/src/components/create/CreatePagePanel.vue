@@ -63,6 +63,7 @@ function submit() {
       <ChatComposer
         v-model:prompt="prompt"
         v-model:model="model"
+        autofocus
         :disabled="createMutation.isPending.value"
         :can-send="!!prompt.trim()"
         :running="false"

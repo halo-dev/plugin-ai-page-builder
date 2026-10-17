@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import HomeView from '../../views/HomeView.vue'
+import CreatePageView from '../../views/CreatePageView.vue'
 import { queryClient } from '../../lib/query-client'
 import { slugValidation } from '../../utils/slug'
 
@@ -102,6 +103,23 @@ beforeEach(() => {
 })
 
 describe('page creation', () => {
+  it('focuses the chat input on entry without stealing focus after prompt updates', async () => {
+    const wrapper = mount(CreatePageView, {
+      attachTo: document.body,
+      global: { stubs: { FormKit }, directives: { tooltip: {} } },
+    })
+    try {
+      await flushPromises()
+      expect(document.activeElement).toBe(wrapper.get('textarea').element)
+      const preset = wrapper.findAll('button').find((button) => button.text() === '公司介绍')!
+      preset.element.focus()
+      await preset.trigger('click')
+      expect(wrapper.get('textarea').element.value).toContain('公司介绍')
+      expect(document.activeElement).toBe(preset.element)
+    } finally {
+      wrapper.unmount()
+    }
+  })
   it('opens hierarchical public paths while drafts still preview by name', async () => {
     mocks.list.mockResolvedValue({
       data: {
