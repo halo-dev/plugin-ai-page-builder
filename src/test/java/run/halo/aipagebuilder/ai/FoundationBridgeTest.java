@@ -331,6 +331,7 @@ class FoundationBridgeTest {
                     .findFirst().orElseThrow();
                 source = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
                     .input(java.util.Map.of("html", "<p>verified</p>")).build()).thenMany(Flux.just(
+                        TextStreamPart.start("provider-first"),
                         TextStreamPart.textStart("same-id"), TextStreamPart.textDelta("same-id", "first"),
                         TextStreamPart.textEnd("same-id"),
                         TextStreamPart.toolInputStart("partial", "same-tool", "update_current_page"),
@@ -339,7 +340,7 @@ class FoundationBridgeTest {
             } else {
                 assertThat(request.getMessages().toString()).contains("verified", "Discard truncated arguments")
                     .doesNotContain("partial-secret");
-                source = Flux.just(TextStreamPart.textStart("same-id"),
+                source = Flux.just(TextStreamPart.start("provider-second"), TextStreamPart.textStart("same-id"),
                     TextStreamPart.textDelta("same-id", "second"), TextStreamPart.textEnd("same-id"),
                     TextStreamPart.finish(FinishReason.STOP, "stop", null));
             }
@@ -348,11 +349,74 @@ class FoundationBridgeTest {
         var chunks = bridge.chat("model", java.util.List.of(), "original task", copy).collectList().block();
         assertThat(attempts).hasSize(2);
         assertThat(saves).hasValue(1);
+        assertThat(chunks.stream().filter(chunk -> "start".equals(chunk.get("type")))
+            .map(chunk -> chunk.get("messageId")).distinct()).hasSize(1);
         assertThat(copy.budget.steps()).isEqualTo(2);
         assertThat(chunks.stream().filter(chunk -> "text-delta".equals(chunk.get("type"))))
             .extracting(chunk -> chunk.get("id")).containsExactly("attempt-1-same-id", "attempt-2-same-id");
         assertThat(chunks).filteredOn(chunk -> "data-generation-recovery".equals(chunk.get("type"))).hasSize(1);
         assertThat(chunks).noneMatch(chunk -> "finish".equals(chunk.get("type")) || "error".equals(chunk.get("type")));
+    }
+
+    @Test
+    void truncatedToolStepEndsSdkLoopAndUsesBoundedRecovery() {
+        setup(Flux.empty());
+        var copy = copy();
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
+        when(model.streamText(any())).thenAnswer(invocation -> {
+            GenerateTextRequest request = invocation.getArgument(0);
+            attempts.incrementAndGet();
+            var context = run.halo.aifoundation.chat.StepContext.builder()
+                .messages(request.getMessages()).stepIndex(0)
+                .step(run.halo.aifoundation.chat.GenerationStep.builder()
+                    .finishReason(FinishReason.LENGTH).build()).build();
+            request.getPrepareStep().prepare(context);
+            // Foundation emits FINISH_STEP before evaluating its internal tool-loop condition.
+            var source = Flux.just(TextStreamPart.toolInputStart("input", "cut", "update_current_page"),
+                TextStreamPart.toolInputDelta("input", "cut", "update_current_page", "{\"html\":\"cut"),
+                TextStreamPart.builder().type(PartType.FINISH_STEP).stepIndex(0)
+                    .finishReason(FinishReason.LENGTH).build()).concatWith(Flux.defer(() -> {
+                        assertThat(request.getStopWhen().shouldContinue(context)).isFalse();
+                        return Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null));
+                    }));
+            return new StreamTextResult(source, Flux.empty(), Flux.empty(), Flux.empty(), Mono.empty(), Mono.empty());
+        });
+        var chunks = new java.util.ArrayList<java.util.Map<String, Object>>();
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "task", copy)
+            .doOnNext(chunks::add).blockLast()).isInstanceOfSatisfying(AiGenerationException.class,
+                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TRUNCATED));
+        assertThat(attempts).hasValue(3);
+        assertThat(copy.budget.steps()).isEqualTo(3);
+        assertThat(copy.budget.recoveries()).isEqualTo(2);
+        assertThat(chunks).filteredOn(chunk -> "data-generation-recovery".equals(chunk.get("type"))).hasSize(2);
+    }
+
+    @Test
+    void manualResumeAndAutomaticRecoveryUseOnlyTheLatestSnapshot() {
+        setup(Flux.empty());
+        var copy = copy();
+        copy.restore(new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null,
+            "<p>old checkpoint</p>", "", "Title", ""), false, java.util.List.of());
+        copy.taskContext(() -> "Original request: build a page");
+        var attempts = new java.util.ArrayList<GenerateTextRequest>();
+        when(model.streamText(any())).thenAnswer(invocation -> {
+            GenerateTextRequest request = invocation.getArgument(0);
+            attempts.add(request);
+            var prompt = request.getMessages().toString();
+            assertThat(prompt).containsOnlyOnce("Working copy:").contains("Original request: build a page");
+            Flux<TextStreamPart> source;
+            if (attempts.size() == 1) {
+                assertThat(prompt).contains("old checkpoint");
+                source = copy.edit(() -> copy.update(java.util.Map.of("html", "<p>new checkpoint</p>")))
+                    .thenMany(Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
+            } else {
+                assertThat(prompt).contains("new checkpoint").doesNotContain("old checkpoint");
+                source = Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null));
+            }
+            return new StreamTextResult(source, Flux.empty(), Flux.empty(), Flux.empty(), Mono.empty(), Mono.empty());
+        });
+        bridge.chat("model", java.util.List.of(), "build a page", copy).blockLast();
+        assertThat(attempts).hasSize(2);
     }
 
     @Test

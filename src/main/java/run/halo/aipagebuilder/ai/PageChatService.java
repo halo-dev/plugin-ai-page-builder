@@ -437,8 +437,7 @@ public class PageChatService {
         var timeout = run.copy.timeBudget.deadline(RUN_TIMEOUT, AiGenerationException.Reason.RUN_TIMEOUT)
             .doOnError(timeoutSignal::tryEmitError).subscribe();
         return saveCheckpoint(name, run).then(Mono.defer(() -> converse(name, run, history,
-                run.request.prompt() + (run.request.resumeFromRunId() == null ? ""
-                    : "\n" + run.copy.recoveryContext()), timeoutSignal.asMono())))
+                run.request.prompt(), timeoutSignal.asMono())))
             .onErrorResume(error -> {
                 if (run.saveStarted && ("committing".equals(run.status) || "completed".equals(run.status))
                     && !(error instanceof ResponseStatusException status
@@ -454,22 +453,30 @@ public class PageChatService {
                         return finish(name, run, null).thenReturn(false);
                     })).then();
                 }
-                synchronized (run) {
-                    if (!"cancelled".equals(run.status)) {
-                        var reason = failureReason(error, run.copy);
-                        run.status = switch (reason) {
-                            case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, TRUNCATED, RUN_TIMEOUT -> "incomplete";
-                            default -> "failed";
-                        };
-                        run.error = error instanceof ResponseStatusException status
-                            && status.getStatusCode().value() == 409 ? "页面已变化，请重新载入（409）"
-                            : reason.message;
-                        org.slf4j.LoggerFactory.getLogger(PageChatService.class).warn(
-                            "Page chat failed: runId={}, reason={}, exception={}",
-                            run.request.runId(), reason.name(), error.getClass().getName());
+                // Cancellation can still fail to persist and roll back its provisional status.
+                // Classify model failures only after that transition has settled.
+                return Mono.defer(() -> {
+                    synchronized (run) {
+                        return run.transition == null ? Mono.<Void>empty() : run.transition.onErrorComplete();
                     }
-                }
-                return finish(name, run, null);
+                }).then(Mono.defer(() -> {
+                    synchronized (run) {
+                        if (!"cancelled".equals(run.status)) {
+                            var reason = failureReason(error, run.copy);
+                            run.status = switch (reason) {
+                                case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, TRUNCATED, RUN_TIMEOUT -> "incomplete";
+                                default -> "failed";
+                            };
+                            run.error = error instanceof ResponseStatusException status
+                                && status.getStatusCode().value() == 409 ? "页面已变化，请重新载入（409）"
+                                : reason.message;
+                            org.slf4j.LoggerFactory.getLogger(PageChatService.class).warn(
+                                "Page chat failed: runId={}, reason={}, exception={}",
+                                run.request.runId(), reason.name(), error.getClass().getName());
+                        }
+                    }
+                    return finish(name, run, null);
+                }));
             }).doFinally(signal -> timeout.dispose());
     }
 
@@ -721,8 +728,23 @@ public class PageChatService {
                         return run.transition.then(Mono.defer(() -> cancel(name, runId)));
                     }
                     if ("running".equals(run.status) || "waiting_for_user".equals(run.status)) {
+                        var previousStatus = run.status;
                         run.status = "cancelled";
-                        run.cancel.tryEmitEmpty();
+                        // Persist intent before signalling the stream or acknowledging cancellation.
+                        // Checkpoint writes may still be draining when the process stops.
+                        run.transition = persistActive(name, run).doOnSuccess(ignored -> {
+                            synchronized (run) {
+                                run.transition = null;
+                                run.cancel.tryEmitEmpty();
+                            }
+                        }).doOnError(error -> {
+                            synchronized (run) {
+                                run.status = previousStatus;
+                                run.transition = null;
+                            }
+                        }).cache();
+                        return run.transition.then(Mono.defer(run.copy::closeMemory)).then(Mono.fromSupplier(() ->
+                            new ChatApi.Run(runId, run.status, run.revision, run.error, null)));
                     }
                     return run.copy.closeMemory().then(Mono.fromSupplier(() ->
                         new ChatApi.Run(runId, run.status, run.revision, run.error, null)));

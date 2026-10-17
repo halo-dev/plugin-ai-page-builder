@@ -196,6 +196,9 @@ export function useStreamingPreview(options: {
     },
     { deep: true, flush: 'sync' },
   )
+  function seedBaseline(content: Content) {
+    baseline = { ...content }
+  }
   function restartAttempt() {
     cancelValidation()
     clearTimeout(sourceTimer)
@@ -211,5 +214,5 @@ export function useStreamingPreview(options: {
     )
   }
   onScopeDispose(clear)
-  return { preview, accept, discard, restartAttempt }
+  return { preview, accept, discard, seedBaseline, restartAttempt }
 }

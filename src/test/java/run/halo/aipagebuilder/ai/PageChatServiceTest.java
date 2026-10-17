@@ -314,6 +314,76 @@ class PageChatServiceTest {
     }
 
     @Test
+    void cancellationIsDurableBeforeAcknowledgementWhileCheckpointWriteIsPending() {
+        when(client.update(any(run.halo.aipagebuilder.model.PageChatCheckpoint.class)))
+            .thenReturn(Mono.never());
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.edit(() -> copy.update(Map.of("html", "<p>pending checkpoint</p>")))
+                .thenMany(Flux.never());
+        });
+        service.start("page", request(), "admin").block();
+        assertThat(service.cancel("page", runId).block().status()).isEqualTo("cancelled");
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("cancelled");
+        assertThat(checkpoints).hasSize(1);
+        var restarted = new PageChatService(client, pages, gateway, policy,
+            mock(run.halo.aipagebuilder.theme.ThemeContextService.class));
+        var result = restarted.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("cancelled");
+        assertThat(result.recovery()).isNull();
+        assertThat(checkpoints).isEmpty();
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void failedCancellationPersistenceIsNotAcknowledgedAndCanBeRetried() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        service.start("page", request(), "admin").block();
+        var failures = new AtomicInteger();
+        when(client.update(any(PageChatSession.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            PageChatSession session = i.getArgument(0);
+            if (session.getSpec().getActive() != null
+                && "cancelled".equals(session.getSpec().getActive().status())
+                && failures.getAndIncrement() == 0) throw new IllegalStateException("storage unavailable");
+            session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            return session;
+        }));
+        assertThatThrownBy(() -> service.cancel("page", runId).block())
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("running");
+        assertThat(service.cancel("page", runId).block().status()).isEqualTo("cancelled");
+        assertThat(service.result("page", runId).block().status()).isEqualTo("cancelled");
+    }
+
+    @Test
+    void modelFailureDuringFailedCancellationPersistenceIsArchivedAsFailed() {
+        Sinks.Many<Map<String, Object>> model = Sinks.many().unicast().onBackpressureBuffer();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(model.asFlux());
+        service.start("page", request(), "admin").block();
+        var cancellationWrite = Sinks.<PageChatSession>one();
+        when(client.update(any(PageChatSession.class))).thenAnswer(i -> {
+            PageChatSession session = i.getArgument(0);
+            if (session.getSpec().getActive() != null
+                && "cancelled".equals(session.getSpec().getActive().status())) return cancellationWrite.asMono();
+            return Mono.fromSupplier(() -> {
+                session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+                stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+                return session;
+            });
+        });
+        var response = service.cancel("page", runId).toFuture();
+        assertThat(response).isNotDone();
+        model.tryEmitError(new AiGenerationException(AiGenerationException.Reason.CALL_FAILED));
+        cancellationWrite.tryEmitError(new IllegalStateException("storage unavailable"));
+        assertThat(response).isCompletedExceptionally();
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("failed");
+        assertThat(result.error()).isEqualTo(AiGenerationException.Reason.CALL_FAILED.message);
+        assertThat(result.recovery().canResume()).isTrue();
+    }
+
+    @Test
     void cancellationWaitsForMemoryWriteAndArchivesItsOutcome() {
         var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);
         when(memories.load()).thenReturn(Mono.just(PageMemoryToolsTest.snapshot(1)));
@@ -1036,13 +1106,29 @@ class PageChatServiceTest {
             assertThat(copy.document().html()).isEqualTo("<p>saved progress</p>");
             assertThat(copy.calls()).isZero();
             assertThat(copy.budget.steps()).isZero();
-            assertThat(i.<String>getArgument(2)).contains("Original request", "saved progress");
+            assertThat(i.<String>getArgument(2)).isEqualTo(request().prompt());
+            assertThat(copy.restored()).isTrue();
+            assertThat(copy.recoveryContext()).contains("Original request", "saved progress");
             return Flux.empty();
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         service.start("page", resumeRequest(checkpoint, next), "admin").block().collectList().block();
         assertThat(service.result("page", next).block().status()).isEqualTo("completed");
         assertThat(checkpoints).isEmpty();
         verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"));
+    }
+
+    @Test
+    void initialCheckpointFailureDoesNotPromiseRecoveryOrCallTheModel() {
+        when(client.create(any(run.halo.aipagebuilder.model.PageChatCheckpoint.class)))
+            .thenReturn(Mono.error(new IllegalStateException("storage unavailable")));
+        service.start("page", request(), "admin").block().collectList().block();
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("failed");
+        assertThat(result.error()).contains("进度保存失败", "重试").doesNotContain("从上次已保存");
+        assertThat(result.recovery()).isNull();
+        assertThat(checkpoints).isEmpty();
+        verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString());
     }
 
     @Test

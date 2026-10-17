@@ -573,6 +573,7 @@ export function usePageChat(options: {
       checkpointPreview.value = undefined
       recovery.value = undefined
       activeRun.value = { runId: request.runId, status: 'running' }
+      streamPreview.seedBaseline(saved.document)
       lastPrompt.value = request.prompt
       chat.clearError()
       await chat.sendMessage({ text: '继续生成' })

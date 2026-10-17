@@ -3,7 +3,7 @@ package run.halo.aipagebuilder.ai;
 final class AiGenerationException extends RuntimeException {
     enum Reason {
         STEP_LIMIT("step-limit", "本轮已达到 20 个模型步骤，草稿未更新。可继续生成。"),
-        CHECKPOINT_FAILED("checkpoint", "进度保存失败，已停止生成。请检查存储后从上次已保存的进度继续。"),
+        CHECKPOINT_FAILED("checkpoint", "进度保存失败，已停止生成。请检查存储后重试。"),
         MODEL_UNAVAILABLE("model-resolution",
             "AI 模型不可用，请检查 AI Foundation 是否已启用，并配置可用的默认或指定文本模型。"),
         CALL_FAILED("model-call",

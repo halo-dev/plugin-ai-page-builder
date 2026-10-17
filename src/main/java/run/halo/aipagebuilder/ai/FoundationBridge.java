@@ -75,7 +75,7 @@ public final class FoundationBridge implements AiGateway {
     @Override
     public Flux<java.util.Map<String, Object>> chat(String modelName,
         java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
-        return recoverableAttempt(modelName, history, prompt, copy, false);
+        return recoverableAttempt(modelName, history, prompt, copy, copy.restored());
     }
 
     private Flux<java.util.Map<String, Object>> recoverableAttempt(String modelName,
@@ -168,7 +168,8 @@ public final class FoundationBridge implements AiGateway {
                 .toolChoice(run.halo.aifoundation.tool.ToolChoice.auto())
                 .parallelToolCalls(false)
                 // Foundation StopCondition returns shouldContinue, despite the builder name.
-                .stopWhen(context -> copy.budget.hasSteps())
+                .stopWhen(context -> copy.budget.hasSteps()
+                    && (context.getStep() == null || context.getStep().getFinishReason() != FinishReason.LENGTH))
                 .prepareStep(context -> {
                     var step = copy.budget.nextStep();
                     stepStarted.set(System.nanoTime());
@@ -245,9 +246,11 @@ public final class FoundationBridge implements AiGateway {
                 .map(run.halo.aifoundation.ui.UIMessageTransportCodec::chunkToMap)
                 .map(chunk -> {
                     var namespaced = new java.util.LinkedHashMap<String, Object>(chunk);
-                    for (var key : java.util.List.of("id", "toolCallId", "messageId")) {
+                    for (var key : java.util.List.of("id", "toolCallId")) {
                         if (chunk.get(key) instanceof String value) namespaced.put(key, prefix + value);
                     }
+                    // Recovery and steer continuations belong to the same assistant reply.
+                    if (chunk.containsKey("messageId")) namespaced.put("messageId", copy.assistantMessageId);
                     return (java.util.Map<String, Object>) namespaced;
                 })
                 .concatWith(Flux.defer(() -> finished.get() ? Flux.empty()

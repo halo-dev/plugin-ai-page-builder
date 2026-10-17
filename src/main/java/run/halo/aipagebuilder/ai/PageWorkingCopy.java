@@ -18,6 +18,8 @@ public final class PageWorkingCopy {
     static final int MAX_CALLS = 40;
     static final int MAX_BYTES = 2 * 1024 * 1024;
     final RunBudget budget = new RunBudget();
+    final String assistantMessageId = java.util.UUID.randomUUID().toString();
+    private boolean restored;
     private java.util.function.Supplier<Mono<Void>> checkpoint = Mono::empty;
     private java.util.function.Supplier<String> taskContext = () -> "";
     private Mono<Void> edits = Mono.empty();
@@ -72,9 +74,12 @@ public final class PageWorkingCopy {
     synchronized void markCheckpointFailed() { checkpointFailed = true; }
     synchronized int calls() { return calls; }
 
+    synchronized boolean restored() { return restored; }
+
     synchronized void restore(PageDocument saved, boolean invalid, List<ChatApi.Tool> tools) {
         policy.validate(saved);
         document = saved;
+        restored = true;
         invalidUpdate = invalid;
         summaries.addAll(tools);
     }

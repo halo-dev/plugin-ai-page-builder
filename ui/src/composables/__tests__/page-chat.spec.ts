@@ -14,6 +14,7 @@ const api = vi.hoisted(() => ({
     renamePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     deletePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     getPageChatCheckpoint: vi.fn<(...args: unknown[]) => unknown>(),
+    validatePageContent: vi.fn<(...args: unknown[]) => unknown>(),
     getPageChat: vi.fn<(...args: unknown[]) => unknown>(),
     getPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
     cancelPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
@@ -599,6 +600,48 @@ describe('checkpoint recovery', () => {
     })
     expect(sdk.transport.prepareSendMessagesRequest().body.runId).not.toBe('original-run')
     expect(sdk.send).toHaveBeenCalledWith({ text: '继续生成' })
+  })
+  it('uses checkpoint HTML for the first CSS-only update without changing the draft', async () => {
+    savedProgress()
+    const draft = { html: '<p>old draft</p>', css: '', js: '' }
+    const state = setup({ baseline: () => draft, version: () => 8 })
+    await state.recover()
+    api.chat.validatePageContent.mockResolvedValue({})
+    let finish!: () => void
+    sdk.send.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const pending = state.resume()
+    await vi.advanceTimersByTimeAsync(0)
+    sdk.setMessages([
+      {
+        id: 'resumed-assistant',
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool-update_current_page',
+            toolName: 'update_current_page',
+            toolCallId: 'css',
+            state: 'input-streaming',
+            input: { css: 'p{color:blue}' },
+          },
+        ],
+      },
+    ])
+    await vi.advanceTimersByTimeAsync(250)
+    expect(api.chat.validatePageContent).toHaveBeenCalledWith(
+      { validatePageContentRequest: { html: '<p>durable</p>', css: 'p{color:blue}' } },
+      expect.anything(),
+    )
+    expect(state.preview.value?.content).toEqual({ html: '<p>durable</p>', css: 'p{color:blue}' })
+    expect(draft).toEqual({ html: '<p>old draft</p>', css: '', js: '' })
+    expect(committed).not.toHaveBeenCalled()
+    expect(prepare).not.toHaveBeenCalled()
+    finish()
+    await pending
   })
   it('blocks resume while local edits are dirty and rechecks base version before sending', async () => {
     savedProgress()
