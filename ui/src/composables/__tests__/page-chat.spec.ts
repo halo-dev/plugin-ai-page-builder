@@ -81,6 +81,7 @@ const page = {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.useFakeTimers()
+  localStorage.clear()
   scope = effectScope()
   api.ai.getAiPageBuilderAiStatus.mockResolvedValue({ data: { available: true, message: 'Ready' } })
   api.chat.listPageChatSessions.mockResolvedValue({
@@ -296,7 +297,7 @@ describe('persistent page chat', () => {
     await state.recover()
     expect(api.chat.getPageChat).toHaveBeenCalledWith({
       name: 'one',
-      sessionId: undefined,
+      sessionId: 'one',
       size: 20,
     })
     expect(await state.send('Make it calm')).toBe(true)
@@ -319,6 +320,109 @@ describe('persistent page chat', () => {
     expect(committed).not.toHaveBeenCalled()
     await state.send('Continue here')
     expect(sdk.transport.prepareSendMessagesRequest().body.sessionId).toBe('two')
+  })
+  it.each(['select', 'create'])(
+    'restores the last session after %s and reopening',
+    async (action) => {
+      api.chat.listPageChatSessions.mockResolvedValue({
+        data: { items: [{ sessionId: 'one' }, { sessionId: 'two' }] },
+      })
+      const state = setup()
+      await state.recover()
+      api.chat.getPageChat.mockResolvedValue({
+        data: {
+          sessionId: 'two',
+          turns: [
+            { runId: 'old', prompt: 'Continue', text: 'Done', tools: [], status: 'completed' },
+          ],
+          hasMore: false,
+        },
+      })
+      if (action === 'create') {
+        api.chat.createPageChatSession.mockResolvedValue({ data: { sessionId: 'two' } })
+        await state.createSession()
+      } else {
+        await state.selectSession('two')
+      }
+      scope.stop()
+      scope = effectScope()
+      const reopened = setup()
+      await reopened.recover()
+      expect(api.chat.getPageChat).toHaveBeenLastCalledWith({
+        name: 'one',
+        sessionId: 'two',
+        size: 20,
+      })
+      expect(reopened.sessionId.value).toBe('two')
+      expect(reopened.messages.value.map((message) => message.id)).toEqual([
+        'old-user',
+        'old-assistant',
+      ])
+    },
+  )
+  it('keeps remembered sessions separate for each page', async () => {
+    localStorage.setItem('ai-page-builder:last-session:one', 'two')
+    api.chat.listPageChatSessions.mockResolvedValue({
+      data: { items: [{ sessionId: 'other-page' }] },
+    })
+    api.chat.getPageChat.mockResolvedValue({
+      data: { sessionId: 'other-page', turns: [], hasMore: false },
+    })
+    await setup({ name: 'other-page' }).recover()
+    expect(api.chat.getPageChat).toHaveBeenLastCalledWith({
+      name: 'other-page',
+      sessionId: 'other-page',
+      size: 20,
+    })
+    expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('two')
+    expect(localStorage.getItem('ai-page-builder:last-session:other-page')).toBe('other-page')
+  })
+  it('falls back to the default session when the remembered session no longer exists', async () => {
+    localStorage.setItem('ai-page-builder:last-session:one', 'deleted')
+    const state = setup()
+    await state.recover()
+    expect(api.chat.getPageChat).toHaveBeenLastCalledWith({
+      name: 'one',
+      sessionId: 'one',
+      size: 20,
+    })
+    expect(state.error.value).toBe('')
+    expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('one')
+  })
+  it('keeps the last successful selection when switching fails', async () => {
+    const state = setup()
+    await state.recover()
+    api.chat.getPageChat.mockRejectedValueOnce(new Error('Offline'))
+    await state.selectSession('two')
+    expect(state.sessionId.value).toBe('one')
+    expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('one')
+  })
+  it('remembers the fallback session after deleting the selected session', async () => {
+    api.chat.listPageChatSessions.mockResolvedValueOnce({
+      data: {
+        items: [
+          { sessionId: 'two', version: 2 },
+          { sessionId: 'one', version: 3 },
+        ],
+      },
+    })
+    const state = setup()
+    await state.recover()
+    api.chat.getPageChat.mockResolvedValueOnce({
+      data: { sessionId: 'two', turns: [], hasMore: false },
+    })
+    await state.selectSession('two')
+    await state.deleteSession()
+    expect(state.sessionId.value).toBe('one')
+    expect(localStorage.getItem('ai-page-builder:last-session:one')).toBe('one')
+    scope.stop()
+    scope = effectScope()
+    await setup().recover()
+    expect(api.chat.getPageChat).toHaveBeenLastCalledWith({
+      name: 'one',
+      sessionId: 'one',
+      size: 20,
+    })
   })
   it('uses session versions for rename/delete and loads a newly created session', async () => {
     const state = setup()
@@ -344,9 +448,13 @@ describe('persistent page chat', () => {
     expect(committed).not.toHaveBeenCalled()
   })
   it('recovers the active session and blocks switching/deletion while a run is pending', async () => {
+    localStorage.setItem('ai-page-builder:last-session:one', 'one')
     api.chat.listPageChatSessions.mockResolvedValue({
       data: {
-        items: [{ sessionId: 'busy', version: 2, activeRun: { runId: 'r', status: 'running' } }],
+        items: [
+          { sessionId: 'one', version: 3 },
+          { sessionId: 'busy', version: 2, activeRun: { runId: 'r', status: 'running' } },
+        ],
       },
     })
     api.chat.getPageChat.mockResolvedValue({
