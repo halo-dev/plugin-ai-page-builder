@@ -42,6 +42,7 @@ vi.mock('@halo-dev/components', () => ({
         h('button', { ...attrs, disabled: props.disabled }, slots.default?.()),
   }),
   VModal: defineComponent({
+    name: 'VModal',
     setup:
       (_, { slots }) =>
       () =>
@@ -324,33 +325,23 @@ describe('workspace integration', () => {
     await flushPromises()
     await wrapper.find('[aria-label="页面设置"]').trigger('click')
     const settings = wrapper.findComponent(PageSettings)
-    const title = settings
-      .findAllComponents({ name: 'FormKit' })
+    const fields = settings.findAllComponents({ name: 'FormKit' })
+    fields
       .find((field) => field.attributes('name') === 'title')!
-    title.vm.$emit('update:modelValue', 'Buffered title')
-    await settings
-      .findAll('button')
-      .find((button) => button.text() === '修改')!
-      .trigger('click')
-    settings
-      .findAllComponents({ name: 'FormKit' })
+      .vm.$emit('update:modelValue', 'Buffered title')
+    fields
       .find((field) => field.attributes('name') === 'slug')!
       .vm.$emit('update:modelValue', 'company/about')
     await flushPromises()
-    settings.findComponent({ ref: 'slugForm' }).vm.$emit('submit')
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
     expect(mocks.updateSlug).toHaveBeenCalledWith({
       name: 'one',
       updatePageSlugRequest: { version: 1, slug: 'company/about' },
     })
-    expect(settings.find('a').attributes('href')).toBe('/company/about')
-    expect(settings.text()).not.toContain('保存后访问路径立即生效')
-    expect(wrapper.find('h1').text()).toBe('Working title')
+    expect(wrapper.find('h1').text()).toBe('Buffered title')
     expect(canvas.props('name')).toBe('one')
     expect(mocks.save).not.toHaveBeenCalled()
-    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
-    await flushPromises()
-    expect(wrapper.find('h1').text()).toBe('Buffered title')
     mocks.save.mockResolvedValue({
       data: {
         ...page,
@@ -400,7 +391,7 @@ describe('workspace integration', () => {
     expect(saveLayout).toHaveBeenNthCalledWith(2, false)
     wrapper.unmount()
   })
-  it('keeps the path dialog and input on failure, then allows retry', async () => {
+  it('keeps the path input and shows the error on failure, then allows retry', async () => {
     const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
     saveSlug.mockRejectedValueOnce(new Error('路径已存在')).mockResolvedValueOnce(page)
     const wrapper = mount(PageSettings, {
@@ -415,25 +406,101 @@ describe('workspace integration', () => {
       },
       global: globals,
     })
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '修改')!
-      .trigger('click')
-    const field = wrapper
+    wrapper
       .findAllComponents({ name: 'FormKit' })
       .find((field) => field.attributes('name') === 'slug')!
-    field.vm.$emit('update:modelValue', 'company/about')
+      .vm.$emit('update:modelValue', 'company/about')
     await flushPromises()
-    wrapper.findComponent({ ref: 'slugForm' }).vm.$emit('submit')
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('路径已存在')
-    expect(wrapper.findComponent({ ref: 'slugForm' }).exists()).toBe(true)
     expect(wrapper.emitted('apply')).toBeUndefined()
     expect(wrapper.emitted('close')).toBeUndefined()
-    wrapper.findComponent({ ref: 'slugForm' }).vm.$emit('submit')
+    // Editing the slug clears the error before the next submit.
+    const slug = wrapper
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'slug')!
+    slug.vm.$emit('update:modelValue', 'company/new')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('路径已存在')
+    slug.vm.$emit('update:modelValue', 'company/about')
+    await flushPromises()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
     expect(saveSlug).toHaveBeenNthCalledWith(2, 'company/about')
-    expect(wrapper.findComponent({ ref: 'slugForm' }).exists()).toBe(false)
+    expect(wrapper.emitted('apply')).toEqual([[{}]])
+    wrapper.unmount()
+  })
+  it('does not emit apply when unmounted while the slug save is in flight', async () => {
+    let resolveSlug!: (value: PageDetail) => void
+    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>(
+      () => new Promise((resolve) => (resolveSlug = resolve)),
+    )
+    const wrapper = mount(PageSettings, {
+      props: {
+        document: page.document,
+        slug: 'one',
+        themeLayout: true,
+        disabled: false,
+        published: false,
+        saveSlug,
+        saveLayout: vi.fn(),
+      },
+      global: globals,
+    })
+    const fields = wrapper.findAllComponents({ name: 'FormKit' })
+    fields
+      .find((field) => field.attributes('name') === 'title')!
+      .vm.$emit('update:modelValue', 'Buffered title')
+    fields
+      .find((field) => field.attributes('name') === 'slug')!
+      .vm.$emit('update:modelValue', 'two')
+    await flushPromises()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    expect(saveSlug).toHaveBeenCalledWith('two')
+    wrapper.unmount()
+    resolveSlug(page)
+    await flushPromises()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+  })
+  it('blocks submit while the layout save is in flight but still allows close', async () => {
+    let resolveLayout!: (value: PageDetail) => void
+    const saveLayout = vi.fn<(themeLayout: boolean) => Promise<PageDetail | undefined>>(
+      () => new Promise((resolve) => (resolveLayout = resolve)),
+    )
+    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
+    const wrapper = mount(PageSettings, {
+      props: {
+        document: page.document,
+        slug: 'one',
+        themeLayout: true,
+        disabled: false,
+        published: false,
+        saveSlug,
+        saveLayout,
+      },
+      global: globals,
+    })
+    const fields = wrapper.findAllComponents({ name: 'FormKit' })
+    fields
+      .find((field) => field.attributes('name') === 'slug')!
+      .vm.$emit('update:modelValue', 'two')
+    fields
+      .find((field) => field.attributes('name') === 'themeLayout')!
+      .vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(saveLayout).toHaveBeenCalledWith(false)
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    expect(saveSlug).not.toHaveBeenCalled()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    // VModal hides itself before emitting close, so closing is always allowed;
+    // the parent discards the late layout result instead.
+    wrapper.findComponent({ name: 'VModal' }).vm.$emit('close')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    resolveLayout(page)
+    await flushPromises()
     wrapper.unmount()
   })
   it('emits an empty settings patch when a legacy description is untouched', async () => {

@@ -126,6 +126,20 @@ public class PageEndpoint implements CustomEndpoint {
                 builder -> named(builder, "getPageRevision", RevisionDetail.class)
                     .parameter(parameterBuilder().name("revision").in(ParameterIn.PATH)
                         .required(true).implementation(String.class).description("Revision name")))
+            .GET("/pages/{name}/revisions/{revision}/preview", request ->
+                    service.get(name(request)).flatMap(detail ->
+                        service.revisionDetail(name(request), request.pathVariable("revision"))
+                            .flatMap(revision -> renderer.render(request, detail.page().name(),
+                                detail.page().slug() != null ? detail.page().slug()
+                                    : detail.page().name(),
+                                detail.page().themeLayout(), revision.document()))),
+                builder -> builder.operationId("previewPageRevision").tag("AiPageBuilder")
+                    .parameter(nameParameter())
+                    .parameter(parameterBuilder().name("revision").in(ParameterIn.PATH)
+                        .required(true).implementation(String.class).description("Revision name"))
+                    .response(responseBuilder().responseCode("200")
+                        .content(contentBuilder().mediaType(MediaType.TEXT_HTML_VALUE)
+                            .schema(schemaBuilder().type("string")))))
             .POST("/pages/{name}/restore", request -> body(request, RestoreRequest.class)
                     .flatMap(input -> actor().flatMap(actor ->
                         json(service.restore(name(request), input, actor)))),
