@@ -40,8 +40,7 @@ class ImportReviewStoreTest {
         store.put("admin", "hash", review("malicious", "malicious", expiresAt));
         store.put("other", "hash", review("safe", "safe", expiresAt));
 
-        assertThat(store.getMalicious("hash")).isNotNull();
-        assertThat(store.getMalicious("hash").review().reviewId()).isEqualTo("malicious");
+        assertThat(store.getMalicious("hash")).isEqualTo(expiresAt);
         assertThat(store.get("safe")).isNotNull();
     }
 
@@ -54,23 +53,18 @@ class ImportReviewStoreTest {
     }
 
     @Test
-    void maliciousCapacityDoesNotEvictUnexpiredBlocks() {
+    void maliciousReviewsAreKeptUntilExpiry() {
         var expiresAt = Instant.now().plusSeconds(600);
-        for (var index = 0; index < ImportReviewStore.MAX_ENTRIES; index++) {
-            assertThat(store.put("admin", "hash-" + index,
-                review("malicious-" + index, "malicious", expiresAt))).isTrue();
+        for (var index = 0; index <= ImportReviewStore.MAX_ENTRIES; index++) {
+            store.put("admin", "hash-" + index,
+                review("malicious-" + index, "malicious", expiresAt));
         }
 
-        assertThat(store.put("admin", "hash-overflow",
-            review("overflow", "malicious", expiresAt))).isFalse();
-
-        assertThat(store.getMalicious("hash-0")).isNotNull();
-        assertThat(store.getMalicious("hash-overflow")).isNull();
-        assertThat(store.get("overflow")).isNull();
+        assertThat(store.getMalicious("hash-0")).isEqualTo(expiresAt);
+        assertThat(store.getMalicious("hash-" + ImportReviewStore.MAX_ENTRIES))
+            .isEqualTo(expiresAt);
         assertThat(store.importBlock("hash-0"))
             .isEqualTo(ImportReviewStore.ImportBlock.MALICIOUS);
-        assertThat(store.importBlock("hash-overflow"))
-            .isEqualTo(ImportReviewStore.ImportBlock.NONE);
     }
 
     @Test

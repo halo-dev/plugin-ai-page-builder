@@ -314,24 +314,7 @@ class PageImportReviewServiceTest {
                 assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
 
         review.dispose();
-    }
-
-    @Test
-    void maliciousReviewFailsClosedWhenStickyStoreIsFull() throws Exception {
-        var expiresAt = Instant.now().plusSeconds(600);
-        for (var index = 0; index < ImportReviewStore.MAX_ENTRIES; index++) {
-            store.put("admin", "hash-" + index, new PageApi.ImportReview(
-                "malicious-" + index, "malicious", "summary", List.of(), "Test", "", false,
-                expiresAt));
-        }
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
-                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
-
-        assertThatThrownBy(() -> service.review(
-            archive("<p>Hello</p>", "", "document.cookie"), "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+        assertThat(store.isReviewing(sha256(bytes))).isFalse();
     }
 
     @Test
@@ -394,6 +377,7 @@ class PageImportReviewServiceTest {
                 assertThat(error.getReason()).contains("disabled");
             });
         verify(gateway, never()).review(anyString(), anyString());
+        assertThat(store.isReviewing(sha256(bytes))).isFalse();
     }
 
     @Test

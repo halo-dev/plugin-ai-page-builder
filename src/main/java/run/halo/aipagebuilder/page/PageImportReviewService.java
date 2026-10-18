@@ -224,10 +224,7 @@ public class PageImportReviewService {
                 .toList(),
             document.title(), document.description(), imported.themeLayout(),
             Instant.now().plus(REVIEW_TTL));
-        if (!store.put(actor, archiveHash, review)) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                "恶意审查记录已达容量上限，请稍后重试。");
-        }
+        store.put(actor, archiveHash, review);
         return review;
     }
 

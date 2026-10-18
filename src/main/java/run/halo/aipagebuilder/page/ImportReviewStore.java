@@ -8,35 +8,28 @@ import org.springframework.stereotype.Component;
 
 /**
  * In-memory store for completed import reviews. Reviews expire and are bound to their actor.
- * Malicious reviews are retained by archive hash so a re-review cannot downgrade them; when the
- * malicious capacity is full, new malicious reviews are rejected instead of evicting an
- * unexpired block. In-flight reviews are tracked so an import cannot race a pending review.
+ * Malicious verdicts are retained by archive hash until their TTL, without a separate capacity
+ * cap, so an active deny record is never evicted early. In-flight reviews are tracked so an
+ * import cannot race a pending review.
  */
 @Component
 public class ImportReviewStore {
     static final int MAX_ENTRIES = 128;
 
     private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Entry> malicious = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Instant> malicious = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, AtomicInteger> inFlight = new ConcurrentHashMap<>();
 
-    synchronized boolean put(String actor, String archiveHash, PageApi.ImportReview review) {
+    synchronized void put(String actor, String archiveHash, PageApi.ImportReview review) {
         var now = Instant.now();
         entries.entrySet().removeIf(item -> item.getValue().review().expiresAt().isBefore(now));
-        malicious.entrySet().removeIf(
-            item -> item.getValue().review().expiresAt().isBefore(now));
-        var isMalicious = "malicious".equals(review.verdict());
-        if (isMalicious && !malicious.containsKey(archiveHash)
-            && malicious.size() >= MAX_ENTRIES) {
-            return false;
-        }
+        malicious.entrySet().removeIf(item -> item.getValue().isBefore(now));
         evictOldest(entries);
         var entry = new Entry(actor, archiveHash, review);
         entries.put(review.reviewId(), entry);
-        if (isMalicious) {
-            malicious.put(archiveHash, entry);
+        if ("malicious".equals(review.verdict())) {
+            malicious.put(archiveHash, review.expiresAt());
         }
-        return true;
     }
 
     void beginReview(String archiveHash) {
@@ -53,12 +46,12 @@ public class ImportReviewStore {
     }
 
     synchronized ImportBlock importBlock(String archiveHash) {
-        var entry = malicious.get(archiveHash);
-        if (entry != null && entry.review().expiresAt().isBefore(Instant.now())) {
-            malicious.remove(archiveHash, entry);
-            entry = null;
+        var expiresAt = malicious.get(archiveHash);
+        if (expiresAt != null && expiresAt.isBefore(Instant.now())) {
+            malicious.remove(archiveHash, expiresAt);
+            expiresAt = null;
         }
-        if (entry != null) {
+        if (expiresAt != null) {
             return ImportBlock.MALICIOUS;
         }
         return inFlight.containsKey(archiveHash) ? ImportBlock.REVIEWING : ImportBlock.NONE;
@@ -88,16 +81,16 @@ public class ImportReviewStore {
         return entry;
     }
 
-    Entry getMalicious(String archiveHash) {
-        var entry = malicious.get(archiveHash);
-        if (entry == null) {
+    Instant getMalicious(String archiveHash) {
+        var expiresAt = malicious.get(archiveHash);
+        if (expiresAt == null) {
             return null;
         }
-        if (entry.review().expiresAt().isBefore(Instant.now())) {
-            malicious.remove(archiveHash, entry);
+        if (expiresAt.isBefore(Instant.now())) {
+            malicious.remove(archiveHash, expiresAt);
             return null;
         }
-        return entry;
+        return expiresAt;
     }
 
     int size() {
