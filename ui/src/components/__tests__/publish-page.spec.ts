@@ -51,7 +51,7 @@ const formKey: InjectionKey<{
 }> = Symbol('form')
 // Model only the host FormKit contract; assertions exercise the rendered fields and API calls.
 const FormKit = defineComponent({
-  props: ['type', 'name', 'label', 'modelValue', 'disabled'],
+  props: ['type', 'name', 'label', 'modelValue', 'disabled', 'help'],
   emits: ['update:modelValue', 'node', 'submit'],
   setup(props, { slots, emit }) {
     if (props.type === 'form') {
@@ -86,6 +86,7 @@ const FormKit = defineComponent({
           onInput: (event: Event) =>
             form.update(props.name, (event.target as HTMLInputElement).value),
         }),
+        props.help ? h('p', props.help) : null,
       ])
   },
 })

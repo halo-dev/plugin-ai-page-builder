@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef, watch } from 'vue'
 import { Toast, VButton, VDropdown, type VDropdownPlacement } from '@halo-dev/components'
-import IconEarth from '~icons/mingcute/earth-line'
 import { aiPageBuilderApi, getPublicSiteUrl } from '../api/clients'
 import type { PageDetail } from '../api/generated'
 import { errorMessage } from '../utils/error'
