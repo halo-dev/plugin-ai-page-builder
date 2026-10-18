@@ -212,8 +212,8 @@ function keydown(event: KeyboardEvent) {
   >
     <slot />
     <template #popper>
-      <div class="w-80 p-3.5">
-        <p class="mb-2 text-[13px] font-semibold text-gray-900">发布页面</p>
+      <div class="w-80 p-2">
+        <p class="mb-2.5 text-sm font-semibold text-gray-900">发布页面</p>
         <FormKit
           v-slot="{ state }"
           v-model="form"
@@ -238,22 +238,20 @@ function keydown(event: KeyboardEvent) {
             placeholder="company/about"
             :validation="slugValidation"
             maxlength="200"
+            :help="previewUrl"
           />
-          <p v-if="previewUrl" class="mt-1.5 flex min-w-0 items-center gap-1 text-xs text-gray-400">
-            <IconEarth class="shrink-0" />
-            <span class="truncate" :title="previewUrl">{{ previewUrl }}</span>
-          </p>
-          <p
-            v-if="scriptedState"
-            class="mt-2 rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-700"
-          >
-            此页面包含脚本，发布后会在访客浏览器中自动执行。
-          </p>
-          <p v-if="error" class="mt-1.5 text-xs text-red-600">{{ error }}</p>
-          <div class="mt-3 flex justify-end">
+          <div v-if="scriptedState" class="py-4">
+            <p class="rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-700">
+              此页面包含脚本，发布后会在访客浏览器中自动执行。
+            </p>
+          </div>
+          <div v-if="error" class="py-4">
+            <p class="text-xs text-red-600">{{ error }}</p>
+          </div>
+          <div class="pt-4 flex justify-end">
             <VButton
               size="sm"
-              type="primary"
+              type="secondary"
               :loading="pending"
               :disabled="pending || disabled || scriptPending || !state.valid"
               @click="formNode?.submit()"
