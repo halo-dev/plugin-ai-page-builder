@@ -3,7 +3,6 @@ package run.halo.aipagebuilder.page;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Component;
 
 /**
@@ -18,7 +17,7 @@ public class ImportReviewStore {
 
     private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Instant> malicious = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, AtomicInteger> inFlight = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Integer> inFlight = new ConcurrentHashMap<>();
 
     synchronized void put(String actor, String archiveHash, PageApi.ImportReview review) {
         var now = Instant.now();
@@ -32,16 +31,16 @@ public class ImportReviewStore {
         }
     }
 
-    void beginReview(String archiveHash) {
-        inFlight.computeIfAbsent(archiveHash, key -> new AtomicInteger()).incrementAndGet();
+    synchronized void beginReview(String archiveHash) {
+        inFlight.merge(archiveHash, 1, Integer::sum);
     }
 
-    void endReview(String archiveHash) {
+    synchronized void endReview(String archiveHash) {
         inFlight.computeIfPresent(archiveHash,
-            (key, count) -> count.decrementAndGet() == 0 ? null : count);
+            (key, count) -> count == 1 ? null : count - 1);
     }
 
-    boolean isReviewing(String archiveHash) {
+    synchronized boolean isReviewing(String archiveHash) {
         return inFlight.containsKey(archiveHash);
     }
 
