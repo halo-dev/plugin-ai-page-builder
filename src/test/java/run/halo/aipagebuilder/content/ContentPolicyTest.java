@@ -98,6 +98,17 @@ class ContentPolicyTest {
             .isEqualTo("\nA");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"&#10;&#10;", "&#xA;&#xA;", "&NewLine;&NewLine;"})
+    void sanitizeHtmlDoesNotAddAnExtraLineForEncodedLeadingNewlines(String newlines) {
+        // A browser drops one leading newline even when it comes from a character
+        // reference; Jsoup does not, so the compensation must not add another one.
+        var output = policy.sanitizeHtml("<pre>" + newlines + "A</pre>");
+        assertThat(output).isEqualTo("<pre>\n\nA</pre>");
+        assertThat(org.jsoup.Jsoup.parseBodyFragment(output).body().selectFirst("pre").wholeText())
+            .isEqualTo("\nA");
+    }
+
     @Test
     void reportsParseLocationForBrokenCss() {
         assertThatThrownBy(() -> policy.validateCss(".a { color: red"))

@@ -18,7 +18,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.TextNode;
 import org.springframework.http.HttpStatus;
@@ -82,12 +81,12 @@ public class ContentPolicy {
         // Serialize the parsed DOM as-is: Jsoup's default pretty printing collapses
         // whitespace that CSS (for example white-space: pre) renders literally.
         body.ownerDocument().outputSettings().prettyPrint(false);
-        // HTML parsers drop one leading newline inside <pre>. Parsing already removed it,
-        // so emit an extra one to keep the author's leading blank lines across the
-        // browser's re-parse of this serialization.
+        // HTML parsers drop one leading newline inside <pre>, including one produced by a
+        // character reference. Jsoup only drops a literal newline, so compensate only when
+        // the source really has one; otherwise an entity would gain an extra line.
         for (var pre : body.select("pre")) {
             if (pre.childNodeSize() > 0 && pre.childNode(0) instanceof TextNode text
-                && text.getWholeText().startsWith("\n")) {
+                && text.getWholeText().startsWith("\n") && literalLeadingNewline(html, pre)) {
                 pre.prependChild(new TextNode("\n"));
             }
         }
@@ -109,7 +108,11 @@ public class ContentPolicy {
     private Element parseAndValidateHtml(String html) {
         require(html != null && html.length() <= MAX_HTML, "正文不能超过 200 KB");
         require(!HTML_SHELL.matcher(html).find(), "仅支持正文片段，请移除 html/head/body 外壳");
-        var body = Jsoup.parseBodyFragment(html).body();
+        var parser = org.jsoup.parser.Parser.htmlParser().setTrackPosition(true);
+        var body = org.jsoup.nodes.Document.createShell("").body();
+        for (var node : parser.parseFragmentInput(html, body, "")) {
+            body.appendChild(node);
+        }
         for (var element : body.getAllElements()) {
             if (element == body) {
                 continue;
@@ -120,6 +123,28 @@ public class ContentPolicy {
             }
         }
         return body;
+    }
+
+    /** True when the source has a literal newline right after this pre's start tag. */
+    private static boolean literalLeadingNewline(String html, Element pre) {
+        var range = pre.sourceRange();
+        if (!range.isTracked()) return false;
+        var index = range.startPos() + 4; // skip "<pre"
+        char quote = 0;
+        for (; index < html.length(); index++) {
+            var c = html.charAt(index);
+            if (quote != 0) {
+                if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '>') {
+                index++;
+                break;
+            }
+        }
+        if (index >= html.length()) return false;
+        var next = html.charAt(index);
+        return next == '\n' || next == '\r';
     }
 
     public void validateCss(String css) {

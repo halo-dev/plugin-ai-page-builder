@@ -300,8 +300,9 @@ async function publish(unpublish = false) {
   if (!detail.value || locked.value || (!unpublish && (dirty.value || !valid.value))) return
   // First publish goes through the popper for the slug; this path is 更新发布/取消发布.
   if (!unpublish && !detail.value.page.publishedRevision) return
-  // Capture the target before awaiting: the route can switch to another page while the
-  // confirmation dialog is open.
+  // Capture the session and target before awaiting: the route can switch to another
+  // page (and start loading it) while the confirmation dialog is open.
+  const session = loadId
   const target = {
     name: detail.value.page.name,
     version: detail.value.page.version,
@@ -315,6 +316,8 @@ async function publish(unpublish = false) {
     return
   if (unpublish && !(await confirm('取消发布？', '访客将无法访问此页面。'))) return
   if (
+    session !== loadId ||
+    String(route.params.name) !== target.name ||
     detail.value?.page.name !== target.name ||
     detail.value?.page.version !== target.version
   ) {
@@ -333,9 +336,12 @@ async function publish(unpublish = false) {
         ? aiPageBuilderApi.unpublishPage(request)
         : aiPageBuilderApi.publishPage(request))
     ).data
-    detail.value = result
-    queryClient.setQueryData(pageKeys.detail(result.page.name), result)
-    Toast.success(unpublish ? '已取消发布' : '页面已发布')
+    // Never let a late response for another page replace the current session.
+    if (session === loadId && String(route.params.name) === target.name) {
+      detail.value = result
+      queryClient.setQueryData(pageKeys.detail(result.page.name), result)
+      Toast.success(unpublish ? '已取消发布' : '页面已发布')
+    }
   } catch (e) {
     error.value = errorMessage(e)
   } finally {

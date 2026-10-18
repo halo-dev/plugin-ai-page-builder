@@ -207,6 +207,36 @@ class PageRendererTest {
     }
 
     @Test
+    void rejectsHostValuesThatCouldInjectCspDirectives() {
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
+            "/apis/api.content.halo.run/v1alpha1/"));
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
+        var injected = ServerRequest.create(MockServerWebExchange.from(
+            MockServerHttpRequest.get("/p/about").header("Host", "a; connect-src *").build()),
+            HandlerStrategies.withDefaults().messageReaders());
+        var preview = (RenderingResponse) renderer.preview(injected, "about", "about", true,
+            document).block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+            .contains("connect-src 'none'").doesNotContain("connect-src *");
+    }
+
+    @Test
+    void rejectsExternalUrlPathsThatCouldInjectCspDirectives() {
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
+            "/apis/api.content.halo.run/v1alpha1/"));
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
+        var preview = (RenderingResponse) new PageRenderer(resolver, policy, publicApiCatalog,
+            fixedExternalUrl("https://pages.example.com/site;x"))
+            .preview(request, "about", "about", true, document).block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+            .contains("script-src http://localhost/ ").doesNotContain("site;x");
+    }
+
+    @Test
     void previewPolicyUsesTheExternalUrlIncludingItsBasePath() {
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
             "/apis/api.content.halo.run/v1alpha1/"));
