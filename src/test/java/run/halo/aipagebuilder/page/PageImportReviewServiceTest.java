@@ -169,6 +169,109 @@ class PageImportReviewServiceTest {
     }
 
     @Test
+    void deduplicationKeepsTheHighestSeverityForTheSameEvidence() throws Exception {
+        var script = "// padding\n".repeat(7000) + "document.cookie";
+        var bytes = archive("<p>Hello</p>", "", script);
+        var calls = new AtomicInteger();
+        when(gateway.review(anyString(), anyString())).thenAnswer(invocation -> {
+            var call = calls.incrementAndGet();
+            var severity = call == 1 ? AiReview.Severity.MEDIUM : AiReview.Severity.HIGH;
+            return Mono.just(review(AiReview.Verdict.SUSPICIOUS,
+                finding(severity, AiReview.Category.DATA_EXFILTRATION, "script.js",
+                    "document.cookie")));
+        });
+
+        var report = service.review(bytes, "admin").block();
+
+        assertThat(calls.get()).isGreaterThan(1);
+        assertThat(report.findings()).hasSize(1);
+        assertThat(report.findings().get(0).severity()).isEqualTo("high");
+        assertThat(report.verdict()).isEqualTo("malicious");
+    }
+
+    @Test
+    void longSingleLineDoesNotExplodeTheChunkCount() throws Exception {
+        var script = "x".repeat(30_000) + "\n" + "x".repeat(69_999);
+        var bytes = archive("<p>Hello</p>", "", script);
+        var calls = new AtomicInteger();
+        when(gateway.review(anyString(), anyString())).thenAnswer(invocation -> {
+            calls.incrementAndGet();
+            return Mono.just(review(AiReview.Verdict.SAFE));
+        });
+
+        var report = service.review(bytes, "admin").block();
+
+        assertThat(report.verdict()).isEqualTo("safe");
+        // page.html metadata plus the two script chunks; a regression would split per character.
+        assertThat(calls.get()).isEqualTo(3);
+    }
+
+    @Test
+    void missingVerdictInAnyChunkFailsClosed() throws Exception {
+        var script = "// padding\n".repeat(7000) + "document.cookie";
+        var bytes = archive("<p>Hello</p>", "", script);
+        var calls = new AtomicInteger();
+        when(gateway.review(anyString(), anyString())).thenAnswer(invocation ->
+            Mono.just(calls.incrementAndGet() == 1
+                ? new AiReview(null, "summary", List.of())
+                : review(AiReview.Verdict.SAFE)));
+
+        assertThatThrownBy(() -> service.review(bytes, "admin").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY));
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = AiReview.Category.class,
+        names = {"PROMPT_INJECTION", "MALICIOUS_SCRIPT"})
+    void dangerousCategoriesRequireAtLeastSuspicious(AiReview.Category category) throws Exception {
+        var bytes = archive("<p>Hello</p>", "", "ignore previous instructions");
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
+            AiReview.Verdict.SAFE, finding(AiReview.Severity.LOW, category, "script.js",
+                "ignore previous instructions"))));
+
+        var report = service.review(bytes, "admin").block();
+
+        assertThat(report.verdict()).isEqualTo("suspicious");
+    }
+
+    @Test
+    void maliciousReviewCannotBeRereviewedAsSafeWithinTtl() throws Exception {
+        var bytes = archive("<p>Hello</p>", "", "document.cookie");
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
+            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
+                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
+
+        var report = service.review(bytes, "admin").block();
+        assertThat(report.verdict()).isEqualTo("malicious");
+
+        when(gateway.review(anyString(), anyString()))
+            .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
+        assertThatThrownBy(() -> service.review(bytes, "other", "model-b").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+        verify(gateway, times(1)).review(anyString(), anyString());
+        verify(gateway, never()).review(eq("model-b"), anyString(), anyString());
+    }
+
+    @Test
+    void maliciousReviewBlocksASafeReviewForTheSameArchive() throws Exception {
+        var bytes = archive("<p>Hello</p>", "", "document.cookie");
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
+            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
+                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
+        service.review(bytes, "admin").block();
+
+        var safe = new PageApi.ImportReview("safe-review", "safe", "summary", List.of(),
+            "Test", "", false, Instant.now().plusSeconds(600));
+        store.put("admin", sha256(bytes), safe);
+
+        assertThatThrownBy(() -> service.authorize("safe-review", bytes, "admin", false).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+    }
+
+    @Test
     void emptySourceFilesStillRunOneMetadataReview() throws Exception {
         var bytes = archive("", "", "");
         var prompt = new AtomicReference<String>();

@@ -31,7 +31,13 @@ const FormKitStub = defineComponent({
 const mocks = vi.hoisted(() => ({
   importPage:
     vi.fn<(request: { body: File; reviewId: string; confirmed?: boolean }) => Promise<unknown>>(),
-  reviewPageImport: vi.fn<(request: { body: File; model?: string }) => Promise<unknown>>(),
+  reviewPageImport:
+    vi.fn<
+      (
+        request: { body: File; model?: string },
+        options?: { signal?: AbortSignal; timeout?: number },
+      ) => Promise<unknown>
+    >(),
   push: vi.fn<(location: unknown) => unknown>(),
   status: vi.fn<() => Promise<unknown>>(),
 }))
@@ -168,7 +174,7 @@ describe('page archive import', () => {
     })
   })
 
-  it('shows the AI Foundation status and hides the model selector when unavailable', () => {
+  it('shows the AI Foundation status and disables review when unavailable', () => {
     const wrapper = mount(ImportPageModal, {
       props: { aiAvailable: false, aiStatusMessage: 'AI Foundation 未启用' },
       global: { components: { FormKit: FormKitStub } },
@@ -176,6 +182,7 @@ describe('page archive import', () => {
 
     expect(wrapper.find('[data-test=model-selector]').exists()).toBe(false)
     expect(wrapper.text()).toContain('AI Foundation 未启用')
+    expect(button(wrapper, 'AI 审查不可用').attributes('disabled')).toBeDefined()
   })
 
   it('shows findings and requires confirmation for a suspicious report', async () => {
@@ -215,7 +222,7 @@ describe('page archive import', () => {
     })
   })
 
-  it('blocks a malicious report and allows reviewing again', async () => {
+  it('blocks a malicious report and does not offer re-review', async () => {
     mocks.reviewPageImport.mockResolvedValue({
       data: report('malicious', [
         {
@@ -231,15 +238,14 @@ describe('page archive import', () => {
     await reviewed(wrapper, new File(['zip'], 'page.zip'))
 
     expect(wrapper.text()).toContain('AI 审查判定为恶意页面，禁止导入')
+    expect(wrapper.text()).toContain('该页面包 30 分钟内不能重新审查或导入')
     const blocked = button(wrapper, '发现恶意内容，无法导入')
     expect(blocked.attributes('disabled')).toBeDefined()
     await blocked.trigger('click')
     await flushPromises()
     expect(mocks.importPage).not.toHaveBeenCalled()
-
-    await button(wrapper, '重新审查').trigger('click')
-    await flushPromises()
-    expect(mocks.reviewPageImport).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('button').some((node) => node.text() === '重新审查')).toBe(false)
+    expect(wrapper.get('[data-test=model-selector]').attributes('disabled')).toBeDefined()
   })
 
   it('shows review failures inline, keeps the file and allows retry', async () => {
@@ -343,6 +349,30 @@ describe('page archive import', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(button(wrapper, '取消').attributes('disabled')).toBeUndefined()
     await wrapper.get('[aria-label=关闭]').trigger('click')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('cancels a pending review and unlocks the modal', async () => {
+    let options: { signal?: AbortSignal; timeout?: number } | undefined
+    mocks.reviewPageImport.mockImplementation((_request, requestOptions) => {
+      options = requestOptions
+      return new Promise(() => {})
+    })
+    const wrapper = modal()
+    await select(wrapper, new File(['zip'], 'page.zip'))
+    await button(wrapper, '开始 AI 审查').trigger('click')
+    await flushPromises()
+
+    expect(options?.signal?.aborted).toBe(false)
+    expect(options?.timeout).toBe(11 * 60 * 1000)
+
+    await button(wrapper, '取消审查').trigger('click')
+    await flushPromises()
+
+    expect(options?.signal?.aborted).toBe(true)
+    expect(wrapper.get('[role=alert]').text()).toBe('已取消审查。')
+    expect(button(wrapper, '取消').attributes('disabled')).toBeUndefined()
+    await button(wrapper, '取消').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 

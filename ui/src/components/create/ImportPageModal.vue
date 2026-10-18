@@ -10,7 +10,7 @@ import { aiPageBuilderApi, type ImportReview } from '../../api/clients'
 import { pageKeys, queryClient } from '../../lib/query-client'
 import { errorMessage } from '../../utils/error'
 
-withDefaults(defineProps<{ aiAvailable?: boolean; aiStatusMessage?: string }>(), {
+const props = withDefaults(defineProps<{ aiAvailable?: boolean; aiStatusMessage?: string }>(), {
   aiAvailable: true,
   aiStatusMessage: '',
 })
@@ -26,6 +26,9 @@ const review = ref<ImportReview>()
 const confirmed = ref(false)
 const pending = ref(false)
 const phase = ref<'select' | 'report'>('select')
+const REVIEW_CLIENT_TIMEOUT = 11 * 60 * 1000
+let reviewAttempt = 0
+let reviewAbort: AbortController | undefined
 
 const severityLabels: Record<string, string> = {
   critical: '严重',
@@ -45,8 +48,12 @@ const categoryLabels: Record<string, string> = {
 }
 
 const isSuspicious = computed(() => review.value?.verdict === 'suspicious')
+const isMalicious = computed(() => review.value?.verdict === 'malicious')
 const canImport = computed(
   () => review.value?.verdict === 'safe' || (isSuspicious.value && confirmed.value),
+)
+const reviewFooter = computed(() =>
+  isMalicious.value ? '该页面包 30 分钟内不能重新审查或导入' : '审查结果 30 分钟内有效',
 )
 const verdictMeta = computed<{ label: string; alertType: 'success' | 'warning' | 'error' }>(() => {
   if (review.value?.verdict === 'safe') {
@@ -58,7 +65,9 @@ const verdictMeta = computed<{ label: string; alertType: 'success' | 'warning' |
   return { label: 'AI 审查判定为恶意页面，禁止导入', alertType: 'error' }
 })
 const primaryLabel = computed(() => {
-  if (phase.value === 'select') return '开始 AI 审查'
+  if (phase.value === 'select') {
+    return props.aiAvailable ? '开始 AI 审查' : 'AI 审查不可用'
+  }
   if (review.value?.verdict === 'safe') return '导入页面'
   if (review.value?.verdict === 'suspicious') return '仍然导入'
   if (review.value?.verdict === 'malicious') return '发现恶意内容，无法导入'
@@ -66,20 +75,29 @@ const primaryLabel = computed(() => {
 })
 
 const reviewMutation = useMutation({
-  mutationFn: async (input: { file: File; model?: string }) =>
-    (await aiPageBuilderApi.reviewPageImport({ body: input.file, model: input.model })).data,
-  onSuccess: (data) => {
+  mutationFn: async (input: { file: File; model?: string; attempt: number; signal: AbortSignal }) =>
+    (
+      await aiPageBuilderApi.reviewPageImport(
+        { body: input.file, model: input.model },
+        { signal: input.signal, timeout: REVIEW_CLIENT_TIMEOUT },
+      )
+    ).data,
+  onSuccess: (data, input) => {
+    if (input.attempt !== reviewAttempt) return
     review.value = data
     confirmed.value = false
     error.value = ''
     phase.value = 'report'
   },
-  onError: (e) => {
+  onError: (e, input) => {
+    if (input.attempt !== reviewAttempt) return
     review.value = undefined
     phase.value = 'select'
     error.value = errorMessage(e)
   },
-  onSettled: () => (pending.value = false),
+  onSettled: (_data, _error, input) => {
+    if (input.attempt === reviewAttempt) pending.value = false
+  },
   queryClient,
 })
 
@@ -140,6 +158,10 @@ function dropFile(event: DragEvent) {
 
 function startReview() {
   if (pending.value) return
+  if (!props.aiAvailable) {
+    error.value = 'AI 审查不可用，请检查 AI Foundation。'
+    return
+  }
   if (!file.value) {
     error.value = '请选择 ZIP 文件。'
     return
@@ -153,11 +175,28 @@ function startReview() {
   review.value = undefined
   confirmed.value = false
   phase.value = 'select'
+  reviewAbort?.abort()
+  reviewAbort = new AbortController()
+  const attempt = ++reviewAttempt
   pending.value = true
   reviewMutation.mutate({
     file: file.value,
     model: (model.value || '').trim() || undefined,
+    attempt,
+    signal: reviewAbort.signal,
   })
+}
+
+function cancelReview() {
+  if (!pending.value || phase.value !== 'select') return
+  reviewAttempt++
+  reviewAbort?.abort()
+  reviewAbort = undefined
+  pending.value = false
+  review.value = undefined
+  confirmed.value = false
+  phase.value = 'select'
+  error.value = '已取消审查。'
 }
 
 function startImport() {
@@ -214,7 +253,7 @@ function guardEscape(event: KeyboardEvent) {
 
 // The report belongs to the model that produced it; changing the model invalidates it.
 watch(model, () => {
-  if (!review.value) return
+  if (!review.value || isMalicious.value) return
   review.value = undefined
   confirmed.value = false
   phase.value = 'select'
@@ -301,7 +340,7 @@ watch(model, () => {
             clearable
             full-width
             placeholder="默认模型"
-            :disabled="pending"
+            :disabled="pending || isMalicious"
           />
         </div>
         <p class="mt-1.5 text-xs text-gray-500">不选择时使用 AI Foundation 配置的默认模型。</p>
@@ -323,7 +362,18 @@ watch(model, () => {
       </div>
 
       <div v-if="pending && phase === 'select'" class="mt-3">
-        <VAlert type="info" :closable="false" description="正在审查页面包，可能需要几十秒…" />
+        <VAlert
+          type="info"
+          :closable="false"
+          description="正在审查页面包，可能需要几十秒到几分钟…"
+        />
+        <button
+          type="button"
+          class="mt-2 text-xs text-blue-600 hover:underline"
+          @click="cancelReview"
+        >
+          取消审查
+        </button>
       </div>
 
       <div v-if="phase === 'report' && review" class="mt-4 rounded-md border border-gray-200 p-3">
@@ -360,6 +410,7 @@ watch(model, () => {
         </label>
         <div class="mt-3 flex items-center justify-between text-xs text-gray-500">
           <button
+            v-if="!isMalicious"
             type="button"
             class="text-blue-600 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
             :disabled="pending"
@@ -367,7 +418,7 @@ watch(model, () => {
           >
             重新审查
           </button>
-          <span>审查结果 30 分钟内有效</span>
+          <span class="ml-auto">{{ reviewFooter }}</span>
         </div>
       </div>
 
@@ -385,7 +436,9 @@ watch(model, () => {
         <VButton
           type="secondary"
           :loading="pending"
-          :disabled="pending || (phase === 'report' && !canImport)"
+          :disabled="
+            pending || (phase === 'select' && !aiAvailable) || (phase === 'report' && !canImport)
+          "
           @click="submit"
         >
           {{ primaryLabel }}

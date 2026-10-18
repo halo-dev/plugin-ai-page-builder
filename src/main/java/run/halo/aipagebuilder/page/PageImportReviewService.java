@@ -32,7 +32,7 @@ import run.halo.aipagebuilder.model.PageDocument;
 public class PageImportReviewService {
     static final Duration REVIEW_TTL = Duration.ofMinutes(30);
     private static final Duration STATUS_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration REVIEW_TIMEOUT = Duration.ofMinutes(5);
+    private static final Duration REVIEW_TIMEOUT = Duration.ofMinutes(10);
     private static final int MAX_CHUNK_CHARS = 60_000;
     private static final int CHUNK_OVERLAP = 300;
     private static final int MAX_FINDINGS = 50;
@@ -98,20 +98,28 @@ public class PageImportReviewService {
         return Mono.fromCallable(() -> {
                 var imported = PageArchive.read(archive);
                 contentPolicy.validate(imported.document());
-                return imported;
+                return new ImportedArchive(imported, hash(archive));
             })
             .subscribeOn(Schedulers.boundedElastic())
-            .flatMap(imported -> gateway.status()
-                .timeout(STATUS_TIMEOUT)
-                .onErrorResume(error -> Mono.just(new AiEndpoint.AiStatus(false,
-                    "AI Foundation 暂不可用。")))
-                .switchIfEmpty(Mono.error(new ResponseStatusException(
-                    HttpStatus.SERVICE_UNAVAILABLE, "AI 审查不可用：未获取到 AI Foundation 状态。")))
-                .flatMap(status -> status.available()
-                    ? reviewChunks(imported, modelName)
-                    : Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                        "AI 审查不可用：" + status.message())))
-                .map(result -> save(actor, archive, imported, result)))
+            .flatMap(input -> {
+                if (store.getMalicious(input.archiveHash()) != null) {
+                    return Mono.error(new ResponseStatusException(
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        "该页面包在 30 分钟内已被 AI 判定为恶意，已阻止重新审查和导入。"));
+                }
+                return gateway.status()
+                    .timeout(STATUS_TIMEOUT)
+                    .onErrorResume(error -> Mono.just(new AiEndpoint.AiStatus(false,
+                        "AI Foundation 暂不可用。")))
+                    .switchIfEmpty(Mono.error(new ResponseStatusException(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "AI 审查不可用：未获取到 AI Foundation 状态。")))
+                    .flatMap(status -> status.available()
+                        ? reviewChunks(input.imported(), modelName)
+                        : Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                            "AI 审查不可用：" + status.message())))
+                    .map(result -> save(actor, input.archiveHash(), input.imported(), result));
+            })
             .doOnError(error -> log.warn("Import review failed: actor={}, type={}, reason={}",
                 actor, error.getClass().getSimpleName(),
                 error instanceof AiReviewException aiError ? aiError.reason() : null))
@@ -132,9 +140,14 @@ public class PageImportReviewService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "审查结果不存在或已过期，请重新审查。");
             }
-            if (!entry.actor().equals(actor) || !entry.archiveHash().equals(hash(archive))) {
+            var archiveHash = hash(archive);
+            if (!entry.actor().equals(actor) || !entry.archiveHash().equals(archiveHash)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "上传内容与审查内容不一致，请重新审查。");
+            }
+            if (store.getMalicious(archiveHash) != null) {
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "该页面包在 30 分钟内已被 AI 判定为恶意，已阻止导入。");
             }
             switch (entry.review().verdict()) {
                 case "safe" -> { }
@@ -186,7 +199,7 @@ public class PageImportReviewService {
         return new ResponseStatusException(status, error.getMessage(), error);
     }
 
-    private PageApi.ImportReview save(String actor, byte[] archive,
+    private PageApi.ImportReview save(String actor, String archiveHash,
         PageArchive.ImportedPage imported, AiReview result) {
         var document = imported.document();
         var review = new PageApi.ImportReview(UUID.randomUUID().toString(),
@@ -199,7 +212,7 @@ public class PageImportReviewService {
                 .toList(),
             document.title(), document.description(), imported.themeLayout(),
             Instant.now().plus(REVIEW_TTL));
-        store.put(actor, hash(archive), review);
+        store.put(actor, archiveHash, review);
         return review;
     }
 
@@ -252,7 +265,7 @@ public class PageImportReviewService {
             var end = Math.min(content.length(), start + MAX_CHUNK_CHARS);
             if (end < content.length()) {
                 var newline = content.lastIndexOf('\n', end);
-                if (newline > start) {
+                if (newline > start + MAX_CHUNK_CHARS - CHUNK_OVERLAP) {
                     end = newline + 1;
                 }
             }
@@ -305,9 +318,13 @@ public class PageImportReviewService {
         if (results.isEmpty()) {
             throw new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT);
         }
+        for (var result : results) {
+            if (result.verdict() == null) {
+                throw new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT);
+            }
+        }
         var aiVerdict = results.stream()
             .map(AiReview::verdict)
-            .filter(value -> value != null)
             .max(Comparator.naturalOrder())
             .orElseThrow(() -> new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT));
         var unique = new LinkedHashMap<String, AiReview.Finding>();
@@ -317,8 +334,11 @@ public class PageImportReviewService {
             }
             for (var finding : result.findings()) {
                 var normalized = normalizeFinding(finding);
-                unique.putIfAbsent(normalized.file() + "\u0000" + normalized.category()
-                    + "\u0000" + normalized.evidence(), normalized);
+                var key = normalized.file() + "\u0000" + normalized.category()
+                    + "\u0000" + normalized.evidence();
+                unique.merge(key, normalized, (existing, incoming) ->
+                    incoming.severity().compareTo(existing.severity()) > 0
+                        ? incoming : existing);
             }
         }
         var findings = unique.values().stream()
@@ -368,6 +388,10 @@ public class PageImportReviewService {
     private static AiReview.Verdict verdictFrom(List<AiReview.Finding> findings) {
         var verdict = AiReview.Verdict.SAFE;
         for (var finding : findings) {
+            if (finding.category() == AiReview.Category.PROMPT_INJECTION
+                || finding.category() == AiReview.Category.MALICIOUS_SCRIPT) {
+                verdict = AiReview.Verdict.SUSPICIOUS;
+            }
             switch (finding.severity()) {
                 case CRITICAL, HIGH -> {
                     return AiReview.Verdict.MALICIOUS;
@@ -412,6 +436,9 @@ public class PageImportReviewService {
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException("SHA-256 不可用", error);
         }
+    }
+
+    private record ImportedArchive(PageArchive.ImportedPage imported, String archiveHash) {
     }
 
     private record Part(String file, int part, int total, String content) {
