@@ -42,7 +42,7 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
 
     public static ThemeStyleContext unavailable() {
         return new ThemeStyleContext(null, null, "UNAVAILABLE", List.of(),
-            List.of("主题样式暂不可读取，请保留页面独立的基础样式，并以主题预览为准。"), "");
+            List.of("主题样式暂不可读取，请保留页面独立的基础样式，并以预览为准。"), "");
     }
 
     /** Page setting: render without the theme layout, so no theme styles or variables exist. */

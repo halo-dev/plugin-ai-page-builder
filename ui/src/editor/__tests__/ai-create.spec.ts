@@ -206,7 +206,7 @@ describe('page creation', () => {
     expect(open).toHaveBeenLastCalledWith('https://www.example.com/company/about', '_blank', 'noopener')
     await wrapper
       .findAll('button')
-      .find((button) => button.text() === '主题预览 ↗')!
+      .find((button) => button.text() === '预览 ↗')!
       .trigger('click')
     expect(open).toHaveBeenLastCalledWith('/preview/draft-id', '_blank', 'noopener')
     open.mockRestore()

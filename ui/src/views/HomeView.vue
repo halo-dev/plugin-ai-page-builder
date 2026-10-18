@@ -433,7 +433,7 @@ function unpublishFromSettings() {
           </div>
           <div class="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3.5">
             <VButton size="sm" class="flex-1" @click="open(item)">
-              {{ item.publishedRevision ? '访问页面 ↗' : '主题预览 ↗' }}
+              {{ item.publishedRevision ? '访问页面 ↗' : '预览 ↗' }}
             </VButton>
             <VDropdown>
               <VButton size="sm" :disabled="mutating" :aria-label="`${item.title}的操作`">

@@ -293,7 +293,7 @@ async function saveDraft() {
 }
 function preview() {
   if (!detail.value) return
-  if (dirty.value) Toast.info('主题预览显示上一次保存的草稿。')
+  if (dirty.value) Toast.info('预览显示上一次保存的草稿。')
   window.open(pagePreviewUrl(detail.value.page.name), '_blank', 'noopener')
 }
 async function publish(unpublish = false) {
@@ -471,8 +471,8 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           type="button"
           class="apb-icon-btn"
           :disabled="locked"
-          v-tooltip="'主题预览（新窗口）'"
-          aria-label="主题预览"
+          v-tooltip="'预览（新窗口）'"
+          aria-label="预览"
           @click="preview"
         >
           <IconExternal class="text-base" />
