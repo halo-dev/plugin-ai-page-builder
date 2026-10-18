@@ -129,19 +129,9 @@ public class ContentPolicy {
     private static boolean literalLeadingNewline(String html, Element pre) {
         var range = pre.sourceRange();
         if (!range.isTracked()) return false;
-        var index = range.startPos() + 4; // skip "<pre"
-        char quote = 0;
-        for (; index < html.length(); index++) {
-            var c = html.charAt(index);
-            if (quote != 0) {
-                if (c == quote) quote = 0;
-            } else if (c == '"' || c == '\'') {
-                quote = c;
-            } else if (c == '>') {
-                index++;
-                break;
-            }
-        }
+        // endPos is the first character after the start tag, so this does not need a
+        // hand-written scan of (possibly malformed) attributes.
+        var index = range.endPos();
         if (index >= html.length()) return false;
         var next = html.charAt(index);
         return next == '\n' || next == '\r';

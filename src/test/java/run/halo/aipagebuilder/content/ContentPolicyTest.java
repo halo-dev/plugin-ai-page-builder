@@ -109,6 +109,14 @@ class ContentPolicyTest {
             .isEqualTo("\nA");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"<pre class=x\"y>\n\nA</pre>", "<pre title=don't>\n\nA</pre>"})
+    void sanitizeHtmlPreservesLeadingLinesWithUnquotedQuotedAttributes(String html) {
+        var output = policy.sanitizeHtml(html);
+        assertThat(org.jsoup.Jsoup.parseBodyFragment(output).body().selectFirst("pre").wholeText())
+            .isEqualTo("\nA");
+    }
+
     @Test
     void reportsParseLocationForBrokenCss() {
         assertThatThrownBy(() -> policy.validateCss(".a { color: red"))
