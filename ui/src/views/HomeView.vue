@@ -501,7 +501,7 @@ function unpublishFromSettings() {
                   v-close-popper
                   :disabled="mutating"
                   @click="exportMutation.mutate(item)"
-                  >导出草稿 ZIP</VDropdownItem
+                  >导出</VDropdownItem
                 >
                 <VDropdownItem
                   v-close-popper

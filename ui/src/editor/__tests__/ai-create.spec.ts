@@ -203,7 +203,11 @@ describe('page creation', () => {
       .find((button) => button.text() === '访问页面 ↗')!
       .trigger('click')
     await flushPromises()
-    expect(open).toHaveBeenLastCalledWith('https://www.example.com/company/about', '_blank', 'noopener')
+    expect(open).toHaveBeenLastCalledWith(
+      'https://www.example.com/company/about',
+      '_blank',
+      'noopener',
+    )
     await wrapper
       .findAll('button')
       .find((button) => button.text() === '预览 ↗')!
@@ -302,7 +306,7 @@ describe('page creation', () => {
     await flushPromises()
     await wrapper
       .findAll('div')
-      .find((item) => item.text() === '导出草稿 ZIP')!
+      .find((item) => item.text() === '导出')!
       .trigger('click')
     await flushPromises()
     expect(mocks.export).toHaveBeenCalledWith({ name: 'original' }, { responseType: 'blob' })
