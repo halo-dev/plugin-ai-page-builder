@@ -24,6 +24,7 @@ vi.mock('../../api/clients', () => ({
   },
   aiPageBuilderAiApi: { getAiPageBuilderAiStatus: mocks.status },
   pagePreviewUrl: (name: string) => `/preview/${name}`,
+  getPublicSiteUrl: () => Promise.resolve('https://www.example.com'),
 }))
 vi.mock('../../utils/error', () => ({
   errorMessage: (error: Error) => error.message,
@@ -201,7 +202,8 @@ describe('page creation', () => {
       .findAll('button')
       .find((button) => button.text() === '访问页面 ↗')!
       .trigger('click')
-    expect(open).toHaveBeenLastCalledWith('/company/about', '_blank', 'noopener')
+    await flushPromises()
+    expect(open).toHaveBeenLastCalledWith('https://www.example.com/company/about', '_blank', 'noopener')
     await wrapper
       .findAll('button')
       .find((button) => button.text() === '主题预览 ↗')!

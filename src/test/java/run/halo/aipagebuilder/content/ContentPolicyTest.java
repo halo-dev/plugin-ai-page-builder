@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -56,6 +57,64 @@ class ContentPolicyTest {
     })
     void rejectsUnsupportedCss(String css) {
         assertThatThrownBy(() -> policy.validateCss(css)).isInstanceOf(ResponseStatusException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"opener", "OPENER", "nofollow Opener", "noopener opener"})
+    void neutralizesOpenerRelInsteadOfRejectingLegacyPages(String rel) {
+        var html = "<a href='https://example.com' target='_blank' rel='" + rel + "'>x</a>";
+        assertThatCode(() -> policy.validateHtml(html)).doesNotThrowAnyException();
+        assertThat(policy.sanitizeHtml(html).toLowerCase(Locale.ROOT)).contains("noopener");
+    }
+
+    @Test
+    void sanitizeHtmlOutputsTheParsedDomAndAddsNoopenerToBlankLinks() {
+        var output = policy.sanitizeHtml(
+            "<DIV class=hero><a href='https://example.com' target='_blank'>go</a><p>Body");
+        assertThat(output)
+            .startsWith("<div class=\"hero\">")
+            .contains("rel=\"noopener\"")
+            .contains("<p>Body</p>");
+        assertThat(policy.sanitizeHtml(
+            "<a href='/x' target='_blank' rel='nofollow noopener'>x</a>"))
+            .contains("rel=\"nofollow noopener\"");
+        assertThatThrownBy(() -> policy.sanitizeHtml("<script>alert(1)</script>"))
+            .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void sanitizeHtmlPreservesTextWhitespace() {
+        assertThat(policy.sanitizeHtml(
+            "<div style='white-space:pre'>A  B\n C</div><span>a</span><span>b</span>"))
+            .isEqualTo("<div style=\"white-space:pre\">A  B\n C</div><span>a</span><span>b</span>");
+    }
+
+    @Test
+    void sanitizeHtmlPreservesLeadingBlankLinesInPreformattedText() {
+        var output = policy.sanitizeHtml("<pre>\n\nA</pre>");
+        assertThat(output).isEqualTo("<pre>\n\nA</pre>");
+        // HTML5 parsers drop one leading LF inside <pre>; the output must survive that.
+        assertThat(org.jsoup.Jsoup.parseBodyFragment(output).body().selectFirst("pre").wholeText())
+            .isEqualTo("\nA");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"&#10;&#10;", "&#xA;&#xA;", "&NewLine;&NewLine;"})
+    void sanitizeHtmlDoesNotAddAnExtraLineForEncodedLeadingNewlines(String newlines) {
+        // A browser drops one leading newline even when it comes from a character
+        // reference; Jsoup does not, so the compensation must not add another one.
+        var output = policy.sanitizeHtml("<pre>" + newlines + "A</pre>");
+        assertThat(output).isEqualTo("<pre>\n\nA</pre>");
+        assertThat(org.jsoup.Jsoup.parseBodyFragment(output).body().selectFirst("pre").wholeText())
+            .isEqualTo("\nA");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"<pre class=x\"y>\n\nA</pre>", "<pre title=don't>\n\nA</pre>"})
+    void sanitizeHtmlPreservesLeadingLinesWithUnquotedQuotedAttributes(String html) {
+        var output = policy.sanitizeHtml(html);
+        assertThat(org.jsoup.Jsoup.parseBodyFragment(output).body().selectFirst("pre").wholeText())
+            .isEqualTo("\nA");
     }
 
     @Test

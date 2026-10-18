@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRouteQuery } from '@vueuse/router'
 import { useMutation, useQuery } from '@tanstack/vue-query'
@@ -19,7 +19,7 @@ import {
 import IconAddCircle from '~icons/mingcute/add-circle-line'
 import IconGrid from '~icons/mingcute/layout-grid-line'
 import IconMore from '~icons/mingcute/more-2-line'
-import { pagePreviewUrl, aiPageBuilderApi } from '../api/clients'
+import { aiPageBuilderApi, getPublicSiteUrl, pagePreviewUrl } from '../api/clients'
 import { errorMessage } from '../utils/error'
 import { pageKeys, queryClient } from '../lib/query-client'
 import type { PageDetail, PageDocument, PageSummary } from '../api/generated'
@@ -60,9 +60,24 @@ function cloned(name: string) {
   openEditor(name)
 }
 // Published pages go straight to the public URL; drafts fall back to the theme preview.
+// Resolve the site URL up front so opening a page stays inside the click's user gesture.
+const siteBaseUrl = ref('')
+onMounted(() => {
+  void getPublicSiteUrl()
+    .then((url) => {
+      siteBaseUrl.value = url
+    })
+    .catch(() => {
+      // Keep the Console origin as a best-effort fallback.
+    })
+})
 function open(item: PageSummary) {
-  const url = item.publishedRevision ? `/${item.slug || item.name}` : pagePreviewUrl(item.name)
-  window.open(url, '_blank', 'noopener')
+  if (!item.publishedRevision) {
+    window.open(pagePreviewUrl(item.name), '_blank', 'noopener')
+    return
+  }
+  const base = (siteBaseUrl.value || window.location.origin).replace(/\/$/, '')
+  window.open(`${base}/${item.slug || item.name}`, '_blank', 'noopener')
 }
 const exportMutation = useMutation({
   mutationFn: async (item: PageSummary) => {
@@ -109,6 +124,35 @@ const publishMutation = useMutation({
   onError: (e) => Toast.error(errorMessage(e)),
   queryClient,
 })
+function confirm(title: string, description: string): Promise<boolean> {
+  return new Promise((resolve) =>
+    Dialog.warning({
+      title,
+      description,
+      confirmText: '继续',
+      cancelText: '取消',
+      onConfirm: () => resolve(true),
+      onCancel: () => resolve(false),
+    }),
+  )
+}
+async function publishUpdate(item: PageSummary) {
+  try {
+    const detail = (await aiPageBuilderApi.getPage({ name: item.name })).data
+    if (
+      (detail.document.js ?? '').trim() &&
+      !(await confirm(
+        '发布包含脚本的页面？',
+        '页面脚本会在访客浏览器中执行。请确认你信任这些内容。',
+      ))
+    )
+      return
+    // Publish the version we just read so an updated list entry does not cause a 409.
+    publishMutation.mutate({ ...item, version: detail.page.version })
+  } catch (e) {
+    Toast.error(errorMessage(e))
+  }
+}
 const unpublishMutation = useMutation({
   mutationFn: async (item: PageSummary) => {
     await aiPageBuilderApi.unpublishPage({
@@ -416,7 +460,7 @@ function unpublishFromSettings() {
                   v-else
                   v-close-popper
                   :disabled="mutating"
-                  @click="publishMutation.mutate(item)"
+                  @click="publishUpdate(item)"
                 >
                   更新发布
                 </VDropdownItem>

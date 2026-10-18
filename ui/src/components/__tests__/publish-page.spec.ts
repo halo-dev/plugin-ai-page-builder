@@ -17,6 +17,7 @@ vi.mock('../../api/clients', () => ({
     updatePageSlug: mocks.slug,
     publishPage: mocks.publish,
   },
+  getPublicSiteUrl: () => Promise.resolve('http://localhost'),
 }))
 vi.mock('../../utils/error', () => ({ errorMessage: (error: Error) => error.message }))
 vi.mock('@halo-dev/components', async () => {
@@ -139,11 +140,90 @@ describe('first publish confirmation', () => {
     expect(wrapper.get<HTMLInputElement>('[name=slug]').element.value).toBe('about-us')
     expect(wrapper.text()).not.toContain('随机')
     await publish(wrapper)
-    expect(mocks.get).not.toHaveBeenCalled()
+    // The script check reads the page once, but no save is needed.
+    expect(mocks.get).toHaveBeenCalledTimes(1)
     expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.slug).not.toHaveBeenCalled()
     expect(mocks.publish).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 1 } })
     expect(wrapper.emitted('published')).toHaveLength(1)
+  })
+
+  it('warns before first publishing a page that contains scripts', () => {
+    const wrapper = mount(PublishPagePopper, {
+      props: { name: 'page', title: '关于我们', slug: 'about-us', version: 1, scripted: true },
+      global: { components: { FormKit } },
+    })
+    expect(wrapper.text()).toContain('此页面包含脚本，发布后会在访客浏览器中自动执行')
+  })
+
+  it('detects scripts and the public site URL when the list provides no flag', async () => {
+    const withScript = detail()
+    withScript.document.js = 'console.log(1)'
+    mocks.get.mockResolvedValue({ data: withScript })
+    const wrapper = popper()
+    await wrapper.findComponent({ name: 'VDropdown' }).vm.$emit('update:shown', true)
+    await flushPromises()
+    expect(mocks.get).toHaveBeenCalledWith({ name: 'page' })
+    expect(wrapper.text()).toContain('此页面包含脚本，发布后会在访客浏览器中自动执行')
+    expect(wrapper.text()).toContain('http://localhost/about-us')
+  })
+
+  it('waits for script detection before allowing publish', async () => {
+    let resolve!: (value: { data: PageDetail }) => void
+    mocks.get.mockReturnValue(
+      new Promise((done) => {
+        resolve = done
+      }),
+    )
+    const wrapper = popper()
+    await wrapper.findComponent({ name: 'VDropdown' }).vm.$emit('update:shown', true)
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    resolve({ data: detail() })
+    await flushPromises()
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+  })
+
+  it('does not adopt the version fetched for the script check', async () => {
+    mocks.get.mockResolvedValue({ data: detail(9, 'Someone else edited', 'new-slug') })
+    const wrapper = popper()
+    await wrapper.findComponent({ name: 'VDropdown' }).vm.$emit('update:shown', true)
+    await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('[name=title]').element.value).toBe('关于我们')
+    await publish(wrapper)
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(mocks.slug).not.toHaveBeenCalled()
+    expect(mocks.publish).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('页面已在别处更新')
+  })
+
+  it('rechecks the script warning when the list entry moves to a newer version', async () => {
+    const wrapper = popper()
+    await wrapper.findComponent({ name: 'VDropdown' }).vm.$emit('update:shown', true)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('此页面包含脚本')
+    const scripted = detail(2)
+    scripted.document.js = 'console.log(1)'
+    mocks.get.mockResolvedValue({ data: scripted })
+    await wrapper.setProps({ version: 2 })
+    await flushPromises()
+    expect(wrapper.text()).toContain('此页面包含脚本')
+  })
+
+  it('requires acknowledgement when detection only finds scripts at publish time', async () => {
+    mocks.get.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = popper()
+    await wrapper.findComponent({ name: 'VDropdown' }).vm.$emit('update:shown', true)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('此页面包含脚本')
+    const scripted = detail()
+    scripted.document.js = 'console.log(1)'
+    mocks.get.mockResolvedValue({ data: scripted })
+    await publish(wrapper)
+    expect(mocks.publish).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('请确认上方提示后再次点击发布')
+    expect(wrapper.text()).toContain('此页面包含脚本')
+    await publish(wrapper)
+    expect(mocks.publish).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 1 } })
   })
 
   it('leaves a missing path empty and requires it before publishing', async () => {
@@ -190,6 +270,7 @@ describe('first publish confirmation', () => {
     await wrapper.get('[name=slug]').setValue('company/about')
     await publish(wrapper)
     expect(wrapper.text()).toContain('暂时无法发布')
+    mocks.get.mockResolvedValue({ data: detail(3, '公司介绍', 'company/about') })
     await publish(wrapper)
     expect(mocks.save).toHaveBeenCalledTimes(1)
     expect(mocks.slug).toHaveBeenCalledTimes(1)
@@ -208,6 +289,7 @@ describe('first publish confirmation', () => {
     expect(wrapper.text()).toContain('访问路径已被占用')
     expect(mocks.publish).not.toHaveBeenCalled()
     await wrapper.get('[name=slug]').setValue('company/about')
+    mocks.get.mockResolvedValue({ data: detail(2, '公司介绍', 'taken') })
     await publish(wrapper)
     expect(mocks.save).toHaveBeenCalledTimes(1)
     expect(mocks.slug).toHaveBeenLastCalledWith({
@@ -217,7 +299,6 @@ describe('first publish confirmation', () => {
   })
 
   it('does not publish after a stale-version title save fails', async () => {
-    mocks.get.mockResolvedValue({ data: detail(9, 'Someone else edited') })
     mocks.save.mockRejectedValue(new Error('Page changed; reload before saving'))
     const wrapper = popper()
     await wrapper.get('[name=title]').setValue('公司介绍')
@@ -230,6 +311,7 @@ describe('first publish confirmation', () => {
 
   it('resyncs on reopening and freezes both fields during publication', async () => {
     const wrapper = popper()
+    mocks.get.mockResolvedValue({ data: detail(3, '公司介绍', 'company/about') })
     await wrapper.setProps({ title: '公司介绍', slug: 'company/about', version: 3 })
     wrapper.getComponent({ name: 'VDropdown' }).vm.$emit('update:shown', true)
     await flushPromises()

@@ -36,6 +36,7 @@ export * from './restore-request';
 export * from './revision-detail';
 export * from './revision-summary';
 export * from './save-page-request';
+export * from './site-url-response';
 export * from './source';
 export * from './test-operation';
 export * from './theme-color-mode';

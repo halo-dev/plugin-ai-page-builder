@@ -42,6 +42,8 @@ import type { RevisionSummary } from '../models';
 // @ts-ignore
 import type { SavePageRequest } from '../models';
 // @ts-ignore
+import type { SiteUrlResponse } from '../models';
+// @ts-ignore
 import type { UpdatePageLayoutRequest } from '../models';
 // @ts-ignore
 import type { UpdatePageSlugRequest } from '../models';
@@ -286,6 +288,43 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
             const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/{name}/revisions/{revision}`
                 .replace(`{${"name"}}`, encodeURIComponent(String(name)))
                 .replace(`{${"revision"}}`, encodeURIComponent(String(revision)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication basicAuth required
+            // http basic authentication required
+            setBasicAuthToObject(localVarRequestOptions, configuration)
+
+            // authentication bearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+
+    
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSiteUrl: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/site-url`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -954,6 +993,17 @@ export const AiPageBuilderApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getSiteUrl(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SiteUrlResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getSiteUrl(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.getSiteUrl']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @param {File} body 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1169,6 +1219,14 @@ export const AiPageBuilderApiFactory = function (configuration?: Configuration, 
          */
         getPageRevision(requestParameters: AiPageBuilderApiGetPageRevisionRequest, options?: RawAxiosRequestConfig): AxiosPromise<RevisionDetail> {
             return localVarFp.getPageRevision(requestParameters.name, requestParameters.revision, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getSiteUrl(options?: RawAxiosRequestConfig): AxiosPromise<SiteUrlResponse> {
+            return localVarFp.getSiteUrl(options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -1695,6 +1753,16 @@ export class AiPageBuilderApi extends BaseAPI {
      */
     public getPageRevision(requestParameters: AiPageBuilderApiGetPageRevisionRequest, options?: RawAxiosRequestConfig) {
         return AiPageBuilderApiFp(this.configuration).getPageRevision(requestParameters.name, requestParameters.revision, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof AiPageBuilderApi
+     */
+    public getSiteUrl(options?: RawAxiosRequestConfig) {
+        return AiPageBuilderApiFp(this.configuration).getSiteUrl(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

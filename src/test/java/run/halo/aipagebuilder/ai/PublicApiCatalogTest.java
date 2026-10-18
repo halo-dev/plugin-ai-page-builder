@@ -73,6 +73,10 @@ class PublicApiCatalogTest {
         assertThat(items(catalog.search("queryPosts", 8)).getFirst())
             .containsEntry("operationId", "queryPosts");
         assertThat(items(catalog.search("doesNotExist", 8))).isEmpty();
+        assertThat(catalog.publicPathPrefixes()).containsExactly(
+            "/apis/api.content.halo.run/v1alpha1/posts",
+            "/apis/api.example.halo.run/v1alpha1/items",
+            "/apis/api.halo.run/v1alpha1/indices/-/search");
     }
 
     @Test
@@ -85,6 +89,55 @@ class PublicApiCatalogTest {
         assertThat(items(catalog.search("", 8))).isEmpty();
         assertThat(items(catalog.details(List.of("GET " + path))).getFirst())
             .containsEntry("status", "not_found");
+        // Hidden operations stay callable from previews even though documentation hides them.
+        assertThat(catalog.publicPathPrefixes())
+            .containsExactly("/apis/api.example.halo.run/v1alpha1/internal");
+    }
+
+    @Test
+    void publicRouteSourcesDoNotExposePrivateSiblingsOrTheWholeGroup() {
+        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
+            "posts", route("/apis/api.content.halo.run/v1alpha1/posts/{name}", "getPost"),
+            "subscription", route(
+                "/apis/api.notification.halo.run/v1alpha1/subscriptions/{name}/unsubscribe",
+                "unsubscribe"),
+            "privateNotification", route(
+                "/apis/api.notification.halo.run/v1alpha1/userspaces/me", "privateNotification")));
+        assertThat(catalog.publicPathPrefixes()).containsExactly(
+            "/apis/api.content.halo.run/v1alpha1/posts/",
+            "/apis/api.notification.halo.run/v1alpha1/subscriptions/");
+    }
+
+    @Test
+    void wildcardRoutesAllowOnlyTheirOwnPathPrefix() {
+        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
+            "files", route("/apis/api.example.halo.run/v1alpha1/files/**", "listFiles")));
+        assertThat(catalog.publicPathPrefixes()).containsExactly(
+            "/apis/api.example.halo.run/v1alpha1/files",
+            "/apis/api.example.halo.run/v1alpha1/files/");
+    }
+
+    @Test
+    void excludesConsoleAndPrivateNotificationRoutesInAnyVersion() {
+        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
+            "console", route("/apis/api.console.halo.run/v1alpha2/posts", "privatePosts"),
+            "userspace", route("/apis/api.notification.halo.run/v1alpha2/userspaces/me",
+                "privateNotification"),
+            "public", route("/apis/api.example.halo.run/v1alpha1/items", "items")));
+        assertThat(items(catalog.search("", 8))).hasSize(1);
+        assertThat(catalog.publicPathPrefixes())
+            .containsExactly("/apis/api.example.halo.run/v1alpha1/items");
+    }
+
+    @Test
+    void redirectingRoutesStaySearchableButAreNotAllowedFromPreviews() {
+        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
+            "thumbnail", route(
+                "/apis/api.storage.halo.run/v1alpha1/thumbnails/-/via-uri", "thumbnail")));
+        assertThat(items(catalog.search("", 8))).hasSize(1);
+        // CSP does not re-check path sources after a redirect, so this route could reach
+        // Console APIs even though only its own path is allowlisted.
+        assertThat(catalog.publicPathPrefixes()).isEmpty();
     }
 
     @Test

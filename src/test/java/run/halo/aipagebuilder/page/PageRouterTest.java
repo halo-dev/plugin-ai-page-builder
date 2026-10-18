@@ -2,8 +2,10 @@ package run.halo.aipagebuilder.page;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -13,6 +15,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.web.reactive.function.server.HandlerStrategies;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
@@ -31,13 +36,13 @@ class PageRouterTest {
         var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
             "draft", "published", Instant.now(), true);
         when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document)))
-            .thenReturn(ServerResponse.ok().build());
+        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document),
+            eq(false))).thenReturn(ServerResponse.ok().build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
         assertThat(handler.handle(request).block().statusCode().value()).isEqualTo(200);
-        verify(renderer).render(request, "stable-id", "about/company", true, document);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, false);
         when(service.findPublished("about")).thenReturn(Mono.empty());
         when(service.findPublished("about/company/child")).thenReturn(Mono.empty());
         assertThat(router.route(request("/about")).block()).isNull();
@@ -57,6 +62,45 @@ class PageRouterTest {
             MockServerHttpRequest.get("/about").accept(MediaType.APPLICATION_JSON)),
             HandlerStrategies.withDefaults().messageReaders())).block()).isNull();
         verifyNoInteractions(service, renderer);
+    }
+
+    @Test
+    void onlySuperAdministratorsGetPageScriptsDisabled() {
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "",
+            "Company", "", "document.title = 'changed';");
+        var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
+            "draft", "published", Instant.now(), true);
+        when(service.findPublished("about/company"))
+            .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
+        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document),
+            anyBoolean())).thenReturn(ServerResponse.ok().build());
+        var request = request("/about/company");
+        var handler = router.route(request).block();
+        assertThat(handler).isNotNull();
+
+        var admin = new UsernamePasswordAuthenticationToken("admin", "password",
+            AuthorityUtils.createAuthorityList("ROLE_super-role"));
+        handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block();
+        verify(renderer).render(request, "stable-id", "about/company", true, document, true);
+
+        var impersonating = new UsernamePasswordAuthenticationToken("member", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated",
+                "ROLE_PREVIOUS_ADMINISTRATOR"));
+        handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating)).block();
+        verify(renderer, times(2))
+            .render(request, "stable-id", "about/company", true, document, true);
+
+        var member = new UsernamePasswordAuthenticationToken("member", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)).block();
+        verify(renderer).render(request, "stable-id", "about/company", true, document, false);
+
+        handler.handle(request).block();
+        verify(renderer, times(2))
+            .render(request, "stable-id", "about/company", true, document, false);
     }
 
     @Test

@@ -23,6 +23,7 @@ vi.mock('../../api/clients', () => ({
   },
   chatUrl: (name: string) => `/pages/${name}/chat`,
   pagePreviewUrl: (name: string) => `/preview/${name}`,
+  getPublicSiteUrl: () => Promise.resolve('http://localhost'),
 }))
 vi.mock('../../utils/error', () => ({
   errorMessage: (e: Error) => e.message,
@@ -100,6 +101,10 @@ const globals = {
   },
 }
 beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.resolve({ ok: true, type: 'basic', status: 200 })),
+  )
   vi.clearAllMocks()
   queryClient.clear()
   mocks.get.mockResolvedValue({ data: page })
@@ -162,7 +167,7 @@ describe('workspace integration', () => {
     expect(mocks.save).not.toHaveBeenCalled()
     wrapper.unmount()
   })
-  it('runs only the saved document with an opaque iframe while unsaved JS stays in the editor', async () => {
+  it('runs the saved document in a sandboxed theme preview iframe', async () => {
     const wrapper = await editor()
     await wrapper
       .findAll('button')
@@ -178,14 +183,11 @@ describe('workspace integration', () => {
     await flushPromises()
     const runtime = wrapper.findComponent(RuntimePreview)
     expect(runtime.props('document')).toEqual(page.document)
-    expect(runtime.props('dirty')).toBe(true)
-    expect(runtime.text()).toContain('上次保存')
-    // SHA-256 completes asynchronously in the browser crypto implementation.
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    await flushPromises()
+    expect(runtime.props('src')).toBe('/preview/one')
     const frame = runtime.find('iframe')
     expect(frame.attributes('sandbox')).toBe('allow-scripts')
-    expect(frame.attributes('srcdoc')).not.toContain('unsaved()')
+    expect(frame.attributes('src')).toBe('/preview/one')
+    expect(frame.attributes('srcdoc')).toBeUndefined()
     expect(mocks.save).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -232,7 +234,7 @@ describe('workspace integration', () => {
       .trigger('click')
     await wrapper
       .findAll('button')
-      .find((b) => b.text() === '可视化')!
+      .find((b) => b.text() === '编辑')!
       .trigger('click')
     expect(mocks.themeContext).toHaveBeenCalledTimes(1)
     expect(mocks.save).not.toHaveBeenCalled()

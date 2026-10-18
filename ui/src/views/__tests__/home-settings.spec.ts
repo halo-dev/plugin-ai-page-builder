@@ -29,6 +29,7 @@ vi.mock('../../api/clients', () => ({
   },
   aiPageBuilderAiApi: {},
   pagePreviewUrl: (name: string) => `/preview/${name}`,
+  getPublicSiteUrl: () => Promise.resolve('http://localhost'),
 }))
 vi.mock('../../utils/error', () => ({
   errorMessage: (error: Error) => error.message,

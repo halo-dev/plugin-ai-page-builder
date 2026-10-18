@@ -18,7 +18,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
-import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -67,9 +68,51 @@ public class ContentPolicy {
     }
 
     public void validateHtml(String html) {
+        parseAndValidateHtml(html);
+    }
+
+    /**
+     * Validates the fragment and returns the DOM serialization used for rendering.
+     * Rendering the parsed DOM instead of the original source prevents differences between
+     * Jsoup's parse and the browser's parse from introducing unchecked markup.
+     */
+    public String sanitizeHtml(String html) {
+        var body = parseAndValidateHtml(html);
+        // Serialize the parsed DOM as-is: Jsoup's default pretty printing collapses
+        // whitespace that CSS (for example white-space: pre) renders literally.
+        body.ownerDocument().outputSettings().prettyPrint(false);
+        // HTML parsers drop one leading newline inside <pre>, including one produced by a
+        // character reference. Jsoup only drops a literal newline, so compensate only when
+        // the source really has one; otherwise an entity would gain an extra line.
+        for (var pre : body.select("pre")) {
+            if (pre.childNodeSize() > 0 && pre.childNode(0) instanceof TextNode text
+                && text.getWholeText().startsWith("\n") && literalLeadingNewline(html, pre)) {
+                pre.prependChild(new TextNode("\n"));
+            }
+        }
+        for (var link : body.select("a[target=_blank]")) {
+            var rel = link.attr("rel");
+            var safe = false;
+            for (var token : rel.split("\\s+")) {
+                if ("noopener".equalsIgnoreCase(token) || "noreferrer".equalsIgnoreCase(token)) {
+                    safe = true;
+                }
+            }
+            if (!safe) {
+                link.attr("rel", rel.isBlank() ? "noopener" : rel + " noopener");
+            }
+        }
+        return body.html();
+    }
+
+    private Element parseAndValidateHtml(String html) {
         require(html != null && html.length() <= MAX_HTML, "正文不能超过 200 KB");
         require(!HTML_SHELL.matcher(html).find(), "仅支持正文片段，请移除 html/head/body 外壳");
-        var body = Jsoup.parseBodyFragment(html).body();
+        var parser = org.jsoup.parser.Parser.htmlParser().setTrackPosition(true);
+        var body = org.jsoup.nodes.Document.createShell("").body();
+        for (var node : parser.parseFragmentInput(html, body, "")) {
+            body.appendChild(node);
+        }
         for (var element : body.getAllElements()) {
             if (element == body) {
                 continue;
@@ -79,6 +122,19 @@ public class ContentPolicy {
                 validateAttribute(attribute.getKey(), attribute.getValue());
             }
         }
+        return body;
+    }
+
+    /** True when the source has a literal newline right after this pre's start tag. */
+    private static boolean literalLeadingNewline(String html, Element pre) {
+        var range = pre.sourceRange();
+        if (!range.isTracked()) return false;
+        // endPos is the first character after the start tag, so this does not need a
+        // hand-written scan of (possibly malformed) attributes.
+        var index = range.endPos();
+        if (index >= html.length()) return false;
+        var next = html.charAt(index);
+        return next == '\n' || next == '\r';
     }
 
     public void validateCss(String css) {

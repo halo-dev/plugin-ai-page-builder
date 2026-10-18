@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import org.pf4j.PluginStateListener;
@@ -30,6 +31,13 @@ import run.halo.app.plugin.SpringPluginManager;
 @Component
 public class PublicApiCatalog {
     private static final long TTL = Duration.ofSeconds(60).toNanos();
+    /**
+     * Public routes that redirect to a caller-supplied target. CSP path sources are not
+     * re-checked after a redirect, so such a route would let a preview reach Console APIs.
+     * Keep it cataloged for documentation, but do not allow it from previews.
+     */
+    private static final List<String> REDIRECTING_PATHS =
+        List.of("/apis/api.storage.halo.run/v1alpha1/thumbnails/-/via-uri");
     private final SpringPluginManager manager;
     private final LongSupplier clock;
     private final AtomicLong generation = new AtomicLong();
@@ -48,6 +56,11 @@ public class PublicApiCatalog {
         this.manager = manager;
         this.clock = clock;
         manager.addPluginStateListener(listener);
+    }
+
+    /** Public API path prefixes that sandboxed previews may call; never Console API paths. */
+    public List<String> publicPathPrefixes() {
+        return snapshot().publicPathPrefixes();
     }
 
     public Map<String, Object> search(String query, int limit) {
@@ -138,7 +151,8 @@ public class PublicApiCatalog {
                 if (version == generation.get()) {
                     current = new Snapshot(version, clock.getAsLong(), items,
                         scan.partial() || items.stream().anyMatch(item ->
-                            !"declared".equals(item.get("contract"))), List.copyOf(scan.warnings()));
+                            !"declared".equals(item.get("contract"))), List.copyOf(scan.warnings()),
+                        scan.publicPathPrefixes());
                     snapshot = current;
                     return current;
                 }
@@ -155,6 +169,7 @@ public class PublicApiCatalog {
     private Scan scan() {
         var routes = new TreeMap<String, List<Discovered>>();
         var warnings = new ArrayList<String>();
+        var prefixes = new TreeSet<String>();
         boolean partial = false;
         var beans = manager.getRootContext().getBeansOfType(RouterFunction.class);
         for (var bean : beans.entrySet()) {
@@ -167,6 +182,9 @@ public class PublicApiCatalog {
             }
             for (var data : visitor.getRouterFunctionDatas()) {
                 if (!publicPath(data.getPath())) continue;
+                if (!REDIRECTING_PATHS.contains(data.getPath())) {
+                    prefixes.addAll(pathSources(data.getPath()));
+                }
                 var attribute = data.getAttributes().get(OPERATION_ATTRIBUTE);
                 Operation operation = null;
                 try {
@@ -191,7 +209,24 @@ public class PublicApiCatalog {
                 }
             }
         }
-        return new Scan(routes, partial, warnings);
+        return new Scan(routes, partial, warnings, List.copyOf(prefixes));
+    }
+
+    /**
+     * Turns a public route into CSP path sources. Only the static prefix before the first
+     * path variable or wildcard is used, so an allowlisted route cannot expose every sibling
+     * route under its group/version.
+     */
+    private static List<String> pathSources(String path) {
+        var variable = path.indexOf('{');
+        var wildcard = path.indexOf("/**");
+        var end = variable < 0 ? wildcard : (wildcard < 0 ? variable : Math.min(variable, wildcard));
+        if (end < 0) {
+            return List.of(path);
+        }
+        var base = path.substring(0, end);
+        if (base.endsWith("/")) return List.of(base);
+        return List.of(base, base + "/");
     }
 
     private static Map<String, Object> conditions(RouterFunctionData data) {
@@ -214,10 +249,12 @@ public class PublicApiCatalog {
     static boolean publicPath(String path) {
         if (path == null) return false;
         var matcher = new AntPathMatcher();
+        // Exclusions are version-agnostic so a future v1alpha2 cannot slip into the
+        // preview allowlist.
         return matcher.match("/apis/api.*/**", path)
-            && !matcher.match("/apis/api.console.*/v1alpha1/**", path)
-            && !matcher.match("/apis/api.notification.halo.run/v1alpha1/userspaces/**", path)
-            && !matcher.match("/apis/api.notification.halo.run/v1alpha1/notifiers/**", path);
+            && !matcher.match("/apis/api.console.*/**", path)
+            && !matcher.match("/apis/api.notification.halo.run/*/userspaces/**", path)
+            && !matcher.match("/apis/api.notification.halo.run/*/notifiers/**", path);
     }
 
     private static Map<String, Object> summary(String id, Discovered route, boolean ambiguous) {
@@ -285,9 +322,11 @@ public class PublicApiCatalog {
     }
 
     private record Snapshot(long generation, long createdAt, List<Map<String, Object>> items,
-                            boolean partial, List<String> warnings) { }
+                            boolean partial, List<String> warnings,
+                            List<String> publicPathPrefixes) { }
     private record Discovered(String method, String path, Operation operation, Object attribute,
                               Map<String, Object> conditions) { }
-    private record Scan(Map<String, List<Discovered>> routes, boolean partial, List<String> warnings) { }
+    private record Scan(Map<String, List<Discovered>> routes, boolean partial, List<String> warnings,
+                        List<String> publicPathPrefixes) { }
     private record Match(Map<String, Object> item, int score) { }
 }

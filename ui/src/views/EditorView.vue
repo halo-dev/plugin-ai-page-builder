@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, shallowRef, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  shallowRef,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { Dialog, Toast, VLoading } from '@halo-dev/components'
 import IconArrowLeft from '~icons/mingcute/arrow-left-line'
@@ -25,7 +33,12 @@ import IconContrast from '~icons/mingcute/brightness-line'
 import IconChat from '~icons/mingcute/chat-3-line'
 import IconCanvas from '~icons/mingcute/layout-grid-line'
 import IconSpinner from '~icons/mingcute/loading-line'
-import { pagePreviewUrl, aiPageBuilderApi, aiPageBuilderChatApi } from '../api/clients'
+import {
+  pagePreviewUrl,
+  aiPageBuilderApi,
+  aiPageBuilderChatApi,
+  getPublicSiteUrl,
+} from '../api/clients'
 import type { ThemeStyleContext } from '../api/generated'
 import { errorMessage } from '../utils/error'
 import { pageKeys, queryClient } from '../lib/query-client'
@@ -146,11 +159,31 @@ function onPublishPending(pending: boolean) {
   busy.value = pending
 }
 const view = shallowRef<'visual' | 'source' | 'runtime'>('visual')
+const runtimePreview = useTemplateRef<{ refresh: () => void }>('runtimePreview')
 const viewOptions = [
-  { value: 'visual', label: '可视化', icon: IconEdit },
+  { value: 'visual', label: '编辑', icon: IconEdit },
   { value: 'source', label: '源码', icon: IconCode },
-  { value: 'runtime', label: '运行', icon: IconPlay },
+  { value: 'runtime', label: '运行', icon: IconPlay, title: '运行已保存的草稿，脚本在沙箱中执行' },
 ] as const
+const siteBaseUrl = shallowRef('')
+onMounted(() => {
+  void getPublicSiteUrl()
+    .then((url) => {
+      siteBaseUrl.value = url
+    })
+    .catch(() => {
+      // Keep the Console origin as a best-effort fallback.
+    })
+})
+const publicUrl = computed(() => {
+  const page = detail.value?.page
+  if (!page?.publishedRevision || !page.slug) return ''
+  const base = (siteBaseUrl.value || window.location.origin).replace(/\/$/, '')
+  return `${base}/${page.slug}`
+})
+function openPublicPage() {
+  if (publicUrl.value) window.open(publicUrl.value, '_blank', 'noopener')
+}
 const mobilePanel = shallowRef<'chat' | 'canvas'>('canvas')
 const mobilePanelOptions = [
   { value: 'chat', label: '对话', icon: IconChat },
@@ -267,22 +300,48 @@ async function publish(unpublish = false) {
   if (!detail.value || locked.value || (!unpublish && (dirty.value || !valid.value))) return
   // First publish goes through the popper for the slug; this path is 更新发布/取消发布.
   if (!unpublish && !detail.value.page.publishedRevision) return
+  // Capture the session and target before awaiting: the route can switch to another
+  // page (and start loading it) while the confirmation dialog is open.
+  const session = loadId
+  const target = {
+    name: detail.value.page.name,
+    version: detail.value.page.version,
+    scripted: !!detail.value.document.js,
+  }
+  if (
+    !unpublish &&
+    target.scripted &&
+    !(await confirm('发布包含脚本的页面？', '页面脚本会在访客浏览器中执行。请确认你信任这些内容。'))
+  )
+    return
   if (unpublish && !(await confirm('取消发布？', '访客将无法访问此页面。'))) return
+  if (
+    session !== loadId ||
+    String(route.params.name) !== target.name ||
+    detail.value?.page.name !== target.name ||
+    detail.value?.page.version !== target.version
+  ) {
+    Toast.info('页面已更新，已取消本次操作，请重试。')
+    return
+  }
   busy.value = true
   error.value = ''
   try {
     const request = {
-      name: detail.value.page.name,
-      mutationRequest: { version: detail.value.page.version },
+      name: target.name,
+      mutationRequest: { version: target.version },
     }
     const result = (
       await (unpublish
         ? aiPageBuilderApi.unpublishPage(request)
         : aiPageBuilderApi.publishPage(request))
     ).data
-    detail.value = result
-    queryClient.setQueryData(pageKeys.detail(result.page.name), result)
-    Toast.success(unpublish ? '已取消发布' : '页面已发布')
+    // Never let a late response for another page replace the current session.
+    if (session === loadId && String(route.params.name) === target.name) {
+      detail.value = result
+      queryClient.setQueryData(pageKeys.detail(result.page.name), result)
+      Toast.success(unpublish ? '已取消发布' : '页面已发布')
+    }
   } catch (e) {
     error.value = errorMessage(e)
   } finally {
@@ -436,6 +495,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           :slug="detail.page.slug"
           :version="detail.page.version"
           :disabled="locked || dirty || !valid"
+          :scripted="!!working?.js"
           @published="published"
           @updated="published"
           @pending="onPublishPending"
@@ -532,9 +592,47 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                   : '草稿'
               }}
             </span>
+            <span
+              v-if="working?.js"
+              class="apb-chip bg-purple-50 text-purple-700"
+              title="页面包含 JavaScript，编辑画布不执行脚本；交互效果请在「运行」中查看，发布后会在访客浏览器中执行"
+              >含脚本</span
+            >
+            <span
+              v-if="view === 'visual' && !streamPreview && working?.js"
+              class="hidden text-xs text-gray-400 lg:inline"
+              title="编辑画布不执行页面脚本，交互效果请在「运行」中查看"
+              >脚本仅在「运行」中执行</span
+            >
+            <span
+              v-if="view === 'runtime' && dirty"
+              class="apb-chip bg-amber-50 text-amber-700"
+              title="运行预览只读取已保存的草稿，请先保存再查看最新修改"
+              >运行的是已保存草稿</span
+            >
+            <button
+              v-if="publicUrl"
+              type="button"
+              class="apb-chip max-w-44 bg-blue-50 text-blue-700 hover:bg-blue-100"
+              :title="`打开公开页面：${publicUrl}`"
+              @click="openPublicPage"
+            >
+              <IconExternal class="shrink-0 text-xs" />
+              <span class="truncate">/{{ detail.page.slug }}</span>
+            </button>
             <div class="ml-auto flex items-center gap-2">
               <button
-                v-if="rootStates.length"
+                v-if="view === 'runtime'"
+                type="button"
+                class="apb-icon-btn"
+                title="重新运行"
+                aria-label="重新运行"
+                @click="runtimePreview?.refresh()"
+              >
+                <IconRefresh class="text-base" />
+              </button>
+              <button
+                v-if="rootStates.length && view !== 'runtime'"
                 type="button"
                 class="apb-icon-btn"
                 :title="previewModeIcon.title"
@@ -575,11 +673,11 @@ function applySettings(value: Parameters<typeof patch>[0]) {
               />
               <RuntimePreview
                 v-if="view === 'runtime'"
+                ref="runtimePreview"
+                :src="pagePreviewUrl(detail.page.name)"
                 :document="detail.document"
-                :dirty="dirty"
                 :device="device"
-                :preview-css="themeContext?.previewCss || ''"
-                :root-state="rootState"
+                :theme-layout="detail.page.themeLayout"
               />
               <VisualEditor
                 v-show="view === 'visual' && !streamPreview"
