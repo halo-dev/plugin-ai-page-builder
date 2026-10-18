@@ -102,23 +102,31 @@ public class PageImportReviewService {
             })
             .subscribeOn(Schedulers.boundedElastic())
             .flatMap(input -> {
-                if (store.getMalicious(input.archiveHash()) != null) {
+                var archiveHash = input.archiveHash();
+                if (store.getMalicious(archiveHash) != null) {
                     return Mono.error(new ResponseStatusException(
                         HttpStatus.UNPROCESSABLE_ENTITY,
                         "该页面包在 30 分钟内已被 AI 判定为恶意，已阻止重新审查和导入。"));
                 }
-                return gateway.status()
-                    .timeout(STATUS_TIMEOUT)
-                    .onErrorResume(error -> Mono.just(new AiEndpoint.AiStatus(false,
-                        "AI Foundation 暂不可用。")))
-                    .switchIfEmpty(Mono.error(new ResponseStatusException(
-                        HttpStatus.SERVICE_UNAVAILABLE,
-                        "AI 审查不可用：未获取到 AI Foundation 状态。")))
-                    .flatMap(status -> status.available()
-                        ? reviewChunks(input.imported(), modelName)
-                        : Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
-                            "AI 审查不可用：" + status.message())))
-                    .map(result -> save(actor, input.archiveHash(), input.imported(), result));
+                return Mono.using(
+                    () -> {
+                        store.beginReview(archiveHash);
+                        return archiveHash;
+                    },
+                    ignored -> gateway.status()
+                        .timeout(STATUS_TIMEOUT)
+                        .onErrorResume(error -> Mono.just(new AiEndpoint.AiStatus(false,
+                            "AI Foundation 暂不可用。")))
+                        .switchIfEmpty(Mono.error(new ResponseStatusException(
+                            HttpStatus.SERVICE_UNAVAILABLE,
+                            "AI 审查不可用：未获取到 AI Foundation 状态。")))
+                        .flatMap(status -> status.available()
+                            ? reviewChunks(input.imported(), modelName)
+                            : Mono.error(new ResponseStatusException(
+                                HttpStatus.SERVICE_UNAVAILABLE,
+                                "AI 审查不可用：" + status.message())))
+                        .map(result -> save(actor, archiveHash, input.imported(), result)),
+                    store::endReview);
             })
             .doOnError(error -> log.warn("Import review failed: actor={}, type={}, reason={}",
                 actor, error.getClass().getSimpleName(),
@@ -145,9 +153,13 @@ public class PageImportReviewService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "上传内容与审查内容不一致，请重新审查。");
             }
-            if (store.getMalicious(archiveHash) != null) {
-                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            switch (store.importBlock(archiveHash)) {
+                case MALICIOUS -> throw new ResponseStatusException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
                     "该页面包在 30 分钟内已被 AI 判定为恶意，已阻止导入。");
+                case REVIEWING -> throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "该页面包正在审查中，请等待审查完成后再导入。");
+                case NONE -> { }
             }
             switch (entry.review().verdict()) {
                 case "safe" -> { }
@@ -212,7 +224,10 @@ public class PageImportReviewService {
                 .toList(),
             document.title(), document.description(), imported.themeLayout(),
             Instant.now().plus(REVIEW_TTL));
-        store.put(actor, archiveHash, review);
+        if (!store.put(actor, archiveHash, review)) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
+                "恶意审查记录已达容量上限，请稍后重试。");
+        }
         return review;
     }
 
@@ -341,13 +356,16 @@ public class PageImportReviewService {
                         ? incoming : existing);
             }
         }
-        var findings = unique.values().stream()
+        var ordered = unique.values().stream()
             .sorted(Comparator.comparing(AiReview.Finding::severity).reversed()
+                .thenComparing(finding -> dangerous(finding.category()) ? 0 : 1)
                 .thenComparing(AiReview.Finding::file)
                 .thenComparing(finding -> finding.category().name()))
-            .limit(MAX_FINDINGS)
             .toList();
-        var derived = verdictFrom(findings);
+        // Derive the verdict before truncating so the display cap cannot hide a dangerous
+        // category from the final decision.
+        var derived = verdictFrom(ordered);
+        var findings = ordered.stream().limit(MAX_FINDINGS).toList();
         var verdict = aiVerdict.compareTo(derived) >= 0 ? aiVerdict : derived;
         // Per-chunk summaries describe only their fragment; use a stable overall summary.
         var summary = verdict != aiVerdict || results.size() > 1
@@ -385,11 +403,15 @@ public class PageImportReviewService {
         return "unknown";
     }
 
+    private static boolean dangerous(AiReview.Category category) {
+        return category == AiReview.Category.PROMPT_INJECTION
+            || category == AiReview.Category.MALICIOUS_SCRIPT;
+    }
+
     private static AiReview.Verdict verdictFrom(List<AiReview.Finding> findings) {
         var verdict = AiReview.Verdict.SAFE;
         for (var finding : findings) {
-            if (finding.category() == AiReview.Category.PROMPT_INJECTION
-                || finding.category() == AiReview.Category.MALICIOUS_SCRIPT) {
+            if (dangerous(finding.category())) {
                 verdict = AiReview.Verdict.SUSPICIOUS;
             }
             switch (finding.severity()) {

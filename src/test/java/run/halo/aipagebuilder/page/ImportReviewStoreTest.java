@@ -54,6 +54,43 @@ class ImportReviewStoreTest {
     }
 
     @Test
+    void maliciousCapacityDoesNotEvictUnexpiredBlocks() {
+        var expiresAt = Instant.now().plusSeconds(600);
+        for (var index = 0; index < ImportReviewStore.MAX_ENTRIES; index++) {
+            assertThat(store.put("admin", "hash-" + index,
+                review("malicious-" + index, "malicious", expiresAt))).isTrue();
+        }
+
+        assertThat(store.put("admin", "hash-overflow",
+            review("overflow", "malicious", expiresAt))).isFalse();
+
+        assertThat(store.getMalicious("hash-0")).isNotNull();
+        assertThat(store.getMalicious("hash-overflow")).isNull();
+        assertThat(store.get("overflow")).isNull();
+        assertThat(store.importBlock("hash-0"))
+            .isEqualTo(ImportReviewStore.ImportBlock.MALICIOUS);
+        assertThat(store.importBlock("hash-overflow"))
+            .isEqualTo(ImportReviewStore.ImportBlock.NONE);
+    }
+
+    @Test
+    void inFlightReviewsAreTrackedUntilTheyFinish() {
+        store.beginReview("hash");
+        store.beginReview("hash");
+        store.endReview("hash");
+
+        assertThat(store.isReviewing("hash")).isTrue();
+        assertThat(store.importBlock("hash"))
+            .isEqualTo(ImportReviewStore.ImportBlock.REVIEWING);
+
+        store.endReview("hash");
+
+        assertThat(store.isReviewing("hash")).isFalse();
+        assertThat(store.importBlock("hash"))
+            .isEqualTo(ImportReviewStore.ImportBlock.NONE);
+    }
+
+    @Test
     void concurrentPutsKeepTheStoreAtCapacity() throws Exception {
         for (var index = 0; index < ImportReviewStore.MAX_ENTRIES; index++) {
             store.put("admin", "hash-" + index,

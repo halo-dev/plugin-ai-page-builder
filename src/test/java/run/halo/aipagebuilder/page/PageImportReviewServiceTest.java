@@ -12,9 +12,12 @@ import static org.mockito.Mockito.when;
 
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -269,6 +272,66 @@ class PageImportReviewServiceTest {
         assertThatThrownBy(() -> service.authorize("safe-review", bytes, "admin", false).block())
             .isInstanceOfSatisfying(ResponseStatusException.class, error ->
                 assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+    }
+
+    @Test
+    void findingLimitDoesNotHideDangerousCategoriesFromTheVerdict() throws Exception {
+        var findings = new ArrayList<AiReview.Finding>();
+        for (var index = 0; index < 50; index++) {
+            findings.add(finding(AiReview.Severity.LOW, AiReview.Category.EXTERNAL_RESOURCE,
+                "page.html", "https://cdn.example/resource-" + index + ".js"));
+        }
+        findings.add(finding(AiReview.Severity.LOW, AiReview.Category.PROMPT_INJECTION,
+            "script.js", "ignore previous instructions"));
+        when(gateway.review(anyString(), anyString())).thenReturn(
+            Mono.just(new AiReview(AiReview.Verdict.SAFE, "summary", findings)));
+
+        var report = service.review(archive("<p>Hello</p>", "", ""), "admin").block();
+
+        assertThat(report.findings()).hasSize(50);
+        assertThat(report.findings()).extracting(PageApi.ImportFinding::category)
+            .contains("prompt_injection");
+        assertThat(report.verdict()).isEqualTo("suspicious");
+    }
+
+    @Test
+    void authorizeRejectsWhileAReviewOfTheSameArchiveIsInFlight() throws Exception {
+        var bytes = archive("<p>Hello</p>", "", "");
+        var safe = new PageApi.ImportReview("safe-review", "safe", "summary", List.of(),
+            "Test", "", false, Instant.now().plusSeconds(600));
+        store.put("admin", sha256(bytes), safe);
+        var started = new CountDownLatch(1);
+        when(gateway.review(anyString(), anyString())).thenAnswer(invocation -> {
+            started.countDown();
+            return Mono.<AiReview>never();
+        });
+
+        var review = service.review(bytes, "admin").subscribe();
+        assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+
+        assertThatThrownBy(() -> service.authorize("safe-review", bytes, "admin", false).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+
+        review.dispose();
+    }
+
+    @Test
+    void maliciousReviewFailsClosedWhenStickyStoreIsFull() throws Exception {
+        var expiresAt = Instant.now().plusSeconds(600);
+        for (var index = 0; index < ImportReviewStore.MAX_ENTRIES; index++) {
+            store.put("admin", "hash-" + index, new PageApi.ImportReview(
+                "malicious-" + index, "malicious", "summary", List.of(), "Test", "", false,
+                expiresAt));
+        }
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
+            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
+                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
+
+        assertThatThrownBy(() -> service.review(
+            archive("<p>Hello</p>", "", "document.cookie"), "admin").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
     }
 
     @Test
