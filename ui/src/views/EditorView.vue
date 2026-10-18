@@ -595,8 +595,14 @@ function applySettings(value: Parameters<typeof patch>[0]) {
             <span
               v-if="working?.js"
               class="apb-chip bg-purple-50 text-purple-700"
-              title="页面包含 JavaScript，发布后会在访客浏览器中执行"
+              title="页面包含 JavaScript，编辑画布不执行脚本；交互效果请在「运行」中查看，发布后会在访客浏览器中执行"
               >含脚本</span
+            >
+            <span
+              v-if="view === 'visual' && !streamPreview && working?.js"
+              class="hidden text-xs text-gray-400 lg:inline"
+              title="编辑画布不执行页面脚本，交互效果请在「运行」中查看"
+              >脚本仅在「运行」中执行</span
             >
             <span
               v-if="view === 'runtime' && dirty"
@@ -692,12 +698,6 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                 @change="patch"
               />
             </div>
-            <p
-              v-if="view === 'visual' && !streamPreview && working?.js"
-              class="pointer-events-none absolute bottom-6 left-6 z-[6] rounded-md border border-gray-200 bg-white/95 px-2.5 py-1.5 text-xs leading-5 text-gray-500 shadow-sm"
-            >
-              编辑画布不执行页面脚本，交互效果请在「运行」中查看
-            </p>
           </div>
         </section>
       </div>
