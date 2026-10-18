@@ -229,15 +229,19 @@ class PageRendererTest {
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
+        var relative = ServerRequest.create(MockServerWebExchange.from(
+            MockServerHttpRequest.get("/p/about").build()),
+            HandlerStrategies.withDefaults().messageReaders());
         var preview = (RenderingResponse) new PageRenderer(resolver, policy, publicApiCatalog,
             fixedExternalUrl("https://pages.example.com/site;x"))
-            .preview(request, "about", "about", true, document).block();
+            .preview(relative, "about", "about", true, document).block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("script-src http://localhost/ ").doesNotContain("site;x");
+            .contains("script-src 'unsafe-inline' 'unsafe-eval'")
+            .contains("connect-src 'none'").doesNotContain("site;x");
     }
 
     @Test
-    void previewPolicyUsesTheExternalUrlIncludingItsBasePath() {
+    void previewPolicyUsesTheOriginServingTheDocument() {
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
             "/apis/api.content.halo.run/v1alpha1/"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
@@ -248,12 +252,30 @@ class PageRendererTest {
             .preview(request, "about", "about", true, document).block();
         var policy = preview.headers().getFirst("Content-Security-Policy");
         assertThat(policy)
+            .contains("connect-src http://localhost/apis/api.content.halo.run/v1alpha1/;")
+            .contains("script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'")
+            .contains("style-src http://localhost/ 'unsafe-inline'")
+            .doesNotContain("pages.example.com");
+    }
+
+    @Test
+    void previewPolicyFallsBackToTheExternalUrlWhenTheRequestOriginIsUnknown() {
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
+            "/apis/api.content.halo.run/v1alpha1/"));
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
+        var relative = ServerRequest.create(MockServerWebExchange.from(
+            MockServerHttpRequest.get("/p/about").build()),
+            HandlerStrategies.withDefaults().messageReaders());
+        var preview = (RenderingResponse) new PageRenderer(resolver, policy, publicApiCatalog,
+            fixedExternalUrl("https://pages.example.com/site"))
+            .preview(relative, "about", "about", true, document).block();
+        var policy = preview.headers().getFirst("Content-Security-Policy");
+        assertThat(policy)
             .contains("connect-src "
                 + "https://pages.example.com/site/apis/api.content.halo.run/v1alpha1/;")
-            .doesNotContain("http://localhost")
-            .contains("script-src https://pages.example.com/site/ "
-                + "'unsafe-inline' 'unsafe-eval'")
-            .contains("style-src https://pages.example.com/site/ 'unsafe-inline'");
+            .contains("script-src https://pages.example.com/site/ 'unsafe-inline' 'unsafe-eval'");
     }
 
     @Test

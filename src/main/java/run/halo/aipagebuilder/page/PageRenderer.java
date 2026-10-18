@@ -80,7 +80,10 @@ public class PageRenderer {
     }
 
     private String previewPolicy(ServerRequest request) {
-        var base = origin(request);
+        // Resources and root-relative API calls resolve against the origin that actually
+        // serves the preview document, which is not necessarily the configured external
+        // URL (for example when the Console is opened via 127.0.0.1 instead of localhost).
+        var base = servingOrigin(request);
         var sources = base == null ? List.<String>of()
             : allowedPrefixes().stream().map(prefix -> base + prefix).distinct().toList();
         // Without a trailing slash a CSP source path matches that exact path only, so a
@@ -117,6 +120,12 @@ public class PageRenderer {
     String origin(ServerRequest request) {
         var external = externalOrigin(request);
         return external != null ? external : requestOrigin(request);
+    }
+
+    /** Origin serving the preview document; the configured external URL is the fallback. */
+    private String servingOrigin(ServerRequest request) {
+        var requestBase = requestOrigin(request);
+        return requestBase != null ? requestBase : externalOrigin(request);
     }
 
     private String externalOrigin(ServerRequest request) {
