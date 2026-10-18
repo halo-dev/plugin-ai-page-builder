@@ -223,7 +223,7 @@ function refetchDetails() {
               <button
                 type="button"
                 class="apb-icon-btn"
-                title="复制预览链接"
+                v-tooltip="'复制预览链接'"
                 aria-label="复制预览链接"
                 @click="copyPreviewLink"
               >
@@ -232,7 +232,7 @@ function refetchDetails() {
               <button
                 type="button"
                 class="apb-icon-btn"
-                title="在新窗口打开预览"
+                v-tooltip="'在新窗口打开预览'"
                 aria-label="在新窗口打开预览"
                 @click="openPreview"
               >

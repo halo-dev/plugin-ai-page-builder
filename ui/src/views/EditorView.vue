@@ -404,7 +404,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
         type="button"
         class="apb-icon-btn"
         aria-label="返回页面列表"
-        title="返回页面列表"
+        v-tooltip="'返回页面列表'"
         @click="router.push({ name: 'AiPageBuilderPages' })"
       >
         <IconArrowLeft class="text-base" />
@@ -430,7 +430,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           type="button"
           class="apb-icon-btn"
           :disabled="locked || !canUndo"
-          title="撤销（⌘/Ctrl Z）"
+          v-tooltip="'撤销（⌘/Ctrl Z）'"
           aria-label="撤销"
           @click="move('undo')"
         >
@@ -440,7 +440,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           type="button"
           class="apb-icon-btn"
           :disabled="locked || !canRedo"
-          title="重做（⌘/Ctrl Shift Z）"
+          v-tooltip="'重做（⌘/Ctrl Shift Z）'"
           aria-label="重做"
           @click="move('redo')"
         >
@@ -451,7 +451,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           type="button"
           class="apb-icon-btn"
           :disabled="locked"
-          title="页面设置"
+          v-tooltip="'页面设置'"
           aria-label="页面设置"
           @click="settingsOpen = true"
         >
@@ -461,7 +461,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           type="button"
           class="apb-icon-btn"
           :disabled="locked"
-          title="历史版本"
+          v-tooltip="'历史版本'"
           aria-label="历史版本"
           @click="historyOpen = true"
         >
@@ -471,7 +471,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           type="button"
           class="apb-icon-btn"
           :disabled="locked"
-          title="主题预览（新窗口）"
+          v-tooltip="'主题预览（新窗口）'"
           aria-label="主题预览"
           @click="preview"
         >
@@ -625,7 +625,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                 v-if="view === 'runtime'"
                 type="button"
                 class="apb-icon-btn"
-                title="重新运行"
+                v-tooltip="'重新运行'"
                 aria-label="重新运行"
                 @click="runtimePreview?.refresh()"
               >
@@ -635,7 +635,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                 v-if="rootStates.length && view !== 'runtime'"
                 type="button"
                 class="apb-icon-btn"
-                :title="previewModeIcon.title"
+                v-tooltip="previewModeIcon.title"
                 :aria-label="previewModeIcon.title"
                 @click="cyclePreviewMode"
               >

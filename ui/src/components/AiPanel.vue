@@ -273,7 +273,7 @@ const suggestions = [
         <button
           type="button"
           class="apb-icon-btn h-7 w-7"
-          title="新建会话"
+          v-tooltip="'新建会话'"
           aria-label="新建会话"
           :disabled="sessionBusy || disabled"
           @click="createSession"
@@ -284,7 +284,7 @@ const suggestions = [
           <button
             type="button"
             class="apb-icon-btn h-7 w-7"
-            title="会话操作"
+            v-tooltip="'会话操作'"
             aria-label="会话操作"
             :disabled="sessionBusy || disabled || !sessionId"
           >
