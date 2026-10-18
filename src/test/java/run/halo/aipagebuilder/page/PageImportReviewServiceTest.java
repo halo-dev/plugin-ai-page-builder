@@ -275,6 +275,25 @@ class PageImportReviewServiceTest {
     }
 
     @Test
+    void laterMaliciousVerdictInvalidatesAnEarlierSafeReview() throws Exception {
+        var bytes = archive("<p>Hello</p>", "", "document.cookie");
+        when(gateway.review(anyString(), anyString()))
+            .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
+        var safe = service.review(bytes, "admin").block();
+        assertThat(service.authorize(safe.reviewId(), bytes, "admin", false).block()).isNull();
+
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
+            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
+                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
+        var malicious = service.review(bytes, "admin").block();
+        assertThat(malicious.verdict()).isEqualTo("malicious");
+
+        assertThatThrownBy(() -> service.authorize(safe.reviewId(), bytes, "admin", false).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+    }
+
+    @Test
     void findingLimitDoesNotHideDangerousCategoriesFromTheVerdict() throws Exception {
         var findings = new ArrayList<AiReview.Finding>();
         for (var index = 0; index < 50; index++) {
