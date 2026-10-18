@@ -139,10 +139,14 @@ class PageRendererTest {
         var preview = (RenderingResponse) renderer.preview(request, "about", "about", themeLayout,
             scripted).block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .isEqualTo("sandbox allow-scripts; connect-src "
+            .isEqualTo("sandbox allow-scripts; default-src 'none'; "
+                + "script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'; "
+                + "style-src http://localhost/ 'unsafe-inline'; "
+                + "img-src * data: blob:; font-src * data:; media-src *; connect-src "
                 + "http://localhost/apis/api.content.halo.run/v1alpha1/ "
                 + "http://localhost/apis/api.photo.halo.run/v1alpha1/; "
-                + "frame-src 'none'; object-src 'none'; worker-src 'none'; form-action 'none'");
+                + "base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; "
+                + "form-action 'none'");
         var published = (RenderingResponse) renderer.render(request, "about", "about", themeLayout,
             scripted).block();
         assertThat(published.headers().getFirst("Content-Security-Policy")).isNull();
@@ -203,7 +207,7 @@ class PageRendererTest {
     }
 
     @Test
-    void previewPolicyUsesTheConfiguredExternalUrlAsItsCspOrigin() {
+    void previewPolicyUsesTheExternalUrlIncludingItsBasePath() {
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
             "/apis/api.content.halo.run/v1alpha1/"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
@@ -212,9 +216,27 @@ class PageRendererTest {
         var preview = (RenderingResponse) new PageRenderer(resolver, policy, publicApiCatalog,
             fixedExternalUrl("https://pages.example.com/site"))
             .preview(request, "about", "about", true, document).block();
+        var policy = preview.headers().getFirst("Content-Security-Policy");
+        assertThat(policy)
+            .contains("connect-src "
+                + "https://pages.example.com/site/apis/api.content.halo.run/v1alpha1/;")
+            .doesNotContain("http://localhost")
+            .contains("script-src https://pages.example.com/site/ "
+                + "'unsafe-inline' 'unsafe-eval'")
+            .contains("style-src https://pages.example.com/site/ 'unsafe-inline'");
+    }
+
+    @Test
+    void previewsBlockApisWhenTheCatalogIsUnavailable() {
+        when(publicApiCatalog.publicPathPrefixes())
+            .thenThrow(new IllegalStateException("接口目录正在变化，请重试"));
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
+        var preview = (RenderingResponse) renderer.preview(request, "about", "about", true,
+            document).block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .startsWith("sandbox allow-scripts; connect-src "
-                + "https://pages.example.com/apis/api.content.halo.run/v1alpha1/;");
+            .contains("connect-src 'none'");
     }
 
     @Test
@@ -236,8 +258,10 @@ class PageRendererTest {
             @Override
             public URL getURL(HttpRequest request) {
                 try {
-                    return request.getURI().toURL();
-                } catch (MalformedURLException error) {
+                    // Halo resolves the configured base path against the request URI, so the
+                    // page path is not part of the returned external URL.
+                    return request.getURI().resolve("/").toURL();
+                } catch (MalformedURLException | IllegalArgumentException error) {
                     throw new IllegalStateException(error);
                 }
             }

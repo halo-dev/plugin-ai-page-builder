@@ -134,6 +134,11 @@ async function openDiffTab(wrapper: ReturnType<typeof mountPanel>) {
 
 describe('HistoryPanel', () => {
   beforeEach(() => {
+    // The preview preflight only needs a successful response; jsdom has no real server.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, type: 'basic', status: 200 })),
+    )
     // The module-level query client caches across tests; reset it so each test refetches.
     queryClient.clear()
     mockListPageRevisions.mockClear()
@@ -163,6 +168,26 @@ describe('HistoryPanel', () => {
     expect(wrapper.find('iframe').attributes('src')).toBe(
       '/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/about/revisions/rev-1/preview',
     )
+  })
+
+  it('shows a retry when the preview request fails, then reloads it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: false, type: 'basic', status: 403 })),
+    )
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.text()).toContain('预览加载失败')
+    expect(wrapper.find('iframe').exists()).toBe(false)
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, type: 'basic', status: 200 })),
+    )
+    const retry = wrapper.findAll('button').find((button) => button.text() === '重新加载')!
+    await retry.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(true)
   })
 
   it('marks draft, published and restored revisions with badges', async () => {

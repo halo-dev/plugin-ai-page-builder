@@ -33,6 +33,7 @@ import run.halo.aipagebuilder.page.PageApi.RestoreRequest;
 import run.halo.aipagebuilder.page.PageApi.RevisionDetail;
 import run.halo.aipagebuilder.page.PageApi.RevisionSummary;
 import run.halo.aipagebuilder.page.PageApi.SavePageRequest;
+import run.halo.aipagebuilder.page.PageApi.SiteUrlResponse;
 
 @Component
 public class PageEndpoint implements CustomEndpoint {
@@ -175,6 +176,11 @@ public class PageEndpoint implements CustomEndpoint {
                     .response(responseBuilder().responseCode("200")
                         .content(contentBuilder().mediaType(MediaType.TEXT_HTML_VALUE)
                             .schema(schemaBuilder().type("string")))))
+            .GET("/site-url", request -> json(Mono.just(
+                    new SiteUrlResponse(renderer.origin(request)))),
+                builder -> builder.operationId("getSiteUrl").tag("AiPageBuilder")
+                    .response(responseBuilder().responseCode("200")
+                        .implementation(SiteUrlResponse.class)))
             .build()
             .filter((request, next) -> actor().then(Mono.defer(() -> next.handle(request))));
     }

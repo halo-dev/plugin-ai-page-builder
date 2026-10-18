@@ -34,6 +34,9 @@ public final class PageApi {
     @Schema(name = "UpdatePageLayoutRequest", requiredProperties = {"version", "themeLayout"})
     public record UpdatePageLayoutRequest(Long version, boolean themeLayout) { }
 
+    @Schema(name = "SiteUrlResponse", requiredProperties = {"baseUrl"})
+    public record SiteUrlResponse(String baseUrl) { }
+
     @Schema(name = "SavePageRequest", requiredProperties = {"version", "document", "source"})
     public record SavePageRequest(Long version, PageDocument document,
         @Schema(allowableValues = {"manual", "ai"}) String source) {

@@ -32,14 +32,18 @@ public class PageRouter {
         };
     }
 
-    /** Published page scripts must not run with a super administrator's session. */
+    /**
+     * Published page scripts must not run with a super administrator's session, including an
+     * impersonated session that can switch back to the original administrator.
+     */
     private static Mono<Boolean> isSuperAdmin() {
         return ReactiveSecurityContextHolder.getContext()
             .map(context -> context.getAuthentication())
             .filter(authentication -> authentication.isAuthenticated()
                 && !(authentication instanceof AnonymousAuthenticationToken))
             .filter(authentication -> authentication.getAuthorities().stream()
-                .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())))
+                .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())
+                    || "ROLE_PREVIOUS_ADMINISTRATOR".equals(authority.getAuthority())))
             .hasElement();
     }
 }

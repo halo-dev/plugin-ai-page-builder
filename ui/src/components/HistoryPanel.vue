@@ -19,6 +19,7 @@ import type { PageDocument, RevisionSummary } from '../api/generated'
 import type { PreviewDevice } from '../editor/preview-canvas'
 import SourceComparison from './SourceComparison.vue'
 import FixedPreviewViewport from './FixedPreviewViewport.vue'
+import { usePreviewFrame } from '../composables/usePreviewFrame'
 import ApbSegmented from './ui/ApbSegmented.vue'
 
 const props = defineProps<{
@@ -89,16 +90,16 @@ const EMPTY_DOCUMENT: Pick<PageDocument, 'html' | 'css' | 'js'> = { html: '', cs
 const previewLink = computed(() =>
   selected.value ? revisionPreviewUrl(props.name, selected.value.name) : '',
 )
+const previewSrc = computed(() => (view.value === 'preview' ? previewLink.value : ''))
 // Load the revision preview directly, exactly like the "运行" tab: the server sets a
 // sandbox CSP (opaque origin, public APIs only), and the iframe adds allow-scripts without
 // allow-same-origin. Scripts run in isolation, and theme assets load via the CORS filter.
-const previewLoading = shallowRef(true)
-watch(
-  () => [selected.value?.name, view.value] as const,
-  () => {
-    if (view.value === 'preview') previewLoading.value = true
-  },
-)
+const {
+  loading: previewLoading,
+  error: previewError,
+  generation: previewGeneration,
+  reload: reloadPreview,
+} = usePreviewFrame(() => previewSrc.value)
 
 const SOURCE_LABELS: Record<string, string> = {
   ai: 'AI 生成',
@@ -246,24 +247,28 @@ function refetchDetails() {
               >
             </div>
           </header>
-          <div v-if="view === 'preview'" class="relative flex min-h-0 flex-1 flex-col bg-gray-100">
-            <div
-              v-if="previewLoading"
-              class="absolute inset-0 z-10 flex items-center justify-center"
+          <div v-if="view === 'preview'" class="relative flex min-h-0 flex-1 flex-col bg-gray-100 p-4">
+            <VAlert
+              v-if="previewError"
+              type="error"
+              title="预览加载失败"
+              :description="previewError"
             >
-              <VLoading />
-            </div>
-            <FixedPreviewViewport :device="device" fit="width" class="p-4">
+              <template #actions>
+                <VButton @click="reloadPreview">重新加载</VButton>
+              </template>
+            </VAlert>
+            <VLoading v-else-if="previewLoading" class="m-auto" />
+            <FixedPreviewViewport v-else :device="device" fit="width">
               <!-- 与「运行」一致的隔离方式：iframe 只放行脚本、不放行同源，服务端预览响应
                    另带 sandbox CSP，脚本在不透明源中执行，无法读取 Console 或站点数据。 -->
               <iframe
-                :key="selected.name"
+                :key="`${selected.name}-${previewGeneration}`"
                 :src="previewLink"
                 class="block h-full w-full rounded-lg border-0 bg-white shadow-sm"
                 title="历史版本预览"
                 sandbox="allow-scripts"
                 referrerpolicy="no-referrer"
-                @load="previewLoading = false"
               />
             </FixedPreviewViewport>
           </div>

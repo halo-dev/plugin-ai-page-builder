@@ -49,6 +49,7 @@ models/restore-request.ts
 models/revision-detail.ts
 models/revision-summary.ts
 models/save-page-request.ts
+models/site-url-response.ts
 models/source.ts
 models/test-operation.ts
 models/theme-color-mode.ts

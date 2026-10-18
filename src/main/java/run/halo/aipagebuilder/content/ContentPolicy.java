@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -78,6 +79,18 @@ public class ContentPolicy {
      */
     public String sanitizeHtml(String html) {
         var body = parseAndValidateHtml(html);
+        // Serialize the parsed DOM as-is: Jsoup's default pretty printing collapses
+        // whitespace that CSS (for example white-space: pre) renders literally.
+        body.ownerDocument().outputSettings().prettyPrint(false);
+        // HTML parsers drop one leading newline inside <pre>. Parsing already removed it,
+        // so emit an extra one to keep the author's leading blank lines across the
+        // browser's re-parse of this serialization.
+        for (var pre : body.select("pre")) {
+            if (pre.childNodeSize() > 0 && pre.childNode(0) instanceof TextNode text
+                && text.getWholeText().startsWith("\n")) {
+                pre.prependChild(new TextNode("\n"));
+            }
+        }
         for (var link : body.select("a[target=_blank]")) {
             var rel = link.attr("rel");
             var safe = false;
@@ -268,11 +281,6 @@ public class ContentPolicy {
         }
         if ("target".equals(key)) {
             require(Set.of("_self", "_blank").contains(value), "不支持的链接 target");
-        }
-        if ("rel".equals(key)) {
-            for (var token : value.split("\\s+")) {
-                require(!"opener".equalsIgnoreCase(token), "不支持的链接 rel");
-            }
         }
     }
 

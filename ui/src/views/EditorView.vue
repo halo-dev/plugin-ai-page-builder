@@ -3,6 +3,7 @@ import {
   computed,
   defineAsyncComponent,
   onBeforeUnmount,
+  onMounted,
   shallowRef,
   useTemplateRef,
   watch,
@@ -32,7 +33,12 @@ import IconContrast from '~icons/mingcute/brightness-line'
 import IconChat from '~icons/mingcute/chat-3-line'
 import IconCanvas from '~icons/mingcute/layout-grid-line'
 import IconSpinner from '~icons/mingcute/loading-line'
-import { pagePreviewUrl, aiPageBuilderApi, aiPageBuilderChatApi } from '../api/clients'
+import {
+  pagePreviewUrl,
+  aiPageBuilderApi,
+  aiPageBuilderChatApi,
+  getPublicSiteUrl,
+} from '../api/clients'
 import type { ThemeStyleContext } from '../api/generated'
 import { errorMessage } from '../utils/error'
 import { pageKeys, queryClient } from '../lib/query-client'
@@ -159,11 +165,22 @@ const viewOptions = [
   { value: 'source', label: '源码', icon: IconCode },
   { value: 'runtime', label: '运行', icon: IconPlay, title: '运行已保存的草稿，脚本在沙箱中执行' },
 ] as const
-const publicUrl = computed(() =>
-  detail.value?.page.publishedRevision && detail.value.page.slug
-    ? `${window.location.origin}/${detail.value.page.slug}`
-    : '',
-)
+const siteBaseUrl = shallowRef('')
+onMounted(() => {
+  void getPublicSiteUrl()
+    .then((url) => {
+      siteBaseUrl.value = url
+    })
+    .catch(() => {
+      // Keep the Console origin as a best-effort fallback.
+    })
+})
+const publicUrl = computed(() => {
+  const page = detail.value?.page
+  if (!page?.publishedRevision || !page.slug) return ''
+  const base = (siteBaseUrl.value || window.location.origin).replace(/\/$/, '')
+  return `${base}/${page.slug}`
+})
 function openPublicPage() {
   if (publicUrl.value) window.open(publicUrl.value, '_blank', 'noopener')
 }
@@ -283,19 +300,33 @@ async function publish(unpublish = false) {
   if (!detail.value || locked.value || (!unpublish && (dirty.value || !valid.value))) return
   // First publish goes through the popper for the slug; this path is 更新发布/取消发布.
   if (!unpublish && !detail.value.page.publishedRevision) return
+  // Capture the target before awaiting: the route can switch to another page while the
+  // confirmation dialog is open.
+  const target = {
+    name: detail.value.page.name,
+    version: detail.value.page.version,
+    scripted: !!detail.value.document.js,
+  }
   if (
     !unpublish &&
-    detail.value.document.js &&
+    target.scripted &&
     !(await confirm('发布包含脚本的页面？', '页面脚本会在访客浏览器中执行。请确认你信任这些内容。'))
   )
     return
   if (unpublish && !(await confirm('取消发布？', '访客将无法访问此页面。'))) return
+  if (
+    detail.value?.page.name !== target.name ||
+    detail.value?.page.version !== target.version
+  ) {
+    Toast.info('页面已更新，已取消本次操作，请重试。')
+    return
+  }
   busy.value = true
   error.value = ''
   try {
     const request = {
-      name: detail.value.page.name,
-      mutationRequest: { version: detail.value.page.version },
+      name: target.name,
+      mutationRequest: { version: target.version },
     }
     const result = (
       await (unpublish
@@ -634,6 +665,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                 :src="pagePreviewUrl(detail.page.name)"
                 :document="detail.document"
                 :device="device"
+                :theme-layout="detail.page.themeLayout"
               />
               <VisualEditor
                 v-show="view === 'visual' && !streamPreview"

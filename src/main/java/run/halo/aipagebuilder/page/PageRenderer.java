@@ -2,7 +2,11 @@ package run.halo.aipagebuilder.page;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -17,6 +21,8 @@ import run.halo.aipagebuilder.model.PageDocument;
 
 @Component
 public class PageRenderer {
+    private static final Set<String> WEB_SCHEMES = Set.of("http", "https");
+    private static final Pattern AUTHORITY = Pattern.compile("[A-Za-z0-9._\\-:\\[\\]]+");
     private final TemplateNameResolver templateNameResolver;
     private final ContentPolicy contentPolicy;
     private final PublicApiCatalog publicApiCatalog;
@@ -61,8 +67,10 @@ public class PageRenderer {
                     var response = ServerResponse.ok().contentType(MediaType.TEXT_HTML)
                         .cacheControl(CacheControl.noStore());
                     if (preview) {
-                        // Preview scripts must not inherit the administrator's origin or issue
-                        // Console API requests; only anonymous public APIs stay reachable.
+                        // Preview content runs in an opaque origin. CSP blocks Console API
+                        // requests, external scripts/styles, frames, workers and form
+                        // submissions; images, fonts and media stay unrestricted so imported
+                        // pages keep their external assets.
                         response.header("Content-Security-Policy", previewPolicy(request));
                     }
                     return response.render(template, Map.of("aiPageBuilder", pageView,
@@ -72,33 +80,80 @@ public class PageRenderer {
     }
 
     private String previewPolicy(ServerRequest request) {
-        var sources = publicApiCatalog.publicPathPrefixes().stream()
-            .map(prefix -> origin(request) + prefix)
-            .distinct()
-            .toList();
-        return "sandbox allow-scripts; connect-src "
-            + (sources.isEmpty() ? "'none'" : String.join(" ", sources))
-            + "; frame-src 'none'; object-src 'none'; worker-src 'none'; form-action 'none'";
+        var base = origin(request);
+        var sources = base == null ? List.<String>of()
+            : allowedPrefixes().stream().map(prefix -> base + prefix).distinct().toList();
+        // Without a trailing slash a CSP source path matches that exact path only, so a
+        // sub-path deployment such as /site would block /site/themes and /site/plugins.
+        var resourceSources = base == null ? "'unsafe-inline'" : base + "/ 'unsafe-inline'";
+        var connectSources = sources.isEmpty() ? "'none'" : String.join(" ", sources);
+        // 'unsafe-eval' restores theme runtimes that compile expressions at runtime (Alpine,
+        // for example). It adds no data access: page scripts are already arbitrary inline JS
+        // and connect-src still limits what they can reach.
+        return "sandbox allow-scripts; default-src 'none'; script-src " + resourceSources
+            + " 'unsafe-eval'; style-src " + resourceSources
+            + "; img-src * data: blob:; font-src * data:; media-src *"
+            + "; connect-src " + connectSources
+            + "; base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'"
+            + "; form-action 'none'";
+    }
+
+    private List<String> allowedPrefixes() {
+        try {
+            return publicApiCatalog.publicPathPrefixes();
+        } catch (IllegalStateException error) {
+            // A catalog refresh must not turn every preview into a 500 error page; fall back
+            // to the most restrictive policy until the next request can build the allowlist.
+            org.slf4j.LoggerFactory.getLogger(PageRenderer.class)
+                .warn("Unable to build the preview API allowlist; blocking API access", error);
+            return List.of();
+        }
     }
 
     /**
-     * Prefers the externally configured URL (external-url) so CSP sources match the origin
-     * visitors actually use behind a reverse proxy; otherwise derives it from the request.
+     * Canonical public origin used for public links. Prefers the configured external URL so
+     * visitors behind a reverse proxy see the address they actually use.
      */
-    private String origin(ServerRequest request) {
-        var url = externalUrlSupplier.getURL(request.exchange().getRequest());
-        if (url.getAuthority() != null && !url.getAuthority().isBlank()) {
-            return url.getProtocol() + "://" + url.getAuthority();
+    String origin(ServerRequest request) {
+        var external = externalOrigin(request);
+        return external != null ? external : requestOrigin(request);
+    }
+
+    private String externalOrigin(ServerRequest request) {
+        java.net.URL url = null;
+        try {
+            url = externalUrlSupplier.getURL(request.exchange().getRequest());
+        } catch (RuntimeException error) {
+            org.slf4j.LoggerFactory.getLogger(PageRenderer.class)
+                .debug("Unable to resolve the external URL; falling back to the request", error);
         }
-        var uri = request.uri();
-        var scheme = uri.getScheme();
-        if (scheme == null) {
-            var forwarded = request.headers().firstHeader("X-Forwarded-Proto");
-            scheme = forwarded == null ? "http" : forwarded.split(",", 2)[0].trim();
+        if (url == null) return null;
+        var base = checkedOrigin(url.getProtocol(), url.getAuthority());
+        if (base == null) return null;
+        var path = url.getPath();
+        if (path != null && !path.isBlank() && !"/".equals(path)) {
+            // A configured path must not be able to inject another CSP directive.
+            if (!path.matches("[A-Za-z0-9._~!$&'()*+=:@%/\\-]*")) return null;
+            return base + (path.endsWith("/") ? path.substring(0, path.length() - 1) : path);
         }
-        var authority = uri.getRawAuthority();
+        return base;
+    }
+
+    private static String requestOrigin(ServerRequest request) {
+        var forwarded = request.headers().firstHeader("X-Forwarded-Proto");
+        var scheme = forwarded != null ? forwarded.split(",", 2)[0].trim()
+            : request.uri().getScheme();
+        if (scheme == null || scheme.isBlank()) scheme = "http";
+        var authority = request.uri().getRawAuthority();
         if (authority == null) authority = request.headers().firstHeader("Host");
-        return scheme + "://" + authority;
+        return checkedOrigin(scheme, authority);
+    }
+
+    /** Rejects values that would break out of the CSP source list. */
+    private static String checkedOrigin(String scheme, String authority) {
+        if (scheme == null || !WEB_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT))) return null;
+        if (authority == null || !AUTHORITY.matcher(authority).matches()) return null;
+        return scheme.toLowerCase(Locale.ROOT) + "://" + authority;
     }
 
     private static String renderHtml(String html, String js, boolean disableScripts) {

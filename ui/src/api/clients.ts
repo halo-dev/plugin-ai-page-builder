@@ -38,6 +38,21 @@ export type {
 export const chatUrl = (name: string) => `${API_BASE}/pages/${encodeURIComponent(name)}/chat`
 export const pagePreviewUrl = (name: string) =>
   `${API_BASE}/pages/${encodeURIComponent(name)}/preview`
+
+// Public links use Halo's configured external URL, which may include a base path.
+let publicSiteUrl: Promise<string> | undefined
+export function getPublicSiteUrl(): Promise<string> {
+  if (!publicSiteUrl) {
+    publicSiteUrl = aiPageBuilderApi
+      .getSiteUrl()
+      .then((response) => response.data.baseUrl)
+      .catch((error) => {
+        publicSiteUrl = undefined
+        throw error
+      })
+  }
+  return publicSiteUrl
+}
 export const revisionPreviewUrl = (name: string, revision: string) =>
   `${API_BASE}/pages/${encodeURIComponent(name)}/revisions/${encodeURIComponent(revision)}/preview`
 

@@ -31,6 +31,13 @@ import run.halo.app.plugin.SpringPluginManager;
 @Component
 public class PublicApiCatalog {
     private static final long TTL = Duration.ofSeconds(60).toNanos();
+    /**
+     * Public routes that redirect to a caller-supplied target. CSP path sources are not
+     * re-checked after a redirect, so such a route would let a preview reach Console APIs.
+     * Keep it cataloged for documentation, but do not allow it from previews.
+     */
+    private static final List<String> REDIRECTING_PATHS =
+        List.of("/apis/api.storage.halo.run/v1alpha1/thumbnails/-/via-uri");
     private final SpringPluginManager manager;
     private final LongSupplier clock;
     private final AtomicLong generation = new AtomicLong();
@@ -175,7 +182,9 @@ public class PublicApiCatalog {
             }
             for (var data : visitor.getRouterFunctionDatas()) {
                 if (!publicPath(data.getPath())) continue;
-                prefixes.add(pathPrefix(data.getPath()));
+                if (!REDIRECTING_PATHS.contains(data.getPath())) {
+                    prefixes.addAll(pathSources(data.getPath()));
+                }
                 var attribute = data.getAttributes().get(OPERATION_ATTRIBUTE);
                 Operation operation = null;
                 try {
@@ -203,14 +212,21 @@ public class PublicApiCatalog {
         return new Scan(routes, partial, warnings, List.copyOf(prefixes));
     }
 
-    /** Turns a public route path into the group/version prefix shared by its siblings. */
-    private static String pathPrefix(String path) {
-        var parts = path.split("/", -1);
-        // ["", "apis", group, version, ...]
-        if (parts.length > 4) {
-            return String.join("/", Arrays.copyOfRange(parts, 0, 4)) + "/";
+    /**
+     * Turns a public route into CSP path sources. Only the static prefix before the first
+     * path variable or wildcard is used, so an allowlisted route cannot expose every sibling
+     * route under its group/version.
+     */
+    private static List<String> pathSources(String path) {
+        var variable = path.indexOf('{');
+        var wildcard = path.indexOf("/**");
+        var end = variable < 0 ? wildcard : (wildcard < 0 ? variable : Math.min(variable, wildcard));
+        if (end < 0) {
+            return List.of(path);
         }
-        return path.endsWith("/") ? path : path + "/";
+        var base = path.substring(0, end);
+        if (base.endsWith("/")) return List.of(base);
+        return List.of(base, base + "/");
     }
 
     private static Map<String, Object> conditions(RouterFunctionData data) {
@@ -233,10 +249,12 @@ public class PublicApiCatalog {
     static boolean publicPath(String path) {
         if (path == null) return false;
         var matcher = new AntPathMatcher();
+        // Exclusions are version-agnostic so a future v1alpha2 cannot slip into the
+        // preview allowlist.
         return matcher.match("/apis/api.*/**", path)
-            && !matcher.match("/apis/api.console.*/v1alpha1/**", path)
-            && !matcher.match("/apis/api.notification.halo.run/v1alpha1/userspaces/**", path)
-            && !matcher.match("/apis/api.notification.halo.run/v1alpha1/notifiers/**", path);
+            && !matcher.match("/apis/api.console.*/**", path)
+            && !matcher.match("/apis/api.notification.halo.run/*/userspaces/**", path)
+            && !matcher.match("/apis/api.notification.halo.run/*/notifiers/**", path);
     }
 
     private static Map<String, Object> summary(String id, Discovered route, boolean ambiguous) {

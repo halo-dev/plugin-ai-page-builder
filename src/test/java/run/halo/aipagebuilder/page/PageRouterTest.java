@@ -84,6 +84,14 @@ class PageRouterTest {
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block();
         verify(renderer).render(request, "stable-id", "about/company", true, document, true);
 
+        var impersonating = new UsernamePasswordAuthenticationToken("member", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated",
+                "ROLE_PREVIOUS_ADMINISTRATOR"));
+        handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating)).block();
+        verify(renderer, times(2))
+            .render(request, "stable-id", "about/company", true, document, true);
+
         var member = new UsernamePasswordAuthenticationToken("member", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated"));
         handler.handle(request)

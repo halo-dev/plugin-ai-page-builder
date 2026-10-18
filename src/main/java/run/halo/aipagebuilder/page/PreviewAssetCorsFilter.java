@@ -21,12 +21,16 @@ public class PreviewAssetCorsFilter implements AdditionalWebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         var request = exchange.getRequest();
-        var path = request.getPath().value();
-        var sandboxed = SANDBOXED_ORIGIN.equals(request.getHeaders().getFirst(HttpHeaders.ORIGIN));
-        if (sandboxed && ASSET_PREFIXES.stream().anyMatch(path::startsWith)) {
-            var headers = exchange.getResponse().getHeaders();
+        var path = request.getPath().pathWithinApplication().value();
+        if (ASSET_PREFIXES.stream().noneMatch(path::startsWith)) {
+            return chain.filter(exchange);
+        }
+        var headers = exchange.getResponse().getHeaders();
+        // Responses differ by Origin, so caches must not reuse a no-CORS variant for a
+        // sandboxed request.
+        headers.add(HttpHeaders.VARY, HttpHeaders.ORIGIN);
+        if (SANDBOXED_ORIGIN.equals(request.getHeaders().getFirst(HttpHeaders.ORIGIN))) {
             headers.set(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, SANDBOXED_ORIGIN);
-            headers.add(HttpHeaders.VARY, HttpHeaders.ORIGIN);
         }
         return chain.filter(exchange);
     }

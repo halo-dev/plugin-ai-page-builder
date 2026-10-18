@@ -33,10 +33,21 @@ class PreviewAssetCorsFilterTest {
     }
 
     @Test
+    void allowsSandboxedOriginForAssetsUnderAnApplicationBasePath() {
+        var exchange = MockServerWebExchange.from(
+            MockServerHttpRequest.get("/site/themes/theme-earth/assets/layout.js")
+                .contextPath("/site").header(HttpHeaders.ORIGIN, "null"));
+        filter.filter(exchange, chain).block();
+        assertThat(allowOrigin(exchange)).isEqualTo("null");
+    }
+
+    @Test
     void leavesRegularOriginsUntouched() {
         var exchange = exchange("/themes/theme-earth/assets/layout.js", "https://example.com");
         filter.filter(exchange, chain).block();
         assertThat(allowOrigin(exchange)).isNull();
+        assertThat(exchange.getResponse().getHeaders().get(HttpHeaders.VARY))
+            .contains(HttpHeaders.ORIGIN);
     }
 
     @Test

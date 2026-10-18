@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import { Toast, VButton, VDropdown, type VDropdownPlacement } from '@halo-dev/components'
 import IconEarth from '~icons/mingcute/earth-line'
-import { aiPageBuilderApi } from '../api/clients'
+import { aiPageBuilderApi, getPublicSiteUrl } from '../api/clients'
 import type { PageDetail } from '../api/generated'
 import { errorMessage } from '../utils/error'
 import { slugValidation } from '../utils/slug'
@@ -17,7 +17,8 @@ const props = withDefaults(
     scripted?: boolean
     placement?: VDropdownPlacement
   }>(),
-  { placement: 'bottom-end' },
+  // undefined keeps the list entry's "not provided" state so the popper can fetch it.
+  { placement: 'bottom-end', scripted: undefined },
 )
 const emit = defineEmits<{
   published: [detail: PageDetail]
@@ -34,9 +35,64 @@ const formNode = ref<{ submit: () => void }>()
 const synced = ref<PageDetail['page'] | null>(null)
 const pending = ref(false)
 const error = ref('')
-const previewUrl = computed(() =>
-  form.value.slug.trim() ? `${window.location.origin}/${form.value.slug.trim()}` : '',
+const siteBaseUrl = shallowRef('')
+const scriptedState = shallowRef(props.scripted ?? false)
+// Version the detection result belongs to; a newer list entry must be re-checked.
+const scriptCheck = shallowRef<{ version: number; scripted: boolean } | null>(null)
+// Detection must finish before publishing so a slow request cannot hide the warning.
+const scriptPending = shallowRef(false)
+watch(
+  () => props.scripted,
+  (value) => {
+    if (value !== undefined) scriptedState.value = value
+  },
 )
+const previewUrl = computed(() => {
+  const slug = form.value.slug.trim()
+  if (!slug) return ''
+  const base = (siteBaseUrl.value || window.location.origin).replace(/\/$/, '')
+  return `${base}/${slug}`
+})
+function loadSiteBaseUrl() {
+  if (siteBaseUrl.value) return
+  void getPublicSiteUrl()
+    .then((url) => {
+      siteBaseUrl.value = url
+    })
+    .catch(() => {
+      // Keep the Console origin as a best-effort fallback.
+    })
+}
+async function loadScriptState() {
+  if (props.scripted !== undefined) return
+  scriptPending.value = true
+  try {
+    const detail = (await aiPageBuilderApi.getPage({ name: props.name })).data
+    // Only the warning flag: the fetched page may be newer than the list entry, and
+    // adopting its version here would let this form overwrite concurrent edits.
+    const scripted = (detail.document.js ?? '').trim() !== ''
+    scriptCheck.value = { version: detail.page.version, scripted }
+    scriptedState.value = scripted
+  } catch {
+    // Publishing re-checks so an unknown state never silently skips the warning.
+  } finally {
+    scriptPending.value = false
+  }
+}
+
+/** Returns whether the version being published contains scripts, re-reading if needed. */
+async function verifyScriptState(base: { version: number }): Promise<boolean> {
+  if (props.scripted !== undefined) return props.scripted
+  if (scriptCheck.value?.version === base.version) return scriptCheck.value.scripted
+  const detail = (await aiPageBuilderApi.getPage({ name: props.name })).data
+  if (detail.page.version !== base.version) {
+    throw new Error('页面已在别处更新，请关闭后重新打开发布面板')
+  }
+  const scripted = (detail.document.js ?? '').trim() !== ''
+  scriptCheck.value = { version: base.version, scripted }
+  scriptedState.value = scripted
+  return scripted
+}
 
 // Authoritative slug/version: whichever of props or this popper's own synced
 // state is newer, so display and publish always agree on the same base.
@@ -55,7 +111,17 @@ watch(shown, (open) => {
   const base = currentBase()
   form.value = { title: base.title, slug: base.slug ?? '' }
   error.value = ''
+  loadSiteBaseUrl()
+  void loadScriptState()
 })
+
+// A list refresh can move this entry to a newer version while the popper stays open.
+watch(
+  () => props.version,
+  () => {
+    if (shown.value && !pending.value) void loadScriptState()
+  },
+)
 
 function sync(detail: PageDetail) {
   synced.value = detail.page
@@ -67,6 +133,7 @@ async function publish(value: { title: string; slug: string }) {
   const requested = value.slug.trim()
   if (
     pending.value ||
+    scriptPending.value ||
     props.disabled ||
     !title ||
     title.length > 200 ||
@@ -79,6 +146,14 @@ async function publish(value: { title: string; slug: string }) {
   error.value = ''
   try {
     const base = currentBase()
+    // The warning must match the version being published; if detection only discovers
+    // scripts now, make the user see the warning and click again.
+    const warned = scriptedState.value
+    const scripted = await verifyScriptState(base)
+    if (scripted && !warned) {
+      error.value = '此页面包含脚本，请确认上方提示后再次点击发布。'
+      return
+    }
     let version = base.version
     if (title !== base.title) {
       const current = (await aiPageBuilderApi.getPage({ name: props.name })).data
@@ -169,7 +244,7 @@ function keydown(event: KeyboardEvent) {
             <span class="truncate" :title="previewUrl">{{ previewUrl }}</span>
           </p>
           <p
-            v-if="scripted"
+            v-if="scriptedState"
             class="mt-2 rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-700"
           >
             此页面包含脚本，发布后会在访客浏览器中自动执行。
@@ -180,7 +255,7 @@ function keydown(event: KeyboardEvent) {
               size="sm"
               type="primary"
               :loading="pending"
-              :disabled="pending || disabled || !state.valid"
+              :disabled="pending || disabled || scriptPending || !state.valid"
               @click="formNode?.submit()"
             >
               发布

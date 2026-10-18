@@ -51,7 +51,7 @@ class PageEndpointTest {
         @Override
         public URL getURL(HttpRequest request) {
             try {
-                return request.getURI().toURL();
+                return URI.create("http://localhost/").toURL();
             } catch (MalformedURLException error) {
                 throw new IllegalStateException(error);
             }

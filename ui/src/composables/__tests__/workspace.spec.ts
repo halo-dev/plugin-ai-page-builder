@@ -23,6 +23,7 @@ vi.mock('../../api/clients', () => ({
   },
   chatUrl: (name: string) => `/pages/${name}/chat`,
   pagePreviewUrl: (name: string) => `/preview/${name}`,
+  getPublicSiteUrl: () => Promise.resolve('http://localhost'),
 }))
 vi.mock('../../utils/error', () => ({
   errorMessage: (e: Error) => e.message,
@@ -100,6 +101,10 @@ const globals = {
   },
 }
 beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.resolve({ ok: true, type: 'basic', status: 200 })),
+  )
   vi.clearAllMocks()
   queryClient.clear()
   mocks.get.mockResolvedValue({ data: page })

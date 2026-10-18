@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -60,10 +61,10 @@ class ContentPolicyTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"opener", "OPENER", "nofollow Opener", "noopener opener"})
-    void rejectsOpenerRel(String rel) {
-        assertThatThrownBy(() -> policy.validateHtml(
-            "<a href='https://example.com' target='_blank' rel='" + rel + "'>x</a>"))
-            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("rel");
+    void neutralizesOpenerRelInsteadOfRejectingLegacyPages(String rel) {
+        var html = "<a href='https://example.com' target='_blank' rel='" + rel + "'>x</a>";
+        assertThatCode(() -> policy.validateHtml(html)).doesNotThrowAnyException();
+        assertThat(policy.sanitizeHtml(html).toLowerCase(Locale.ROOT)).contains("noopener");
     }
 
     @Test
@@ -79,6 +80,22 @@ class ContentPolicyTest {
             .contains("rel=\"nofollow noopener\"");
         assertThatThrownBy(() -> policy.sanitizeHtml("<script>alert(1)</script>"))
             .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
+    void sanitizeHtmlPreservesTextWhitespace() {
+        assertThat(policy.sanitizeHtml(
+            "<div style='white-space:pre'>A  B\n C</div><span>a</span><span>b</span>"))
+            .isEqualTo("<div style=\"white-space:pre\">A  B\n C</div><span>a</span><span>b</span>");
+    }
+
+    @Test
+    void sanitizeHtmlPreservesLeadingBlankLinesInPreformattedText() {
+        var output = policy.sanitizeHtml("<pre>\n\nA</pre>");
+        assertThat(output).isEqualTo("<pre>\n\nA</pre>");
+        // HTML5 parsers drop one leading LF inside <pre>; the output must survive that.
+        assertThat(org.jsoup.Jsoup.parseBodyFragment(output).body().selectFirst("pre").wholeText())
+            .isEqualTo("\nA");
     }
 
     @Test
