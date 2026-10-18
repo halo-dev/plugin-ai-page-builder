@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRouteQuery } from '@vueuse/router'
 import { useMutation, useQuery } from '@tanstack/vue-query'
@@ -37,10 +37,26 @@ const size = useRouteQuery<number>('size', 20, {
   transform: (value) => Math.max(1, Number(value) || 1),
 })
 const keyword = useRouteQuery<string>('keyword', '')
+const status = useRouteQuery<'published' | 'unpublished' | undefined>('status')
+const sort = useRouteQuery<'created' | undefined>('sort')
+watch([status, sort], () => {
+  page.value = 1
+})
+const statusItems = [
+  { label: '全部', value: undefined },
+  { label: '已发布', value: 'published' },
+  { label: '未发布', value: 'unpublished' },
+]
+const sortItems = [
+  { label: '默认（最近更新）', value: undefined },
+  { label: '最近创建', value: 'created' },
+]
 const listParams = computed(() => ({
   page: page.value,
   size: size.value,
   keyword: keyword.value,
+  status: status.value,
+  sort: sort.value,
 }))
 const listQuery = useQuery({
   queryKey: computed(() => pageKeys.list(listParams.value)),
@@ -373,17 +389,23 @@ function unpublishFromSettings() {
     </template>
   </VPageHeader>
   <div class="m-2 md:m-4">
-    <div class="mb-6">
-      <SearchInput v-model="keyword" placeholder="搜索标题或路径" />
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex w-full flex-1 items-center sm:w-auto">
+        <SearchInput v-model="keyword" placeholder="搜索标题或路径" />
+      </div>
+      <div class="flex flex-wrap items-center gap-6">
+        <FilterDropdown v-model="status" label="状态" :items="statusItems" />
+        <FilterDropdown v-model="sort" label="排序" :items="sortItems" />
+      </div>
     </div>
     <VLoading v-if="listQuery.isLoading.value" />
     <VAlert v-else-if="listQuery.isError.value" type="error" title="页面列表加载失败">
       <template #actions><VButton @click="listQuery.refetch()">重试</VButton> </template>
     </VAlert>
     <VEmpty
-      v-else-if="!items.length && keyword"
+      v-else-if="!items.length && (keyword || status)"
       title="没有找到匹配的页面"
-      message="试试其它标题或路径。"
+      message="试试其它标题、路径或筛选条件。"
     />
     <CreatePagePanel v-else-if="!items.length" class="py-10" />
     <div

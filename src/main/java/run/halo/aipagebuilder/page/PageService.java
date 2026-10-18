@@ -2,6 +2,7 @@ package run.halo.aipagebuilder.page;
 
 import static run.halo.app.extension.index.query.QueryFactory.contains;
 import static run.halo.app.extension.index.query.QueryFactory.equal;
+import static run.halo.app.extension.index.query.QueryFactory.isNotNull;
 import static run.halo.app.extension.index.query.QueryFactory.isNull;
 import static run.halo.app.extension.index.query.QueryFactory.or;
 
@@ -55,7 +56,7 @@ public class PageService {
         this.contentPolicy = contentPolicy;
     }
 
-    public Mono<PageList> list(int page, int size, String keyword) {
+    public Mono<PageList> list(int page, int size, String keyword, String status, String sort) {
         if (page < 1 || size < 1 || size > 100) {
             return Mono.error(badRequest("page must be positive; size must be between 1 and 100"));
         }
@@ -64,10 +65,24 @@ public class PageService {
             selector = selector.andQuery(or(contains("spec.title", keyword),
                 contains("spec.slug", keyword)));
         }
+        if ("published".equals(status)) {
+            selector = selector.andQuery(isNotNull("spec.publishedRevision"));
+        } else if ("unpublished".equals(status)) {
+            selector = selector.andQuery(isNull("spec.publishedRevision"));
+        } else if (status != null && !status.isBlank()) {
+            return Mono.error(badRequest("status must be published or unpublished"));
+        }
+        Sort.Order order;
+        if (sort == null || sort.isBlank()) {
+            order = Sort.Order.desc("spec.updatedAt");
+        } else if ("created".equals(sort)) {
+            order = Sort.Order.desc("metadata.creationTimestamp");
+        } else {
+            return Mono.error(badRequest("sort must be created"));
+        }
         var options = new ListOptions().setFieldSelector(selector);
         return client.listBy(ThemePage.class, options,
-                PageRequestImpl.of(page, size, Sort.by(Sort.Order.desc("spec.updatedAt"),
-                    Sort.Order.asc("metadata.name"))))
+                PageRequestImpl.of(page, size, Sort.by(order, Sort.Order.asc("metadata.name"))))
             .map(result -> new PageList(result.getItems().stream().map(PageService::summary).toList(),
                 result.getTotal(), result.getPage(), result.getSize()));
     }

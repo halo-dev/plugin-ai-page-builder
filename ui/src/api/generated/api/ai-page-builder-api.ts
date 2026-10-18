@@ -444,10 +444,12 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
          * @param {number} [page] Page number, starting at 1
          * @param {number} [size] Page size, at most 100
          * @param {string} [keyword] Title or slug keyword
+         * @param {string} [status] Publish status: published or unpublished
+         * @param {string} [sort] Sort order: defaults to recently updated; created sorts by creation time
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listPages: async (page?: number, size?: number, keyword?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listPages: async (page?: number, size?: number, keyword?: string, status?: string, sort?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -478,6 +480,14 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
 
             if (keyword !== undefined) {
                 localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (status !== undefined) {
+                localVarQueryParameter['status'] = status;
+            }
+
+            if (sort !== undefined) {
+                localVarQueryParameter['sort'] = sort;
             }
 
 
@@ -1031,11 +1041,13 @@ export const AiPageBuilderApiFp = function(configuration?: Configuration) {
          * @param {number} [page] Page number, starting at 1
          * @param {number} [size] Page size, at most 100
          * @param {string} [keyword] Title or slug keyword
+         * @param {string} [status] Publish status: published or unpublished
+         * @param {string} [sort] Sort order: defaults to recently updated; created sorts by creation time
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listPages(page?: number, size?: number, keyword?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageList>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listPages(page, size, keyword, options);
+        async listPages(page?: number, size?: number, keyword?: string, status?: string, sort?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listPages(page, size, keyword, status, sort, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.listPages']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1253,7 +1265,7 @@ export const AiPageBuilderApiFactory = function (configuration?: Configuration, 
          * @throws {RequiredError}
          */
         listPages(requestParameters: AiPageBuilderApiListPagesRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<PageList> {
-            return localVarFp.listPages(requestParameters.page, requestParameters.size, requestParameters.keyword, options).then((request) => request(axios, basePath));
+            return localVarFp.listPages(requestParameters.page, requestParameters.size, requestParameters.keyword, requestParameters.status, requestParameters.sort, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -1498,6 +1510,20 @@ export interface AiPageBuilderApiListPagesRequest {
      * @memberof AiPageBuilderApiListPages
      */
     readonly keyword?: string
+
+    /**
+     * Publish status: published or unpublished
+     * @type {string}
+     * @memberof AiPageBuilderApiListPages
+     */
+    readonly status?: string
+
+    /**
+     * Sort order: defaults to recently updated; created sorts by creation time
+     * @type {string}
+     * @memberof AiPageBuilderApiListPages
+     */
+    readonly sort?: string
 }
 
 /**
@@ -1795,7 +1821,7 @@ export class AiPageBuilderApi extends BaseAPI {
      * @memberof AiPageBuilderApi
      */
     public listPages(requestParameters: AiPageBuilderApiListPagesRequest = {}, options?: RawAxiosRequestConfig) {
-        return AiPageBuilderApiFp(this.configuration).listPages(requestParameters.page, requestParameters.size, requestParameters.keyword, options).then((request) => request(this.axios, this.basePath));
+        return AiPageBuilderApiFp(this.configuration).listPages(requestParameters.page, requestParameters.size, requestParameters.keyword, requestParameters.status, requestParameters.sort, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

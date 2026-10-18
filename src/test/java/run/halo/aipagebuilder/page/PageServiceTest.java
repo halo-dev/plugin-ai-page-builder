@@ -19,6 +19,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
@@ -26,6 +27,8 @@ import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 import reactor.test.publisher.TestPublisher;
 import run.halo.app.extension.ListOptions;
+import run.halo.app.extension.ListResult;
+import run.halo.app.extension.PageRequest;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.router.selector.FieldSelector;
 import run.halo.app.infra.utils.JsonUtils;
@@ -602,6 +605,52 @@ class PageServiceTest {
         assertThat(service.create(new CreatePageRequest("same", "Retry"), "admin").block())
             .isNotNull();
         assertThat(revisions).hasSize(1);
+    }
+
+    @Test
+    void listFiltersByStatusAndSortsByCreationTime() {
+        var options = new AtomicReference<ListOptions>();
+        var request = new AtomicReference<PageRequest>();
+        when(client.listBy(eq(ThemePage.class), any(ListOptions.class), any(PageRequest.class)))
+            .thenAnswer(invocation -> {
+                options.set(invocation.getArgument(1));
+                request.set(invocation.getArgument(2));
+                return Mono.just(ListResult.emptyResult());
+            });
+
+        service.list(2, 10, null, "published", "created").block();
+
+        assertThat(options.get().getFieldSelector().query().toString()).isEqualTo(
+            "(metadata.deletionTimestamp IS NULL AND spec.publishedRevision IS NOT NULL)");
+        assertThat(request.get().getSort().toList()).containsExactly(
+            Sort.Order.desc("metadata.creationTimestamp"), Sort.Order.asc("metadata.name"));
+        assertThat(request.get().getPageNumber()).isEqualTo(2);
+        assertThat(request.get().getPageSize()).isEqualTo(10);
+    }
+
+    @Test
+    void listDefaultsToRecentlyUpdated() {
+        var options = new AtomicReference<ListOptions>();
+        var request = new AtomicReference<PageRequest>();
+        when(client.listBy(eq(ThemePage.class), any(ListOptions.class), any(PageRequest.class)))
+            .thenAnswer(invocation -> {
+                options.set(invocation.getArgument(1));
+                request.set(invocation.getArgument(2));
+                return Mono.just(ListResult.emptyResult());
+            });
+
+        service.list(1, 20, null, "unpublished", null).block();
+
+        assertThat(options.get().getFieldSelector().query().toString()).isEqualTo(
+            "(metadata.deletionTimestamp IS NULL AND spec.publishedRevision IS NULL)");
+        assertThat(request.get().getSort().toList()).containsExactly(
+            Sort.Order.desc("spec.updatedAt"), Sort.Order.asc("metadata.name"));
+    }
+
+    @Test
+    void listRejectsUnknownStatusAndSort() {
+        assertBadRequest(() -> service.list(1, 20, null, "draft", null).block());
+        assertBadRequest(() -> service.list(1, 20, null, null, "title").block());
     }
 
     private static PageDocument document(String title) {

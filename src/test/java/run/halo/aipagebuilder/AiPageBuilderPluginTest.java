@@ -71,9 +71,13 @@ class AiPageBuilderPluginTest {
         configuration.getValue().accept(indexes);
 
         var captor = ArgumentCaptor.forClass(IndexSpecBuilder.class);
-        verify(indexes, org.mockito.Mockito.times(3)).add(captor.capture());
+        verify(indexes, org.mockito.Mockito.times(4)).add(captor.capture());
         var slugIndex = captor.getAllValues().stream().map(IndexSpecBuilder::build)
             .filter(index -> "spec.slug".equals(index.getName())).findFirst().orElseThrow();
         assertThat(slugIndex.isUnique()).isTrue();
+        var publishedIndex = captor.getAllValues().stream().map(IndexSpecBuilder::build)
+            .filter(index -> "spec.publishedRevision".equals(index.getName()))
+            .findFirst().orElseThrow();
+        assertThat(publishedIndex.isNullable()).isTrue();
     }
 }

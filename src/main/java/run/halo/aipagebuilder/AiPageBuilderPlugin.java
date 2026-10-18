@@ -58,6 +58,8 @@ public class AiPageBuilderPlugin extends BasePlugin {
                 .indexFunc(page -> page.getSpec().getTitle()));
             indexes.add(IndexSpecs.<ThemePage, Instant>single("spec.updatedAt", Instant.class)
                 .indexFunc(page -> page.getSpec().getUpdatedAt()));
+            indexes.add(IndexSpecs.<ThemePage, String>single("spec.publishedRevision", String.class)
+                .nullable(true).indexFunc(page -> page.getSpec().getPublishedRevision()));
         });
         schemeManager.register(ThemePageRevision.class, indexes ->
             indexes.add(IndexSpecs.<ThemePageRevision, String>single("spec.pageName", String.class)

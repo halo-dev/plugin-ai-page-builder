@@ -54,7 +54,9 @@ public class PageEndpoint implements CustomEndpoint {
     public RouterFunction<ServerResponse> endpoint() {
         return SpringdocRouteBuilder.route()
             .GET("/pages", request -> json(service.list(integer(request, "page", 1),
-                    integer(request, "size", 20), request.queryParam("keyword").orElse(null))),
+                    integer(request, "size", 20), request.queryParam("keyword").orElse(null),
+                    request.queryParam("status").orElse(null),
+                    request.queryParam("sort").orElse(null))),
                 builder -> operation(builder, "listPages", PageList.class)
                     .parameter(parameterBuilder().name("page").in(ParameterIn.QUERY)
                         .implementation(Integer.class).description("Page number, starting at 1")
@@ -64,7 +66,14 @@ public class PageEndpoint implements CustomEndpoint {
                         .schema(schemaBuilder().type("integer").minimum("1").maximum("100")
                             .defaultValue("20")))
                     .parameter(parameterBuilder().name("keyword").in(ParameterIn.QUERY)
-                        .implementation(String.class).description("Title or slug keyword")))
+                        .implementation(String.class).description("Title or slug keyword"))
+                    .parameter(parameterBuilder().name("status").in(ParameterIn.QUERY)
+                        .implementation(String.class)
+                        .description("Publish status: published or unpublished"))
+                    .parameter(parameterBuilder().name("sort").in(ParameterIn.QUERY)
+                        .implementation(String.class)
+                        .description("Sort order: defaults to recently updated; created sorts by "
+                            + "creation time")))
             .POST("/pages", request -> body(request, CreatePageRequest.class)
                     .flatMap(input -> actor().flatMap(actor -> json(service.create(input, actor)))),
                 builder -> operation(builder, "createPage", PageDetail.class)

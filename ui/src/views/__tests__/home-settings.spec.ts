@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn<(...args: unknown[]) => unknown>(),
   unpublish: vi.fn<(...args: unknown[]) => unknown>(),
   warning: vi.fn<(options: { onConfirm: () => void }) => void>(),
+  routeQuery: {} as Record<string, unknown>,
 }))
 vi.mock('../../api/clients', () => ({
   aiPageBuilderApi: {
@@ -40,7 +41,10 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@vueuse/router', async () => {
   const { ref } = await import('vue')
-  return { useRouteQuery: (_key: string, defaultValue: unknown) => ref(defaultValue) }
+  return {
+    useRouteQuery: (key: string, defaultValue: unknown) =>
+      ref(key in mocks.routeQuery ? mocks.routeQuery[key] : defaultValue),
+  }
 })
 vi.mock('@halo-dev/components', async () => {
   const { defineComponent, h } = await import('vue')
@@ -129,6 +133,7 @@ async function openSettingsFor(wrapper: ReturnType<typeof mount>, index: number)
 beforeEach(() => {
   vi.resetAllMocks()
   queryClient.clear()
+  mocks.routeQuery = {}
   mocks.list.mockResolvedValue({
     data: { items: [summary('a'), summary('b')], total: 2 },
   })
@@ -143,6 +148,7 @@ function mountHome() {
       stubs: {
         FormKit,
         SearchInput,
+        FilterDropdown: true,
         PagePreviewCard: true,
         PublishPagePopper: defineComponent({
           setup:
@@ -159,6 +165,19 @@ function mountHome() {
   })
 }
 describe('page settings from the list', () => {
+  it('passes status and sort filters from the route to the list request', async () => {
+    mocks.routeQuery = { status: 'published', sort: 'created' }
+    const wrapper = mountHome()
+    await flushPromises()
+    expect(mocks.list).toHaveBeenCalledWith({
+      page: 1,
+      size: 20,
+      keyword: '',
+      status: 'published',
+      sort: 'created',
+    })
+    wrapper.unmount()
+  })
   it('discards a stale detail response when another card was opened later', async () => {
     const slow = deferred<unknown>()
     mocks.get.mockImplementation((...args: unknown[]) => {
