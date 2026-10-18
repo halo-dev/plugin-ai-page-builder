@@ -78,4 +78,18 @@ public final class PageApi {
     @Schema(name = "RevisionDetail", requiredProperties = {"summary", "document"})
     public record RevisionDetail(RevisionSummary summary, PageDocument document) {
     }
+
+    @Schema(name = "ImportReview", requiredProperties = {"reviewId", "verdict", "summary",
+        "findings", "title", "themeLayout", "expiresAt"})
+    public record ImportReview(String reviewId,
+        @Schema(allowableValues = {"safe", "suspicious", "malicious"}) String verdict,
+        String summary, List<ImportFinding> findings, String title,
+        @Schema(nullable = true) String description, boolean themeLayout, Instant expiresAt) {
+    }
+
+    @Schema(name = "ImportFinding", requiredProperties = {"severity", "category", "file",
+        "evidence", "explanation"})
+    public record ImportFinding(String severity, String category, String file, String evidence,
+        String explanation) {
+    }
 }

@@ -26,6 +26,8 @@ import type { ClonePageRequest } from '../models';
 // @ts-ignore
 import type { CreatePageRequest } from '../models';
 // @ts-ignore
+import type { ImportReview } from '../models';
+// @ts-ignore
 import type { MutationRequest } from '../models';
 // @ts-ignore
 import type { PageDetail } from '../models';
@@ -357,11 +359,15 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
         },
         /**
          * 
+         * @param {string} reviewId Review identifier returned by the import review endpoint
          * @param {File} body 
+         * @param {boolean} [confirmed] Confirms import despite suspicious findings
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        importPage: async (body: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        importPage: async (reviewId: string, body: File, confirmed?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'reviewId' is not null or undefined
+            assertParamExists('importPage', 'reviewId', reviewId)
             // verify required parameter 'body' is not null or undefined
             assertParamExists('importPage', 'body', body)
             const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/import`;
@@ -383,6 +389,14 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
             // authentication bearerAuth required
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (reviewId !== undefined) {
+                localVarQueryParameter['reviewId'] = reviewId;
+            }
+
+            if (confirmed !== undefined) {
+                localVarQueryParameter['confirmed'] = confirmed;
+            }
 
 
     
@@ -730,6 +744,54 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
         },
         /**
          * 
+         * @param {File} body 
+         * @param {string} [model] AI Foundation language model name; defaults to the configured default model
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reviewPageImport: async (body: File, model?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'body' is not null or undefined
+            assertParamExists('reviewPageImport', 'body', body)
+            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/import/review`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication basicAuth required
+            // http basic authentication required
+            setBasicAuthToObject(localVarRequestOptions, configuration)
+
+            // authentication bearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            if (model !== undefined) {
+                localVarQueryParameter['model'] = model;
+            }
+
+
+    
+            localVarHeaderParameter['Content-Type'] = 'application/zip';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @param {string} name Stable page identifier
          * @param {SavePageRequest} savePageRequest 
          * @param {*} [options] Override http request option.
@@ -1014,12 +1076,14 @@ export const AiPageBuilderApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @param {string} reviewId Review identifier returned by the import review endpoint
          * @param {File} body 
+         * @param {boolean} [confirmed] Confirms import despite suspicious findings
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async importPage(body: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageDetail>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.importPage(body, options);
+        async importPage(reviewId: string, body: File, confirmed?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageDetail>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.importPage(reviewId, body, confirmed, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.importPage']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1114,6 +1178,19 @@ export const AiPageBuilderApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.restorePageRevision(name, restoreRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.restorePageRevision']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @param {File} body 
+         * @param {string} [model] AI Foundation language model name; defaults to the configured default model
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async reviewPageImport(body: File, model?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ImportReview>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.reviewPageImport(body, model, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.reviewPageImport']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -1247,7 +1324,7 @@ export const AiPageBuilderApiFactory = function (configuration?: Configuration, 
          * @throws {RequiredError}
          */
         importPage(requestParameters: AiPageBuilderApiImportPageRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageDetail> {
-            return localVarFp.importPage(requestParameters.body, options).then((request) => request(axios, basePath));
+            return localVarFp.importPage(requestParameters.reviewId, requestParameters.body, requestParameters.confirmed, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -1311,6 +1388,15 @@ export const AiPageBuilderApiFactory = function (configuration?: Configuration, 
          */
         restorePageRevision(requestParameters: AiPageBuilderApiRestorePageRevisionRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageDetail> {
             return localVarFp.restorePageRevision(requestParameters.name, requestParameters.restoreRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @param {AiPageBuilderApiReviewPageImportRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        reviewPageImport(requestParameters: AiPageBuilderApiReviewPageImportRequest, options?: RawAxiosRequestConfig): AxiosPromise<ImportReview> {
+            return localVarFp.reviewPageImport(requestParameters.body, requestParameters.model, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -1463,11 +1549,25 @@ export interface AiPageBuilderApiGetPageRevisionRequest {
  */
 export interface AiPageBuilderApiImportPageRequest {
     /**
+     * Review identifier returned by the import review endpoint
+     * @type {string}
+     * @memberof AiPageBuilderApiImportPage
+     */
+    readonly reviewId: string
+
+    /**
      * 
      * @type {File}
      * @memberof AiPageBuilderApiImportPage
      */
     readonly body: File
+
+    /**
+     * Confirms import despite suspicious findings
+     * @type {boolean}
+     * @memberof AiPageBuilderApiImportPage
+     */
+    readonly confirmed?: boolean
 }
 
 /**
@@ -1622,6 +1722,27 @@ export interface AiPageBuilderApiRestorePageRevisionRequest {
      * @memberof AiPageBuilderApiRestorePageRevision
      */
     readonly restoreRequest: RestoreRequest
+}
+
+/**
+ * Request parameters for reviewPageImport operation in AiPageBuilderApi.
+ * @export
+ * @interface AiPageBuilderApiReviewPageImportRequest
+ */
+export interface AiPageBuilderApiReviewPageImportRequest {
+    /**
+     * 
+     * @type {File}
+     * @memberof AiPageBuilderApiReviewPageImport
+     */
+    readonly body: File
+
+    /**
+     * AI Foundation language model name; defaults to the configured default model
+     * @type {string}
+     * @memberof AiPageBuilderApiReviewPageImport
+     */
+    readonly model?: string
 }
 
 /**
@@ -1799,7 +1920,7 @@ export class AiPageBuilderApi extends BaseAPI {
      * @memberof AiPageBuilderApi
      */
     public importPage(requestParameters: AiPageBuilderApiImportPageRequest, options?: RawAxiosRequestConfig) {
-        return AiPageBuilderApiFp(this.configuration).importPage(requestParameters.body, options).then((request) => request(this.axios, this.basePath));
+        return AiPageBuilderApiFp(this.configuration).importPage(requestParameters.reviewId, requestParameters.body, requestParameters.confirmed, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1877,6 +1998,17 @@ export class AiPageBuilderApi extends BaseAPI {
      */
     public restorePageRevision(requestParameters: AiPageBuilderApiRestorePageRevisionRequest, options?: RawAxiosRequestConfig) {
         return AiPageBuilderApiFp(this.configuration).restorePageRevision(requestParameters.name, requestParameters.restoreRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @param {AiPageBuilderApiReviewPageImportRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof AiPageBuilderApi
+     */
+    public reviewPageImport(requestParameters: AiPageBuilderApiReviewPageImportRequest, options?: RawAxiosRequestConfig) {
+        return AiPageBuilderApiFp(this.configuration).reviewPageImport(requestParameters.body, requestParameters.model, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

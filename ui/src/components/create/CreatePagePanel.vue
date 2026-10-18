@@ -128,6 +128,11 @@ function submit() {
       </button>
     </div>
     <ManualCreateModal v-if="manualOpen" @close="manualOpen = false" />
-    <ImportPageModal v-if="importOpen" @close="importOpen = false" />
+    <ImportPageModal
+      v-if="importOpen"
+      :ai-available="available"
+      :ai-status-message="statusMessage"
+      @close="importOpen = false"
+    />
   </div>
 </template>

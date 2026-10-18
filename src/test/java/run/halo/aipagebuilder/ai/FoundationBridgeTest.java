@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,8 +18,11 @@ import reactor.core.publisher.Mono;
 import run.halo.aifoundation.AiModelService;
 import run.halo.aifoundation.chat.FinishReason;
 import run.halo.aifoundation.chat.GenerateTextRequest;
+import run.halo.aifoundation.chat.GenerateTextResult;
 import run.halo.aifoundation.chat.LanguageModel;
 import run.halo.aifoundation.chat.StreamTextResult;
+import run.halo.aifoundation.exception.DefaultModelNotConfiguredException;
+import run.halo.aifoundation.exception.StructuredOutputValidationException;
 import run.halo.aifoundation.part.TextStreamPart;
 import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
@@ -35,6 +39,109 @@ class FoundationBridgeTest {
         assertThat(bridge.available().block()).isTrue();
         assertThat(bridge.available().block()).isFalse();
         assertThat(bridge.available().block()).isTrue();
+    }
+
+    @Test
+    void reviewUsesDefaultModelAndConvertsStructuredOutput() {
+        when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.just(service));
+        when(service.languageModel()).thenReturn(Mono.just(model));
+        var captured = new AtomicReference<GenerateTextRequest>();
+        when(model.generateText(any(GenerateTextRequest.class))).thenAnswer(invocation -> {
+            captured.set(invocation.getArgument(0));
+            var result = new GenerateTextResult();
+            result.setFinishReason(FinishReason.STOP);
+            result.setOutput(java.util.Map.of("verdict", "SUSPICIOUS", "summary", "发现外部请求",
+                "findings", java.util.List.of(java.util.Map.of("severity", "HIGH",
+                    "category", "DATA_EXFILTRATION", "file", "script.js",
+                    "evidence", "fetch('https://example.com')", "explanation", "向外部发送数据"))));
+            return Mono.just(result);
+        });
+
+        var review = bridge.review("system", "prompt").block();
+
+        assertThat(review.verdict()).isEqualTo(AiReview.Verdict.SUSPICIOUS);
+        assertThat(review.findings()).singleElement().satisfies(finding -> {
+            assertThat(finding.severity()).isEqualTo(AiReview.Severity.HIGH);
+            assertThat(finding.category()).isEqualTo(AiReview.Category.DATA_EXFILTRATION);
+            assertThat(finding.file()).isEqualTo("script.js");
+        });
+        assertThat(captured.get().getSystem()).isEqualTo("system");
+        assertThat(captured.get().getPrompt()).isEqualTo("prompt");
+        assertThat(captured.get().getOutput().getOutputClass()).isEqualTo(AiReview.class);
+        assertThat(captured.get().getTemperature()).isEqualTo(0.1);
+        assertThat(captured.get().getMaxOutputTokens()).isEqualTo(3000);
+        assertThat(captured.get().getMaxRetries()).isEqualTo(1);
+        org.mockito.Mockito.verify(service).languageModel();
+    }
+
+    @Test
+    void reviewUsesSelectedModelWhenProvided() {
+        when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.just(service));
+        when(service.languageModel("model-a")).thenReturn(Mono.empty());
+
+        assertThatThrownBy(() -> bridge.review("model-a", "system", "prompt").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+
+        org.mockito.Mockito.verify(service).languageModel("model-a");
+        org.mockito.Mockito.verify(service, never()).languageModel();
+    }
+
+    @Test
+    void reviewFailsClosedWhenOutputIsNotUsable() {
+        when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.just(service));
+        when(service.languageModel()).thenReturn(Mono.just(model));
+        when(model.generateText(any(GenerateTextRequest.class))).thenAnswer(invocation -> {
+            var result = new GenerateTextResult();
+            result.setFinishReason(FinishReason.LENGTH);
+            result.setOutput(java.util.Map.of("verdict", "SAFE", "summary", "",
+                "findings", java.util.List.of()));
+            return Mono.just(result);
+        });
+        assertThatThrownBy(() -> bridge.review("s", "p").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.INVALID_OUTPUT));
+
+        when(model.generateText(any(GenerateTextRequest.class))).thenReturn(Mono.error(
+            new StructuredOutputValidationException("private-output")));
+        assertThatThrownBy(() -> bridge.review("s", "p").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.INVALID_OUTPUT))
+            .hasMessageNotContaining("private-output");
+
+        when(model.generateText(any(GenerateTextRequest.class))).thenReturn(Mono.error(
+            new DefaultModelNotConfiguredException("private-provider")));
+        assertThatThrownBy(() -> bridge.review("s", "p").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.UNAVAILABLE))
+            .hasMessageNotContaining("private-provider");
+    }
+
+    @Test
+    void reviewRequiresAnEnabledServiceAndDefaultModel() {
+        when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.empty());
+        assertThatThrownBy(() -> bridge.review("s", "p").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+
+        when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.just(service));
+        when(service.languageModel()).thenReturn(Mono.empty());
+        assertThatThrownBy(() -> bridge.review("s", "p").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+    }
+
+    @Test
+    void reviewTimesOutAsTimeoutReason() {
+        when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.just(service));
+        when(service.languageModel()).thenReturn(Mono.just(model));
+        when(model.generateText(any(GenerateTextRequest.class))).thenReturn(Mono.never());
+        reactor.test.StepVerifier.withVirtualTime(() -> bridge.review("s", "p"))
+            .expectSubscription().thenAwait(java.time.Duration.ofSeconds(120))
+            .expectErrorSatisfies(error -> assertThat(error).isInstanceOfSatisfying(
+                AiReviewException.class, known -> assertThat(known.reason())
+                    .isEqualTo(AiReviewException.Reason.TIMEOUT)))
+            .verify(java.time.Duration.ofSeconds(5));
     }
 
     @Test

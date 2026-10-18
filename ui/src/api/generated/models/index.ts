@@ -4,6 +4,8 @@ export * from './clone-page-request';
 export * from './copy-operation';
 export * from './create-page-chat-session-request';
 export * from './create-page-request';
+export * from './import-finding';
+export * from './import-review';
 export * from './json-patch-inner';
 export * from './move-operation';
 export * from './mutation-request';

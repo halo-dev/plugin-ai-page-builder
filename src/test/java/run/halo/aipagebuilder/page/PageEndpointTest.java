@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -64,7 +65,8 @@ class PageEndpointTest {
     };
     private final PageService service = mock(PageService.class);
     private final PageRenderer renderer = mock(PageRenderer.class);
-    private final PageEndpoint endpoint = new PageEndpoint(service, renderer);
+    private final PageImportReviewService reviewService = mock(PageImportReviewService.class);
+    private final PageEndpoint endpoint = new PageEndpoint(service, renderer, reviewService);
 
     private static PageDetail detail(PageDocument document) {
         return new PageDetail(new PageApi.PageSummary("about", "company/about-us", "About", "",
@@ -104,22 +106,96 @@ class PageEndpointTest {
         verifyNoInteractions(service, renderer);
     }
 
-    private static ServerRequest importRequest(byte[] bytes) {
+    private static ServerRequest binaryRequest(String path, byte[] bytes) {
         var buffer = org.springframework.core.io.buffer.DefaultDataBufferFactory.sharedInstance.wrap(bytes);
         return ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest
-                .post("/pages/import").contentType(MediaType.parseMediaType("application/zip"))
+                .post(path).contentType(MediaType.parseMediaType("application/zip"))
                 .body(reactor.core.publisher.Flux.just(buffer))),
             HandlerStrategies.withDefaults().messageReaders());
+    }
+
+    private static ServerRequest importRequest(byte[] bytes) {
+        return binaryRequest("/pages/import?reviewId=review-1", bytes);
+    }
+
+    private static ServerRequest importRequest(byte[] bytes, String query) {
+        return binaryRequest("/pages/import" + (query == null ? "" : "?" + query), bytes);
+    }
+
+    @Test
+    void reviewsArchiveBeforeImport() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var review = new PageApi.ImportReview("review-1", "safe", "AI 未发现明显风险。", List.of(),
+            "About", "", true, java.time.Instant.now().plusSeconds(600));
+        when(reviewService.review(any(byte[].class), eq("admin"), any())).thenReturn(Mono.just(review));
+        var response = asAdmin(endpoint, binaryRequest("/pages/import/review", bytes)).block();
+        assertThat(response.statusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.headers().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+        verify(reviewService).review(eq(bytes), eq("admin"), isNull());
+        verifyNoInteractions(service, renderer);
+    }
+
+    @Test
+    void reviewPassesSelectedModel() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var review = new PageApi.ImportReview("review-1", "safe", "AI 未发现明显风险。", List.of(),
+            "About", "", true, java.time.Instant.now().plusSeconds(600));
+        when(reviewService.review(any(byte[].class), eq("admin"), eq("model-a")))
+            .thenReturn(Mono.just(review));
+
+        var response = asAdmin(endpoint,
+            binaryRequest("/pages/import/review?model=model-a", bytes)).block();
+
+        assertThat(response.statusCode()).isEqualTo(HttpStatus.OK);
+        verify(reviewService).review(eq(bytes), eq("admin"), eq("model-a"));
+        verifyNoInteractions(service, renderer);
     }
 
     @Test
     void importsBinaryUploadWithAuthenticatedActor() throws Exception {
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
         var document = PageArchive.read(bytes).document();
+        when(reviewService.authorize(eq("review-1"), any(byte[].class), eq("admin"), eq(false)))
+            .thenReturn(Mono.empty());
         when(service.importPage(any(byte[].class), eq("admin"))).thenReturn(Mono.just(detail(document)));
         assertThat(asAdmin(endpoint, importRequest(bytes)).block().statusCode()).isEqualTo(HttpStatus.OK);
+        verify(reviewService).authorize(eq("review-1"), eq(bytes), eq("admin"), eq(false));
         verify(service).importPage(eq(bytes), eq("admin"));
         verifyNoMoreInteractions(service);
+    }
+
+    @Test
+    void importRequiresReviewId() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var result = asAdmin(endpoint, importRequest(bytes, null));
+        assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(service, reviewService, renderer);
+    }
+
+    @Test
+    void confirmedSuspiciousReviewIsPassedToImport() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var document = PageArchive.read(bytes).document();
+        when(reviewService.authorize(eq("review-1"), any(byte[].class), eq("admin"), eq(true)))
+            .thenReturn(Mono.empty());
+        when(service.importPage(any(byte[].class), eq("admin"))).thenReturn(Mono.just(detail(document)));
+        assertThat(asAdmin(endpoint, importRequest(bytes, "reviewId=review-1&confirmed=true"))
+            .block().statusCode()).isEqualTo(HttpStatus.OK);
+        verify(reviewService).authorize(eq("review-1"), eq(bytes), eq("admin"), eq(true));
+        verify(service).importPage(eq(bytes), eq("admin"));
+    }
+
+    @Test
+    void rejectedReviewDoesNotImport() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        when(reviewService.authorize(eq("review-1"), any(byte[].class), eq("admin"), eq(false)))
+            .thenReturn(Mono.error(new ResponseStatusException(
+                HttpStatus.UNPROCESSABLE_ENTITY, "blocked")));
+        var result = asAdmin(endpoint, importRequest(bytes));
+        assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+        verify(service, org.mockito.Mockito.never()).importPage(any(byte[].class), any());
     }
 
     @ParameterizedTest
@@ -161,7 +237,7 @@ class PageEndpointTest {
         var resolver = mock(TemplateNameResolver.class);
         var renderingEndpoint = new PageEndpoint(service,
             new PageRenderer(resolver, new ContentPolicy(), mock(PublicApiCatalog.class),
-                EXTERNAL_URLS));
+                EXTERNAL_URLS), reviewService);
         var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
         var candidate = new PageDocument(2, "code", null, null, "<p>Unsaved</p>", """
             :root {color: red}
@@ -261,7 +337,7 @@ class PageEndpointTest {
         var resolver = mock(TemplateNameResolver.class);
         var renderingEndpoint = new PageEndpoint(service,
             new PageRenderer(resolver, new ContentPolicy(), mock(PublicApiCatalog.class),
-                EXTERNAL_URLS));
+                EXTERNAL_URLS), reviewService);
         var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
         var candidate = new PageDocument("schema".equals(invalidField) ? 99 : 1, "code", null, null,
             "html".equals(invalidField) ? "<script>alert(1)</script>" : "<p>Unsaved</p>",

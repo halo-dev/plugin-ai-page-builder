@@ -70,4 +70,24 @@ public class OptionalAiGateway implements AiGateway {
         });
     }
 
+    @Override
+    public Mono<AiReview> review(String system, String prompt) {
+        return compatible().flatMap(compatible -> {
+            var gateway = compatible ? bridge() : null;
+            return gateway == null
+                ? Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE))
+                : gateway.review(system, prompt);
+        });
+    }
+
+    @Override
+    public Mono<AiReview> review(String modelName, String system, String prompt) {
+        return compatible().flatMap(compatible -> {
+            var gateway = compatible ? bridge() : null;
+            return gateway == null
+                ? Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE))
+                : gateway.review(modelName, system, prompt);
+        });
+    }
+
 }

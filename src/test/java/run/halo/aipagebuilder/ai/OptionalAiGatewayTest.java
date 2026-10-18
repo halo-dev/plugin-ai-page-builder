@@ -29,6 +29,12 @@ class OptionalAiGatewayTest {
         assertThatThrownBy(() -> gateway.chat(null, java.util.List.of(), "prompt", null).blockLast())
             .isInstanceOfSatisfying(AiGenerationException.class, error ->
                 assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.MODEL_UNAVAILABLE));
+        assertThatThrownBy(() -> gateway.review("system", "prompt").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+        assertThatThrownBy(() -> gateway.review("model-a", "system", "prompt").block())
+            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
+                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
         verifyNoInteractions(extensions);
     }
 

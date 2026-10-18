@@ -1,20 +1,38 @@
 package run.halo.aipagebuilder.ai;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import run.halo.aifoundation.AiModelService;
 import run.halo.aifoundation.chat.FinishReason;
 import run.halo.aifoundation.chat.GenerateTextRequest;
+import run.halo.aifoundation.chat.GenerateTextResult;
 import run.halo.aifoundation.control.CancellationSource;
+import run.halo.aifoundation.exception.AiGenerationTimeoutException;
+import run.halo.aifoundation.exception.DefaultModelNotConfiguredException;
+import run.halo.aifoundation.exception.IncompatibleModelTypeException;
+import run.halo.aifoundation.exception.ModelDisabledException;
+import run.halo.aifoundation.exception.ModelNotFoundException;
+import run.halo.aifoundation.exception.ProviderDisabledException;
+import run.halo.aifoundation.exception.StructuredOutputSchemaException;
+import run.halo.aifoundation.exception.StructuredOutputValidationException;
+import run.halo.aifoundation.exception.UnsupportedModelCapabilityException;
 import run.halo.aifoundation.part.PartType;
+import run.halo.aifoundation.schema.OutputSpec;
 import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 import run.halo.aipagebuilder.ai.AiGenerationException.Reason;
 
 /** Loaded reflectively on demand only. Must never be a Spring/PF4J component. */
 public final class FoundationBridge implements AiGateway {
     static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(120);
+
+    private static final ObjectMapper REVIEW_MAPPER = run.halo.app.infra.utils.JsonUtils.mapper()
+        .copy()
+        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private static final String SYSTEM_PROMPT = """
         You are the editing assistant for the current page. Call read_current_page for the latest content before making changes.
@@ -71,6 +89,66 @@ public final class FoundationBridge implements AiGateway {
     @Override
     public Mono<Boolean> available() {
         return Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class)).hasElement();
+    }
+
+    @Override
+    public Mono<AiReview> review(String system, String prompt) {
+        return review(null, system, prompt);
+    }
+
+    @Override
+    public Mono<AiReview> review(String modelName, String system, String prompt) {
+        var request = GenerateTextRequest.builder()
+            .system(system)
+            .prompt(prompt)
+            .output(OutputSpec.object(AiReview.class))
+            .temperature(0.1)
+            .maxOutputTokens(3000)
+            .maxRetries(1)
+            .build();
+        return Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class))
+            .switchIfEmpty(Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE)))
+            .flatMap(service -> modelName == null || modelName.isBlank()
+                ? service.languageModel() : service.languageModel(modelName))
+            .switchIfEmpty(Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE)))
+            .flatMap(model -> model.generateText(request))
+            .timeout(Duration.ofSeconds(120))
+            .map(FoundationBridge::convertReview)
+            .onErrorMap(FoundationBridge::reviewError);
+    }
+
+    private static AiReview convertReview(GenerateTextResult result) {
+        if (result.getOutput() == null || result.getFinishReason() != FinishReason.STOP) {
+            throw new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT);
+        }
+        try {
+            return REVIEW_MAPPER.convertValue(result.getOutput(), AiReview.class);
+        } catch (IllegalArgumentException error) {
+            throw new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT, error);
+        }
+    }
+
+    private static Throwable reviewError(Throwable error) {
+        if (error instanceof AiReviewException) {
+            return error;
+        }
+        if (error instanceof AiGenerationTimeoutException || error instanceof TimeoutException) {
+            return new AiReviewException(AiReviewException.Reason.TIMEOUT, error);
+        }
+        if (error instanceof StructuredOutputSchemaException
+            || error instanceof StructuredOutputValidationException
+            || error instanceof IllegalArgumentException) {
+            return new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT, error);
+        }
+        if (error instanceof DefaultModelNotConfiguredException
+            || error instanceof ModelNotFoundException
+            || error instanceof ModelDisabledException
+            || error instanceof ProviderDisabledException
+            || error instanceof IncompatibleModelTypeException
+            || error instanceof UnsupportedModelCapabilityException) {
+            return new AiReviewException(AiReviewException.Reason.UNAVAILABLE, error);
+        }
+        return new AiReviewException(AiReviewException.Reason.FAILED, error);
     }
 
     @Override

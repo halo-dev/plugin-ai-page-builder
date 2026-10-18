@@ -16,6 +16,8 @@ models/clone-page-request.ts
 models/copy-operation.ts
 models/create-page-chat-session-request.ts
 models/create-page-request.ts
+models/import-finding.ts
+models/import-review.ts
 models/index.ts
 models/json-patch-inner.ts
 models/move-operation.ts
