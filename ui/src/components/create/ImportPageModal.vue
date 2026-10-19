@@ -3,7 +3,6 @@ import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMutation } from '@tanstack/vue-query'
 import { VAlert, VButton, VModal, VSpace } from '@halo-dev/components'
-import IconClose from '~icons/mingcute/close-line'
 import IconFileZip from '~icons/mingcute/file-zip-line'
 import IconUpload from '~icons/mingcute/upload-2-line'
 import { aiPageBuilderApi, type ImportReview } from '../../api/clients'
@@ -17,6 +16,7 @@ const props = withDefaults(defineProps<{ aiAvailable?: boolean; aiStatusMessage?
 
 const emit = defineEmits<{ close: [] }>()
 const router = useRouter()
+const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
 const file = ref<File>()
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput')
 const dragging = ref(false)
@@ -267,20 +267,10 @@ watch(model, () => {
     :width="640"
     :layer-closable="false"
     @keyup.esc.capture="guardEscape"
+    mount-to-body
     @close="close"
+    ref="modal"
   >
-    <template #header>
-      <div class="modal-header-title">导入页面</div>
-      <button
-        type="button"
-        aria-label="关闭"
-        class="rounded p-1 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
-        :disabled="pending"
-        @click="close"
-      >
-        <IconClose />
-      </button>
-    </template>
     <div>
       <div class="mb-2 flex items-baseline justify-between gap-2">
         <label for="page-archive" class="text-sm font-medium text-gray-700">页面包 ZIP</label>
@@ -443,7 +433,7 @@ watch(model, () => {
         >
           {{ primaryLabel }}
         </VButton>
-        <VButton :disabled="pending" @click="close">取消</VButton>
+        <VButton :disabled="pending" @click="modal?.close()">取消</VButton>
       </VSpace>
     </template>
   </VModal>
