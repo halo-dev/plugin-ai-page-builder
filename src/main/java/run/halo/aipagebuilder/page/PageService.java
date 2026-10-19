@@ -170,9 +170,19 @@ public class PageService {
                 return Mono.error(badRequest("source must be manual or ai"));
             }
             contentPolicy.validate(request.document());
+            var layout = request.themeLayout();
+            var layoutChanged = layout != null && layout != themeLayout(page);
             return revision(name, page.getSpec().getDraftRevision()).flatMap(current -> {
                 if (Objects.equals(current.getSpec().getDocument(), request.document())) {
-                    return Mono.just(detail(page, current));
+                    if (!layoutChanged) {
+                        return Mono.just(detail(page, current));
+                    }
+                    page.getSpec().setThemeLayout(layout);
+                    page.getSpec().setUpdatedAt(Instant.now());
+                    return client.update(page).map(saved -> detail(saved, current));
+                }
+                if (layoutChanged) {
+                    page.getSpec().setThemeLayout(layout);
                 }
                 return writeDraft(page, request.document(), request.source(), actor);
             });

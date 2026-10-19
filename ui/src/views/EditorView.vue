@@ -87,11 +87,12 @@ const {
   adopt,
   change,
   patch,
+  applySettings,
   move,
   save,
   updateSlug,
-  updateLayout,
   prepareAgent,
+  layout,
 } = useWorkingDocument()
 const {
   annotations,
@@ -381,8 +382,8 @@ async function restore(revision: string) {
     busy.value = false
   }
 }
-function applySettings(value: Parameters<typeof patch>[0]) {
-  patch(value)
+function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
+  applySettings(value)
   settingsOpen.value = false
 }
 </script>
@@ -692,6 +693,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
                 v-show="view === 'visual' && !streamPreview"
                 :name="detail.page.name"
                 :document="working"
+                :theme-layout="detail.page.themeLayout"
                 :validated="valid"
                 :disabled="locked || !valid"
                 :device="device"
@@ -714,13 +716,12 @@ function applySettings(value: Parameters<typeof patch>[0]) {
         v-if="settingsOpen"
         :document="working"
         :slug="detail.page.slug"
-        :theme-layout="detail.page.themeLayout"
+        :theme-layout="layout"
         :save-slug="updateSlug"
-        :save-layout="updateLayout"
         :disabled="locked"
         :published="!!detail.page.publishedRevision"
         @close="settingsOpen = false"
-        @apply="applySettings"
+        @apply="applySettingsAndClose"
         @unpublish="publish(true)"
       />
       <HistoryPanel

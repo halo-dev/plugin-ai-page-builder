@@ -222,8 +222,8 @@ function confirmUnpublish(item: PageSummary) {
     onConfirm: () => unpublishMutation.mutate(item),
   })
 }
-// Settings modal edits the saved page directly: slug/layout apply immediately,
-// title/description are persisted as a saved draft on 应用.
+// Settings modal edits the saved page directly: the slug applies immediately,
+// title/description/layout are persisted as a saved draft on 应用.
 const settingsDetail = ref<PageDetail>()
 const settingsSaving = ref(false)
 // Rapid clicks on different cards race their detail fetches; only the latest
@@ -304,32 +304,17 @@ async function saveSettingsSlug(slug: string) {
     throw e
   }
 }
-async function saveSettingsLayout(themeLayout: boolean) {
-  const current = settingsDetail.value
-  if (!current) return undefined
-  if (themeLayout === current.page.themeLayout) return current
-  const session = settingsSession
-  try {
-    const result = (
-      await aiPageBuilderApi.updatePageLayout({
-        name: current.page.name,
-        updatePageLayoutRequest: { version: current.page.version, themeLayout },
-      })
-    ).data
-    applySettingsResult(result, session)
-    return result
-  } catch (e) {
-    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
-    throw e
-  }
+type SettingsPatch = Partial<Pick<PageDocument, 'title' | 'description'>> & {
+  themeLayout?: boolean
 }
-async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'description'>>) {
+async function applySettings(patch: SettingsPatch) {
   const current = settingsDetail.value
   if (!current) return
   if (!Object.keys(patch).length) {
     settingsDetail.value = undefined
     return
   }
+  const { themeLayout, ...documentPatch } = patch
   const session = settingsSession
   settingsSaving.value = true
   try {
@@ -338,8 +323,9 @@ async function applySettings(patch: Partial<Pick<PageDocument, 'title' | 'descri
         name: current.page.name,
         savePageRequest: {
           version: current.page.version,
-          document: { ...current.document, ...patch },
+          document: { ...current.document, ...documentPatch },
           source: 'manual',
+          ...(themeLayout === undefined ? {} : { themeLayout }),
         },
       })
     ).data
@@ -552,7 +538,6 @@ function unpublishFromSettings() {
     :slug="settingsDetail.page.slug"
     :theme-layout="settingsDetail.page.themeLayout"
     :save-slug="saveSettingsSlug"
-    :save-layout="saveSettingsLayout"
     :disabled="settingsSaving"
     :published="!!settingsDetail.page.publishedRevision"
     @close="settingsDetail = undefined"

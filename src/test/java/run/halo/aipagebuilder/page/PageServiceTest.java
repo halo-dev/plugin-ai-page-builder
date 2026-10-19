@@ -424,6 +424,29 @@ class PageServiceTest {
     }
 
     @Test
+    void saveAppliesThemeLayoutAlongsideDocumentChanges() {
+        var created = service.create(new CreatePageRequest("about", "Original"), "admin").block();
+        var saved = service.save(created.page().name(), new SavePageRequest(created.page().version(),
+            document("Changed"), "manual", false), "admin").block();
+        assertThat(saved.page().themeLayout()).isFalse();
+        assertThat(saved.document().title()).isEqualTo("Changed");
+        assertThat(saved.page().draftRevision()).isNotEqualTo(created.page().draftRevision());
+        assertThat(revisions).hasSize(2);
+    }
+
+    @Test
+    void saveAppliesThemeLayoutWithoutCreatingRevisionWhenDocumentIsUnchanged() {
+        var created = service.create(new CreatePageRequest("about", "Original"), "admin").block();
+        var saved = service.save(created.page().name(), new SavePageRequest(created.page().version(),
+            created.document(), "manual", false), "admin").block();
+        assertThat(saved.page().themeLayout()).isFalse();
+        assertThat(saved.page().draftRevision()).isEqualTo(created.page().draftRevision());
+        assertThat(saved.page().version()).isEqualTo(created.page().version() + 1);
+        assertThat(saved.document()).isEqualTo(created.document());
+        assertThat(revisions).hasSize(1);
+    }
+
+    @Test
     void cannotReadOrRestoreAnotherPagesRevision() {
         var about = service.create(new CreatePageRequest("about", "About"), "admin").block();
         var other = service.create(new CreatePageRequest("other", "Other"), "admin").block();

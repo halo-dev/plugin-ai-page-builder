@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn<(...args: unknown[]) => unknown>(),
   get: vi.fn<(...args: unknown[]) => unknown>(),
   updateSlug: vi.fn<(...args: unknown[]) => unknown>(),
-  updateLayout: vi.fn<(...args: unknown[]) => unknown>(),
   save: vi.fn<(...args: unknown[]) => unknown>(),
   unpublish: vi.fn<(...args: unknown[]) => unknown>(),
   warning: vi.fn<(options: { onConfirm: () => void }) => void>(),
@@ -20,7 +19,6 @@ vi.mock('../../api/clients', () => ({
     listPages: mocks.list,
     getPage: mocks.get,
     updatePageSlug: mocks.updateSlug,
-    updatePageLayout: mocks.updateLayout,
     savePage: mocks.save,
     unpublishPage: mocks.unpublish,
     publishPage: vi.fn<(...args: unknown[]) => unknown>(),
@@ -130,6 +128,15 @@ async function openSettingsFor(wrapper: ReturnType<typeof mount>, index: number)
   const items = wrapper.findAll('div').filter((node) => node.text() === '设置')
   await items[index]!.trigger('click')
 }
+function settingsField(settings: ReturnType<typeof mount>, name: string) {
+  return settings
+    .findAllComponents({ name: 'FormKit' })
+    .find((field) => field.attributes('name') === name)!
+}
+async function submitSettings(settings: ReturnType<typeof mount>) {
+  settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+  await flushPromises()
+}
 beforeEach(() => {
   vi.resetAllMocks()
   queryClient.clear()
@@ -210,21 +217,22 @@ describe('page settings from the list', () => {
     expect(mocks.get).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
-  it('does not revive a closed modal when a late mutation resolves', async () => {
+  it('does not revive a closed modal when a late save resolves', async () => {
     const slow = deferred<unknown>()
-    mocks.updateLayout.mockReturnValue(slow.promise)
+    mocks.save.mockReturnValue(slow.promise)
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
     await flushPromises()
     const settings = wrapper.findComponent(PageSettings)
-    // Start a layout save, then close the modal before it resolves.
-    const layoutPromise = settings.props('saveLayout')(false)
+    settingsField(settings, 'title').vm.$emit('update:modelValue', 'New title')
+    await flushPromises()
+    await submitSettings(settings)
+    // Close the modal before the save resolves.
     settings.vm.$emit('close')
     await flushPromises()
     expect(wrapper.findComponent(PageSettings).exists()).toBe(false)
-    slow.resolve({ data: detail('a', { version: 2, themeLayout: false }) })
-    await layoutPromise
+    slow.resolve({ data: detail('a', { version: 2 }) })
     await flushPromises()
     expect(wrapper.findComponent(PageSettings).exists()).toBe(false)
     // The cache still received the result, so the list shows the new state.
@@ -233,48 +241,53 @@ describe('page settings from the list', () => {
     })
     wrapper.unmount()
   })
-  it('ignores a late mutation response from a previous session of the same page', async () => {
+  it('ignores a save response from a previous session of the same page', async () => {
     let getCalls = 0
     mocks.get.mockImplementation(() => {
       getCalls++
       return Promise.resolve({ data: detail('a', { version: getCalls }) })
     })
     const first = deferred<unknown>()
-    let layoutCalls = 0
-    mocks.updateLayout.mockImplementation(() => {
-      layoutCalls++
-      return layoutCalls === 1
+    let saveCalls = 0
+    mocks.save.mockImplementation(() => {
+      saveCalls++
+      return saveCalls === 1
         ? first.promise
-        : Promise.resolve({ data: detail('a', { version: 3, themeLayout: false }) })
+        : Promise.resolve({ data: detail('a', { version: 3 }) })
     })
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
     await flushPromises()
-    // Session 1: layout save (v1 → v2) stays in flight while the modal closes.
-    const staleSave = wrapper.findComponent(PageSettings).props('saveLayout')(false)
-    wrapper.findComponent(PageSettings).vm.$emit('close')
+    // Session 1: a save (v1 → v2) stays in flight while the modal closes.
+    const firstSettings = wrapper.findComponent(PageSettings)
+    settingsField(firstSettings, 'title').vm.$emit('update:modelValue', 'First')
     await flushPromises()
-    // Session 2: reopen the same page (now at v2) and save again (v2 → v3).
+    await submitSettings(firstSettings)
+    firstSettings.vm.$emit('close')
+    await flushPromises()
+    // Session 2: reopen the same page, now at v2.
     await openSettingsFor(wrapper, 0)
     await flushPromises()
-    await wrapper.findComponent(PageSettings).props('saveLayout')(false)
-    await flushPromises()
-    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
-      page: { version: 3 },
-    })
-    // The session-1 response arrives last; it must not roll anything back.
+    // The session-1 response arrives after the new session opened; it must
+    // neither revive that session nor overwrite the fresh form values.
     first.resolve({ data: detail('a', { version: 2 }) })
-    await staleSave
     await flushPromises()
+    const secondSettings = wrapper.findComponent(PageSettings)
+    expect(secondSettings.props('document').title).toBe('Page a')
+    settingsField(secondSettings, 'title').vm.$emit('update:modelValue', 'Second')
+    await flushPromises()
+    await submitSettings(secondSettings)
+    expect(mocks.save).toHaveBeenLastCalledWith({
+      name: 'a',
+      savePageRequest: {
+        version: 2,
+        document: expect.objectContaining({ title: 'Second' }),
+        source: 'manual',
+      },
+    })
     expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
       page: { version: 3 },
-    })
-    // The modal still holds v3, so the next save builds on it.
-    await wrapper.findComponent(PageSettings).props('saveLayout')(true)
-    expect(mocks.updateLayout).toHaveBeenLastCalledWith({
-      name: 'a',
-      updatePageLayoutRequest: { version: 3, themeLayout: true },
     })
     wrapper.unmount()
   })
@@ -356,7 +369,7 @@ describe('page settings from the list', () => {
     })
     wrapper.unmount()
   })
-  it('ignores a conflict refresh that resolves after a newer save', async () => {
+  it('ignores a stale conflict refresh that resolves after a newer save', async () => {
     mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
     const refresh = deferred<unknown>()
     let getCalls = 0
@@ -366,37 +379,36 @@ describe('page settings from the list', () => {
         ? Promise.resolve({ data: detail('a', { version: 1 }) })
         : refresh.promise
     })
-    mocks.updateLayout.mockResolvedValue({ data: detail('a', { version: 2, themeLayout: false }) })
+    mocks.save.mockResolvedValue({ data: detail('a', { version: 2 }) })
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
     await flushPromises()
     const settings = wrapper.findComponent(PageSettings)
-    settings
-      .findAllComponents({ name: 'FormKit' })
-      .find((field) => field.attributes('name') === 'slug')!
-      .vm.$emit('update:modelValue', 'taken-path')
+    settingsField(settings, 'slug').vm.$emit('update:modelValue', 'taken-path')
     await flushPromises()
-    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
-    await flushPromises()
-    // The conflict refresh (still v1) is in flight; the layout save lands v2.
+    await submitSettings(settings)
+    // The conflict refresh (still v1) is in flight; a newer save lands v2.
     expect(getCalls).toBe(2)
-    await settings.props('saveLayout')(false)
+    settingsField(settings, 'slug').vm.$emit('update:modelValue', 'a-path')
+    settingsField(settings, 'title').vm.$emit('update:modelValue', 'Changed')
     await flushPromises()
+    await submitSettings(settings)
+    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+      page: { version: 2 },
+    })
     refresh.resolve({ data: detail('a', { version: 1 }) })
     await flushPromises()
-    // The stale refresh must not roll the modal back: next save builds on v2.
-    await wrapper.findComponent(PageSettings).props('saveLayout')(true)
-    expect(mocks.updateLayout).toHaveBeenLastCalledWith({
-      name: 'a',
-      updatePageLayoutRequest: { version: 2, themeLayout: true },
+    // The stale refresh must not roll the cache back.
+    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+      page: { version: 2 },
     })
     wrapper.unmount()
   })
   it('ignores a late save response that resolves after a newer refresh', async () => {
     mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
     const refresh = deferred<unknown>()
-    const layoutSave = deferred<unknown>()
+    const slowSave = deferred<unknown>()
     let getCalls = 0
     mocks.get.mockImplementation(() => {
       getCalls++
@@ -404,31 +416,67 @@ describe('page settings from the list', () => {
         ? Promise.resolve({ data: detail('a', { version: 1 }) })
         : refresh.promise
     })
-    mocks.updateLayout.mockReturnValue(layoutSave.promise)
+    mocks.save.mockReturnValue(slowSave.promise)
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
     await flushPromises()
     const settings = wrapper.findComponent(PageSettings)
-    settings
-      .findAllComponents({ name: 'FormKit' })
-      .find((field) => field.attributes('name') === 'slug')!
-      .vm.$emit('update:modelValue', 'taken-path')
+    settingsField(settings, 'title').vm.$emit('update:modelValue', 'New title')
     await flushPromises()
-    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await submitSettings(settings)
+    // A slug conflict starts a refresh while the save is still in flight.
+    await settings
+      .props('saveSlug')('taken-path')
+      .catch(() => undefined)
+    refresh.resolve({ data: detail('a', { version: 3 }) })
     await flushPromises()
-    // Conflict refresh in flight; the layout save response is even slower.
-    const save = settings.props('saveLayout')(false)
-    refresh.resolve({ data: detail('a', { version: 3, themeLayout: false }) })
+    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+      page: { version: 3 },
+    })
+    // The v2 save response arrives last; it must not roll anything back.
+    slowSave.resolve({ data: detail('a', { version: 2 }) })
     await flushPromises()
-    layoutSave.resolve({ data: detail('a', { version: 2, themeLayout: false }) })
-    await save
+    expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+      page: { version: 3 },
+    })
+    // Reopening builds the next save on the refreshed version.
+    mocks.save.mockResolvedValue({ data: detail('a', { version: 4 }) })
+    await openSettingsFor(wrapper, 0)
     await flushPromises()
-    // The v2 save response must not roll the v3 modal back.
-    await wrapper.findComponent(PageSettings).props('saveLayout')(true)
-    expect(mocks.updateLayout).toHaveBeenLastCalledWith({
+    const reopened = wrapper.findComponent(PageSettings)
+    settingsField(reopened, 'title').vm.$emit('update:modelValue', 'Again')
+    await flushPromises()
+    await submitSettings(reopened)
+    expect(mocks.save).toHaveBeenLastCalledWith({
       name: 'a',
-      updatePageLayoutRequest: { version: 3, themeLayout: true },
+      savePageRequest: {
+        version: 3,
+        document: expect.objectContaining({ title: 'Again' }),
+        source: 'manual',
+      },
+    })
+    wrapper.unmount()
+  })
+  it('saves the theme layout with the form instead of on toggle', async () => {
+    mocks.save.mockResolvedValue({ data: detail('a', { version: 2, themeLayout: false }) })
+    const wrapper = mountHome()
+    await flushPromises()
+    await openSettingsFor(wrapper, 0)
+    await flushPromises()
+    const settings = wrapper.findComponent(PageSettings)
+    settingsField(settings, 'themeLayout').vm.$emit('update:modelValue', false)
+    await flushPromises()
+    expect(mocks.save).not.toHaveBeenCalled()
+    await submitSettings(settings)
+    expect(mocks.save).toHaveBeenCalledWith({
+      name: 'a',
+      savePageRequest: {
+        version: 1,
+        document: expect.objectContaining({ title: 'Page a' }),
+        source: 'manual',
+        themeLayout: false,
+      },
     })
     wrapper.unmount()
   })
@@ -436,8 +484,10 @@ describe('page settings from the list', () => {
     mocks.list.mockResolvedValue({
       data: { items: [summary('a', { publishedRevision: 'r1' })], total: 1 },
     })
-    mocks.get.mockResolvedValue({ data: detail('a', { publishedRevision: 'r1' }) })
-    mocks.updateLayout.mockResolvedValue({ data: detail('a', { version: 2, themeLayout: false }) })
+    mocks.get
+      .mockResolvedValueOnce({ data: detail('a', { publishedRevision: 'r1' }) })
+      .mockResolvedValue({ data: detail('a', { version: 2, publishedRevision: 'r1' }) })
+    mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
     mocks.unpublish.mockResolvedValue({
       data: detail('a', { version: 3, publishedRevision: null }),
     })
@@ -448,9 +498,11 @@ describe('page settings from the list', () => {
     const settings = wrapper.findComponent(PageSettings)
     settings.vm.$emit('unpublish')
     expect(mocks.warning).toHaveBeenCalledTimes(1)
-    // A layout save completes while the confirmation dialog is open, bumping
-    // the optimistic-lock version.
-    await settings.props('saveLayout')(false)
+    // A conflict refresh completes while the confirmation dialog is open,
+    // bumping the optimistic-lock version.
+    await settings
+      .props('saveSlug')('taken-path')
+      .catch(() => undefined)
     await flushPromises()
     const options = mocks.warning.mock.calls[0]![0]
     await options.onConfirm()

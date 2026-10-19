@@ -39,7 +39,12 @@ public final class PageApi {
 
     @Schema(name = "SavePageRequest", requiredProperties = {"version", "document", "source"})
     public record SavePageRequest(Long version, PageDocument document,
-        @Schema(allowableValues = {"manual", "ai"}) String source) {
+        @Schema(allowableValues = {"manual", "ai"}) String source,
+        @Schema(nullable = true, description = "Whether to reuse the theme layout; "
+            + "omitted keeps the current value") Boolean themeLayout) {
+        public SavePageRequest(Long version, PageDocument document, String source) {
+            this(version, document, source, null);
+        }
     }
 
     @Schema(name = "MutationRequest", requiredProperties = {"version"})

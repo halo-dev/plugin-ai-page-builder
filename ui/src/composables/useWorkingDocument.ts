@@ -13,6 +13,7 @@ import {
 export function useWorkingDocument() {
   const detail = shallowRef<PageDetail>()
   const document = shallowRef<PageDocument>()
+  const layout = shallowRef(false)
   const busy = shallowRef(false)
   const saving = shallowRef(false)
   const agentRunning = shallowRef(false)
@@ -27,7 +28,10 @@ export function useWorkingDocument() {
   let timer: ReturnType<typeof setTimeout> | undefined
   let controller: AbortController | undefined
   const dirty = computed(
-    () => !!document.value && fingerprint(document.value) !== savedFingerprint.value,
+    () =>
+      !!document.value &&
+      (fingerprint(document.value) !== savedFingerprint.value ||
+        layout.value !== detail.value?.page.themeLayout),
   )
   const locked = computed(() => busy.value || agentRunning.value || preparing.value)
   const valid = computed(() => validationState.value === 'valid')
@@ -79,6 +83,7 @@ export function useWorkingDocument() {
   function adopt(result: PageDetail, reset = false) {
     cancelValidation()
     detail.value = result
+    layout.value = result.page.themeLayout
     if (!history || reset) history = createDocumentHistory(result.document)
     else history.push(result.document)
     document.value = cloneDocument(result.document)
@@ -102,6 +107,14 @@ export function useWorkingDocument() {
     value: Partial<Pick<PageDocument, 'html' | 'css' | 'js' | 'title' | 'description'>>,
   ) {
     if (document.value) change(updateDocument(document.value, value))
+  }
+  function applySettings(
+    value: Partial<Pick<PageDocument, 'title' | 'description'>> & { themeLayout?: boolean },
+  ) {
+    if (locked.value) return
+    const { themeLayout, ...documentPatch } = value
+    if (themeLayout !== undefined) layout.value = themeLayout
+    if (Object.keys(documentPatch).length) patch(documentPatch)
   }
   function move(direction: 'undo' | 'redo') {
     if (locked.value || !history || !(direction === 'undo' ? history.canUndo : history.canRedo))
@@ -132,6 +145,7 @@ export function useWorkingDocument() {
             version: detail.value.page.version,
             document: document.value,
             source: 'manual',
+            themeLayout: layout.value,
           },
         })
       ).data
@@ -162,24 +176,6 @@ export function useWorkingDocument() {
       busy.value = false
     }
   }
-  async function updateLayout(themeLayout: boolean) {
-    if (locked.value || !detail.value) return undefined
-    if (themeLayout === detail.value.page.themeLayout) return detail.value
-    busy.value = true
-    try {
-      const result = (
-        await aiPageBuilderApi.updatePageLayout({
-          name: detail.value.page.name,
-          updatePageLayoutRequest: { version: detail.value.page.version, themeLayout },
-        })
-      ).data
-      detail.value = { ...detail.value, page: result.page }
-      queryClient.setQueryData(pageKeys.detail(result.page.name), result)
-      return result
-    } finally {
-      busy.value = false
-    }
-  }
   async function prepareAgent<T = number>(
     snapshot?: (page: PageDetail) => Promise<T>,
   ): Promise<T | number> {
@@ -197,6 +193,7 @@ export function useWorkingDocument() {
   return {
     detail,
     document,
+    layout,
     busy,
     saving,
     agentRunning,
@@ -212,10 +209,10 @@ export function useWorkingDocument() {
     adopt,
     change,
     patch,
+    applySettings,
     move,
     save,
     updateSlug,
-    updateLayout,
     prepareAgent,
   }
 }

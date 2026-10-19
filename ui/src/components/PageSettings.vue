@@ -11,67 +11,49 @@ const props = defineProps<{
   disabled: boolean
   published: boolean
   saveSlug: (slug: string) => Promise<PageDetail | undefined>
-  saveLayout: (themeLayout: boolean) => Promise<PageDetail | undefined>
 }>()
+type SettingsPatch = Partial<Pick<PageDocument, 'title' | 'description'>> & {
+  themeLayout?: boolean
+}
 const emit = defineEmits<{
   close: []
-  apply: [value: Partial<Pick<PageDocument, 'title' | 'description'>>]
+  apply: [value: SettingsPatch]
   unpublish: []
 }>()
 const buffer = reactive({
   title: props.document.title,
   description: props.document.description || '',
   slug: props.slug ?? '',
+  themeLayout: props.themeLayout,
 })
 const form = useTemplateRef<{ node: { submit: () => void } }>('form')
 const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
 const saving = ref(false)
-const layoutOn = ref(props.themeLayout)
-const layoutSaving = ref(false)
-// Serialize the modal's writes: every operation (slug, layout, apply,
-// unpublish via the disabled prop) shares the page's optimistic-lock version,
-// so no two of them may be in flight at once. Closing stays allowed even
-// while busy: VModal hides itself before emitting close, so the event cannot
-// be vetoed — parents must tolerate late results instead.
-const busy = computed(() => saving.value || layoutSaving.value || props.disabled)
-watch(
-  () => props.themeLayout,
-  (value) => (layoutOn.value = value),
-)
+// The modal's writes (slug save and the parent's apply) share the page's
+// optimistic-lock version, so no two of them may be in flight at once. Closing
+// stays allowed even while busy: VModal hides itself before emitting close, so
+// the event cannot be vetoed — parents must tolerate late results instead.
+const busy = computed(() => saving.value || props.disabled)
 // A parent refresh (e.g. after a version conflict) swaps the document under
 // the form: fields the user never touched follow the fresh values, while
 // edited fields (buffer diverged from the old props) keep the user's input.
 watch(
-  () => [props.document, props.slug] as const,
-  ([doc, slug], [prevDoc, prevSlug]) => {
+  () => [props.document, props.slug, props.themeLayout] as const,
+  ([doc, slug, themeLayout], [prevDoc, prevSlug, prevThemeLayout]) => {
     if (buffer.title === prevDoc.title) buffer.title = doc.title
     if (buffer.description === (prevDoc.description || ''))
       buffer.description = doc.description || ''
     if (buffer.slug === (prevSlug ?? '')) buffer.slug = slug ?? ''
+    if (buffer.themeLayout === prevThemeLayout) buffer.themeLayout = themeLayout
   },
 )
-// FormKit emits change before the v-model update lands, so take the target
-// value from update:model-value instead of reading the bound ref.
-async function toggleLayout(value: unknown) {
-  const target = value === true
-  if (busy.value || target === props.themeLayout) return
-  layoutOn.value = target
-  layoutSaving.value = true
-  try {
-    if (!(await props.saveLayout(target))) layoutOn.value = !target
-  } catch (e) {
-    layoutOn.value = !target
-    Toast.error(errorMessage(e))
-  } finally {
-    layoutSaving.value = false
-  }
-}
 async function submit() {
   if (busy.value) return
-  const patch: Partial<Pick<PageDocument, 'title' | 'description'>> = {}
+  const patch: SettingsPatch = {}
   if (buffer.title !== props.document.title) patch.title = buffer.title
   if (buffer.description !== (props.document.description || ''))
     patch.description = buffer.description
+  if (buffer.themeLayout !== props.themeLayout) patch.themeLayout = buffer.themeLayout
   // The slug saves through its own API and takes effect immediately, unlike
   // title/description which the parent applies to the working document.
   if (buffer.slug !== (props.slug ?? '')) {
@@ -133,20 +115,14 @@ onBeforeUnmount(() => {
           :validation="slug ? slugValidation : slugOptionalValidation"
           :maxlength="200"
         />
-      </FormKit>
-      <div class="my-5 flex items-center gap-3">
-        <p class="min-w-0 flex-1 text-xs text-gray-500">
-          复用主题布局
-          <span class="block">关闭后页面独立渲染，不套用主题的页头页尾与基础样式。</span>
-        </p>
         <FormKit
-          :model-value="layoutOn"
+          v-model="buffer.themeLayout"
           type="checkbox"
           name="themeLayout"
-          :disabled="busy"
-          @update:model-value="toggleLayout"
+          label="复用主题布局"
+          help="关闭后页面独立渲染，不套用主题的页头页尾与基础样式。"
         />
-      </div>
+      </FormKit>
     </div>
     <template #footer>
       <div class="flex items-center justify-between gap-3">

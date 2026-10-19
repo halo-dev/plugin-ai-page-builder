@@ -32,6 +32,7 @@ const props = withDefaults(
   defineProps<{
     name: string
     document: PageDocument
+    themeLayout: boolean
     validated: boolean
     disabled?: boolean
     device?: PreviewDevice
@@ -163,7 +164,14 @@ const textEditable = computed(() => selected.value && canEditText(selected.value
 const duplicateAllowed = computed(() => selected.value && canDuplicate(selected.value))
 
 watch(
-  () => [props.name, JSON.stringify(props.document), props.validated, refresh.value] as const,
+  () =>
+    [
+      props.name,
+      JSON.stringify(props.document),
+      props.validated,
+      refresh.value,
+      props.themeLayout,
+    ] as const,
   async (_, previous, onCleanup) => {
     const id = ++requestId
     const controller = new AbortController()
@@ -180,7 +188,8 @@ watch(
       !unsupported.value &&
       sameDocument(rendered.value, props.document) &&
       sameDocument(preview.value?.snapshot, props.document) &&
-      previous?.[3] === refresh.value
+      previous?.[3] === refresh.value &&
+      previous?.[4] === props.themeLayout
     ) {
       previewError.value = ''
       pending.value = false

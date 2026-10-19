@@ -81,14 +81,14 @@ vi.mock('../../components/HistoryPanel.vue', () => ({
   default: defineComponent({ setup: () => () => h('div') }),
 }))
 const page = {
-  page: { name: 'one', slug: 'one', version: 1, draftRevision: 'r1' },
+  page: { name: 'one', slug: 'one', version: 1, themeLayout: true, draftRevision: 'r1' },
   document: { mode: 'visual', title: 'Original', html: '<p>Hello</p>', css: '', schemaVersion: 1 },
 } as PageDetail
 const globals = {
   stubs: {
     VisualEditor: defineComponent({
       name: 'VisualEditor',
-      props: ['name', 'document', 'validated', 'disabled', 'device'],
+      props: ['name', 'document', 'themeLayout', 'validated', 'disabled', 'device'],
       emits: ['update:document'],
       setup: () => () => h('visual-editor-stub'),
     }),
@@ -259,7 +259,7 @@ describe('workspace integration', () => {
     await flushPromises()
     expect(mocks.save).toHaveBeenCalledWith({
       name: 'one',
-      savePageRequest: { version: 1, document: edited, source: 'manual' },
+      savePageRequest: { version: 1, document: edited, source: 'manual', themeLayout: true },
     })
     expect(mocks.themeContext).toHaveBeenCalledTimes(1)
     wrapper.unmount()
@@ -359,13 +359,52 @@ describe('workspace integration', () => {
         version: 2,
         document: expect.objectContaining({ title: 'Buffered title' }),
         source: 'manual',
+        themeLayout: true,
       },
     })
     wrapper.unmount()
   })
-  it('saves the layout toggle and rolls back on failure', async () => {
-    const saveLayout = vi.fn<(themeLayout: boolean) => Promise<PageDetail | undefined>>()
-    saveLayout.mockRejectedValueOnce(new Error('页面已变化')).mockResolvedValueOnce(page)
+  it('applies the layout to the working state and saves it with the draft', async () => {
+    const wrapper = await editor()
+    const canvas = wrapper.findComponent({ name: 'VisualEditor' })
+    expect(canvas.props('themeLayout')).toBe(true)
+    await wrapper.find('[aria-label="页面设置"]').trigger('click')
+    const settings = wrapper.findComponent(PageSettings)
+    expect(settings.props('themeLayout')).toBe(true)
+    settings
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'themeLayout')!
+      .vm.$emit('update:modelValue', false)
+    await flushPromises()
+    settings.findComponent({ ref: 'form' }).vm.$emit('submit')
+    await flushPromises()
+    // Applying only changes the working state; the canvas keeps rendering the
+    // saved layout until the draft is saved.
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(canvas.props('themeLayout')).toBe(true)
+    mocks.save.mockResolvedValue({
+      data: { ...page, page: { ...page.page, version: 2, themeLayout: false } },
+    })
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click')
+    await flushPromises()
+    expect(mocks.save).toHaveBeenCalledWith({
+      name: 'one',
+      savePageRequest: {
+        version: 1,
+        document: expect.objectContaining({ title: 'Original' }),
+        source: 'manual',
+        themeLayout: false,
+      },
+    })
+    // The saved layout reaches the canvas, which refetches its server render.
+    expect(canvas.props('themeLayout')).toBe(false)
+    wrapper.unmount()
+  })
+  it('applies the layout with the form instead of saving on toggle', async () => {
+    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
     const wrapper = mount(PageSettings, {
       props: {
         document: page.document,
@@ -373,8 +412,7 @@ describe('workspace integration', () => {
         themeLayout: true,
         disabled: false,
         published: false,
-        saveSlug: vi.fn(),
-        saveLayout,
+        saveSlug,
       },
       global: globals,
     })
@@ -383,11 +421,12 @@ describe('workspace integration', () => {
       .find((input) => input.attributes('name') === 'themeLayout')!
     field.vm.$emit('update:modelValue', false)
     await flushPromises()
-    expect(saveLayout).toHaveBeenNthCalledWith(1, false)
-    // Failure rolls the checkbox back to the stored value.
-    field.vm.$emit('update:modelValue', false)
+    // Toggling only changes the form buffer; the parent saves on apply.
+    expect(saveSlug).not.toHaveBeenCalled()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
-    expect(saveLayout).toHaveBeenNthCalledWith(2, false)
+    expect(wrapper.emitted('apply')).toEqual([[{ themeLayout: false }]])
     wrapper.unmount()
   })
   it('keeps the path input and reports the failure with a toast, then allows retry', async () => {
@@ -401,7 +440,6 @@ describe('workspace integration', () => {
         disabled: false,
         published: false,
         saveSlug,
-        saveLayout: vi.fn(),
       },
       global: globals,
     })
@@ -442,7 +480,6 @@ describe('workspace integration', () => {
         disabled: false,
         published: false,
         saveSlug,
-        saveLayout: vi.fn(),
       },
       global: globals,
     })
@@ -462,45 +499,6 @@ describe('workspace integration', () => {
     await flushPromises()
     expect(wrapper.emitted('apply')).toBeUndefined()
   })
-  it('blocks submit while the layout save is in flight but still allows close', async () => {
-    let resolveLayout!: (value: PageDetail) => void
-    const saveLayout = vi.fn<(themeLayout: boolean) => Promise<PageDetail | undefined>>(
-      () => new Promise((resolve) => (resolveLayout = resolve)),
-    )
-    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
-    const wrapper = mount(PageSettings, {
-      props: {
-        document: page.document,
-        slug: 'one',
-        themeLayout: true,
-        disabled: false,
-        published: false,
-        saveSlug,
-        saveLayout,
-      },
-      global: globals,
-    })
-    const fields = wrapper.findAllComponents({ name: 'FormKit' })
-    fields
-      .find((field) => field.attributes('name') === 'slug')!
-      .vm.$emit('update:modelValue', 'two')
-    fields
-      .find((field) => field.attributes('name') === 'themeLayout')!
-      .vm.$emit('update:modelValue', false)
-    await flushPromises()
-    expect(saveLayout).toHaveBeenCalledWith(false)
-    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
-    await flushPromises()
-    expect(saveSlug).not.toHaveBeenCalled()
-    expect(wrapper.emitted('apply')).toBeUndefined()
-    // VModal hides itself before emitting close, so closing is always allowed;
-    // the parent discards the late layout result instead.
-    wrapper.findComponent({ name: 'VModal' }).vm.$emit('close')
-    expect(wrapper.emitted('close')).toHaveLength(1)
-    resolveLayout(page)
-    await flushPromises()
-    wrapper.unmount()
-  })
   it('emits an empty settings patch when a legacy description is untouched', async () => {
     const wrapper = mount(PageSettings, {
       props: {
@@ -509,8 +507,7 @@ describe('workspace integration', () => {
         themeLayout: true,
         disabled: false,
         published: false,
-        saveSlug: vi.fn(),
-        saveLayout: vi.fn(),
+        saveSlug: vi.fn<(slug: string) => Promise<PageDetail | undefined>>(),
       },
       global: globals,
     })
@@ -526,8 +523,7 @@ describe('workspace integration', () => {
         themeLayout: true,
         disabled: false,
         published: false,
-        saveSlug: vi.fn(),
-        saveLayout: vi.fn(),
+        saveSlug: vi.fn<(slug: string) => Promise<PageDetail | undefined>>(),
       },
       global: globals,
     })

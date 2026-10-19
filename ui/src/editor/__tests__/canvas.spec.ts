@@ -42,7 +42,7 @@ function themePage(snapshot = document, name = 'demo') {
 }
 function render(props: Partial<InstanceType<typeof VisualEditor>['$props']> = {}) {
   const wrapper = mount(VisualEditor, {
-    props: { name: 'demo', document, validated: true, ...props },
+    props: { name: 'demo', document, themeLayout: true, validated: true, ...props },
     attachTo: window.document.body,
     global: { stubs: { FormKit: true } },
   })
@@ -319,6 +319,20 @@ describe('theme preview canvas', () => {
     expect(current.querySelector('header')?.textContent).toBe('主题头')
     expect(current.querySelector('footer')?.textContent).toBe('主题脚')
     expect(current.documentElement.outerHTML).not.toContain('@scope')
+  })
+
+  it('refetches when only the theme layout changes', async () => {
+    const wrapper = render()
+    await load(wrapper)
+    expect(mocks.renderPagePreview).toHaveBeenCalledTimes(1)
+    await wrapper.setProps({ themeLayout: false })
+    await flushPromises()
+    expect(mocks.renderPagePreview).toHaveBeenCalledTimes(2)
+    expect(mocks.renderPagePreview).toHaveBeenLastCalledWith(
+      'demo',
+      document,
+      expect.any(AbortSignal),
+    )
   })
 
   it('ignores an older async response arriving after the current preview', async () => {
