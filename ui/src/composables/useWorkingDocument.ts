@@ -14,6 +14,7 @@ export function useWorkingDocument() {
   const detail = shallowRef<PageDetail>()
   const document = shallowRef<PageDocument>()
   const busy = shallowRef(false)
+  const saving = shallowRef(false)
   const agentRunning = shallowRef(false)
   const preparing = shallowRef(false)
   const error = shallowRef('')
@@ -121,6 +122,7 @@ export function useWorkingDocument() {
     if (!valid.value) throw new Error('请先修正源码并等待校验通过。')
     if (!dirty.value) return detail.value
     busy.value = true
+    saving.value = true
     error.value = ''
     try {
       const result = (
@@ -137,6 +139,7 @@ export function useWorkingDocument() {
       queryClient.setQueryData(pageKeys.detail(result.page.name), result)
       return result
     } finally {
+      saving.value = false
       busy.value = false
     }
   }
@@ -195,6 +198,7 @@ export function useWorkingDocument() {
     detail,
     document,
     busy,
+    saving,
     agentRunning,
     preparing,
     locked,

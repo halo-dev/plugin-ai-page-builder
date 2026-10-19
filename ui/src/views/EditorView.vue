@@ -73,6 +73,7 @@ const {
   detail,
   document: working,
   busy,
+  saving,
   agentRunning,
   preparing,
   locked,
@@ -416,11 +417,32 @@ function applySettings(value: Parameters<typeof patch>[0]) {
       <span
         v-if="detail"
         class="apb-chip ml-1 shrink-0"
-        :class="dirty ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'"
+        :class="
+          detail.page.publishedRevision
+            ? detail.page.hasUnpublishedChanges
+              ? 'bg-amber-50 text-amber-700'
+              : 'bg-emerald-50 text-emerald-700'
+            : 'bg-gray-100 text-gray-500'
+        "
       >
-        <span class="h-1.5 w-1.5 rounded-full" :class="dirty ? 'bg-amber-500' : 'bg-emerald-500'" />
-        {{ busy ? '保存中…' : dirty ? '未保存' : '已保存' }}
+        {{
+          detail.page.publishedRevision
+            ? detail.page.hasUnpublishedChanges
+              ? '有未发布修改'
+              : '已发布'
+            : '未发布'
+        }}
       </span>
+      <button
+        v-if="publicUrl"
+        type="button"
+        class="apb-chip max-w-44 shrink-0 bg-blue-50 text-blue-700 hover:bg-blue-100"
+        :title="`打开公开页面：${publicUrl}`"
+        @click="openPublicPage"
+      >
+        <IconExternal class="shrink-0 text-xs" />
+        <span class="truncate">/{{ detail?.page.slug }}</span>
+      </button>
       <div
         v-if="detail && !loading"
         class="ml-auto flex max-w-full items-center gap-1 overflow-x-auto max-md:w-full"
@@ -576,20 +598,18 @@ function applySettings(value: Parameters<typeof patch>[0]) {
             <span
               class="apb-chip"
               :class="
-                detail.page.publishedRevision
-                  ? detail.page.hasUnpublishedChanges
+                saving
+                  ? 'bg-blue-50 text-blue-700'
+                  : dirty
                     ? 'bg-amber-50 text-amber-700'
-                    : 'bg-blue-50 text-blue-700'
-                  : 'bg-gray-100 text-gray-500'
+                    : 'bg-emerald-50 text-emerald-700'
               "
             >
-              {{
-                detail.page.publishedRevision
-                  ? detail.page.hasUnpublishedChanges
-                    ? '有未发布修改'
-                    : '已发布'
-                  : '草稿'
-              }}
+              <span
+                class="h-1.5 w-1.5 rounded-full"
+                :class="saving ? 'bg-blue-500' : dirty ? 'bg-amber-500' : 'bg-emerald-500'"
+              />
+              {{ saving ? '保存中…' : dirty ? '未保存' : '已保存' }}
             </span>
             <span
               v-if="working?.js"
@@ -609,16 +629,6 @@ function applySettings(value: Parameters<typeof patch>[0]) {
               title="运行预览只读取已保存的草稿，请先保存再查看最新修改"
               >运行的是已保存草稿</span
             >
-            <button
-              v-if="publicUrl"
-              type="button"
-              class="apb-chip max-w-44 bg-blue-50 text-blue-700 hover:bg-blue-100"
-              :title="`打开公开页面：${publicUrl}`"
-              @click="openPublicPage"
-            >
-              <IconExternal class="shrink-0 text-xs" />
-              <span class="truncate">/{{ detail.page.slug }}</span>
-            </button>
             <div class="ml-auto flex items-center gap-2">
               <button
                 v-if="view === 'runtime'"
