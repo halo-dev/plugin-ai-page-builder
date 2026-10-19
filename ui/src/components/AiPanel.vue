@@ -10,12 +10,13 @@ import IconError from '~icons/mingcute/warning-line'
 import IconClose from '~icons/mingcute/close-line'
 import IconSpinner from '~icons/mingcute/loading-line'
 import IconChevron from '~icons/mingcute/right-line'
-import type { PageDetail, PageChatQuestion } from '../api/generated'
+import type { PageDetail } from '../api/generated'
 import { pageAdjustmentPresets, promptPresetGroups } from '../data/promptPresets'
 import { usePageChat } from '../composables/usePageChat'
 import ChatComposer from './chat/ChatComposer.vue'
-import ChatMessageParts, { questionSlotCount } from './chat/ChatMessageParts.vue'
+import ChatMessageParts from './chat/ChatMessageParts.vue'
 import ChatQuestions from './chat/ChatQuestions.vue'
+import { buildConversationDisplay } from '../editor/chat-display'
 import type { AnnotationDraft, PreparedPage } from '../editor/annotations'
 import type { StreamingPreview } from '../composables/useStreamingPreview'
 
@@ -98,60 +99,14 @@ const {
   committed: (page) => emit('committed', page),
   completed: () => emit('completed'),
 })
-function turnResult(role: string, metadata: unknown) {
-  if (role !== 'assistant' || !metadata || typeof metadata !== 'object') return undefined
-  const { status, error, revision, recovery } = metadata as Record<string, unknown>
-  if (status === 'completed' && typeof revision === 'string' && revision) {
-    return { failed: false, text: '本轮草稿已保存', error: '' }
-  }
-  const label =
-    status === 'failed'
-      ? '运行失败'
-      : status === 'cancelled'
-        ? '已停止'
-        : status === 'incomplete'
-          ? '本轮未完成'
-          : status === 'interrupted'
-            ? '运行中断'
-            : ''
-  if (!label) return undefined
-  return {
-    failed: status === 'failed' || status === 'interrupted',
-    text: `${label} · ${recovery ? '进度已保留，草稿未更新' : '草稿未更新'}`,
-    error: recovery ? '' : typeof error === 'string' ? error : '',
-  }
-}
 const visibleMessages = computed(() =>
-  (messages.value || []).map((message) => {
-    const messageQuestions =
-      message.role === 'assistant' &&
-      activeRun.value &&
-      message === messages.value?.[messages.value.length - 1]
-        ? questions.value
-        : (message.metadata as { questions?: PageChatQuestion[] } | undefined)?.questions || []
-    // Questions pair with the message's ask_user calls in order and render where they
-    // were asked; anything unpaired (e.g. a turn cancelled while waiting, whose tool
-    // call never resolved) still renders after the message.
-    const slots = questionSlotCount(message.parts)
-    return {
-      id: message.id,
-      role: message.role,
-      result: turnResult(message.role, message.metadata),
-      message,
-      questions: messageQuestions,
-      fallbackQuestions: messageQuestions.slice(slots),
-      active:
-        running.value &&
-        !waitingForUser.value &&
-        !error.value &&
-        !turnResult(message.role, message.metadata) &&
-        message === messages.value?.[messages.value.length - 1],
-      annotations:
-        (
-          message.metadata as
-            { annotations?: { id: string; summary: string; comment: string }[] } | undefined
-        )?.annotations || [],
-    }
+  buildConversationDisplay({
+    messages: messages.value || [],
+    activeRunId: activeRun.value?.runId,
+    questions: questions.value,
+    running: running.value,
+    waitingForUser: waitingForUser.value,
+    error: error.value,
   }),
 )
 watch(preview, (value) => emit('preview', value), { immediate: true })
@@ -394,10 +349,7 @@ watch(blankPage, () => (activePresetGroup.value = 0))
         </div>
         <template v-else>
           <ChatMessageParts
-            :message="message.message"
-            :active="message.active"
-            :waiting="waitingForUser && message === visibleMessages[visibleMessages.length - 1]"
-            :questions="message.questions"
+            :parts="message.parts"
             :pending-question-id="waitingForUser ? pendingQuestion?.id : undefined"
             :submitting="answering"
             :answer-error="answerError"

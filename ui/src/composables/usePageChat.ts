@@ -1,18 +1,12 @@
 import { computed, onScopeDispose, shallowRef, watch, type DeepReadonly } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
-import {
-  DefaultChatTransport,
-  useChat,
-  type UIMessage,
-  type ToolPart,
-} from '@halo-dev/ai-foundation-sdk'
+import { DefaultChatTransport, useChat, type UIMessage } from '@halo-dev/ai-foundation-sdk'
 import {
   chatUrl,
   prepareChatRequest,
   aiPageBuilderAiApi,
   aiPageBuilderChatApi,
   type ChatRun,
-  type ChatTurn,
 } from '../api/clients'
 import { errorMessage } from '../utils/error'
 import type {
@@ -26,20 +20,10 @@ import type {
 
 import { authenticatedChatFetch } from '../api/stream'
 import type { PreparedPage } from '../editor/annotations'
+import { restoreConversation } from '../editor/chat-display'
 import { useStreamingPreview, type StreamingPreview } from './useStreamingPreview'
 
 const activeStatuses = ['running', 'committing', 'waiting_for_user']
-
-// A resumed run inherits the checkpoint's answered questions for task context
-// (PageChatService.reserve); they belong to the source turn and would otherwise
-// mispair with this turn's ask_user tool parts, which start empty on resume.
-function turnQuestions(turn: ChatTurn): PageChatQuestion[] {
-  const started = Date.parse(turn.createdAt)
-  return (turn.questions || []).filter((question) => {
-    const asked = Date.parse(question.createdAt)
-    return Number.isNaN(started) || Number.isNaN(asked) || asked >= started
-  })
-}
 
 // Update in place: questions pair with ask_user tool parts by array order, so a
 // late answer response must not move its question to the end of the list.
@@ -50,73 +34,6 @@ export function upsertQuestion(
   return list.some((item) => item.id === question.id)
     ? list.map((item) => (item.id === question.id ? question : item))
     : [...list, question]
-}
-
-export function conversationMessages(turns: ChatTurn[]): UIMessage[] {
-  return turns.flatMap((turn) => [
-    {
-      id: `${turn.runId}-user`,
-      role: 'user' as const,
-      parts: [{ type: 'text' as const, id: `${turn.runId}-prompt`, text: turn.prompt }],
-      metadata: { annotations: turn.annotations },
-    },
-    ...(turn.steers || []).map((text, index) => ({
-      id: `${turn.runId}-steer-${index}`,
-      role: 'user' as const,
-      parts: [{ type: 'text' as const, id: `${turn.runId}-steer-${index}-text`, text }],
-    })),
-    {
-      id: `${turn.runId}-assistant`,
-      role: 'assistant' as const,
-      parts: turn.parts?.length
-        ? turn.parts.flatMap((part): UIMessage['parts'] => {
-            if (part.type === 'text' || part.type === 'reasoning')
-              return [
-                {
-                  type: part.type,
-                  id: part.id,
-                  text: (part.text || '') + (part.truncated ? '\n（内容已截断）' : ''),
-                },
-              ]
-            if (part.type !== 'tool' || !part.toolName) return []
-            return [
-              {
-                type: `tool-${part.toolName}`,
-                toolName: part.toolName,
-                toolCallId: part.id,
-                state:
-                  part.status === 'error'
-                    ? 'output-error'
-                    : part.status === 'running'
-                      ? 'input-available'
-                      : 'output-available',
-                output: { summary: part.summary || '' },
-              },
-            ]
-          })
-        : [
-            ...turn.tools.map((tool, index): ToolPart => ({
-              type: `tool-${tool.name}`,
-              toolName: tool.name,
-              toolCallId: `${turn.runId}-${index}`,
-              state:
-                tool.status === 'failed' || tool.status === 'error'
-                  ? 'output-error'
-                  : 'output-available',
-              output: { summary: tool.summary },
-            })),
-            { type: 'text' as const, id: `${turn.runId}-text`, text: turn.text },
-          ],
-      metadata: {
-        runId: turn.runId,
-        revision: turn.revision,
-        status: turn.status,
-        error: turn.error,
-        questions: turnQuestions(turn),
-        recovery: turn.recovery,
-      },
-    },
-  ])
 }
 
 export function usePageChat(options: {
@@ -294,14 +211,14 @@ export function usePageChat(options: {
     lastSessionId.value = conversation.sessionId
     hasMore.value = conversation.hasMore
     nextBefore = conversation.nextBefore ?? undefined
-    chat.setMessages(conversationMessages(conversation.turns))
+    const restored = restoreConversation(conversation.turns)
+    chat.setMessages(restored.messages)
     recovered.value = true
     const active = conversation.activeRun
     if (refreshRun)
       activeRun.value = active && activeStatuses.includes(active.status) ? active : undefined
     const last = conversation.turns[conversation.turns.length - 1]
-    const activeTurn = conversation.turns.find((turn) => turn.runId === activeRun.value?.runId)
-    const activeTurnQuestions = activeTurn ? turnQuestions(activeTurn) : []
+    const activeTurnQuestions = restored.questionsByRunId.get(activeRun.value?.runId ?? '') || []
     if (refreshRun) questions.value = activeTurnQuestions
     else
       for (const question of activeTurnQuestions) {
@@ -403,7 +320,9 @@ export function usePageChat(options: {
       if (disposed) return
       const currentIds = new Set((chat.messages.value || []).map((message) => message.id))
       chat.setMessages([
-        ...conversationMessages(earlier.turns).filter((message) => !currentIds.has(message.id)),
+        ...restoreConversation(earlier.turns).messages.filter(
+          (message) => !currentIds.has(message.id),
+        ),
         ...(chat.messages.value || []),
       ] as UIMessage[])
       hasMore.value = earlier.hasMore

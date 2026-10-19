@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, shallowRef } from 'vue'
-import { conversationMessages, upsertQuestion, usePageChat } from '../usePageChat'
+import { upsertQuestion, usePageChat } from '../usePageChat'
 import type { UIMessage } from '@halo-dev/ai-foundation-sdk'
-import type { ChatTurn } from '../../api/clients'
 import type { PageDetail, PageChatQuestion } from '../../api/generated'
 const api = vi.hoisted(() => ({
   ai: {
@@ -752,78 +751,6 @@ describe('persistent page chat', () => {
     await state.send('Change target', true)
     expect(sdk.send).toHaveBeenCalledTimes(2)
     expect(state.error.value).toContain('重新选择')
-  })
-  it('restores ordered text, reasoning and tool display parts', () => {
-    const turns = [
-      {
-        runId: 'a',
-        actor: 'user',
-        createdAt: '2026-01-01T00:00:00Z',
-        prompt: 'Hi',
-        text: 'Legacy',
-        tools: [],
-        status: 'completed',
-        parts: [
-          { type: 'text', id: 'first', text: 'First' },
-          { type: 'reasoning', id: 'why', text: 'Actual reasoning' },
-          {
-            type: 'tool',
-            id: 'tool-a',
-            toolName: 'patch_current_page',
-            status: 'completed',
-            summary: 'Saved',
-          },
-          { type: 'text', id: 'last', text: 'Last' },
-        ],
-      },
-    ] as ChatTurn[]
-    const parts = conversationMessages(turns)[1]!.parts
-    expect(parts.map((part) => part.type)).toEqual([
-      'text',
-      'reasoning',
-      'tool-patch_current_page',
-      'text',
-    ])
-    expect(parts[1]).toMatchObject({ text: 'Actual reasoning' })
-    expect(parts[2]).not.toHaveProperty('input')
-  })
-  it('restores legacy text/tool summaries without tool arguments', () => {
-    const turns = [
-      {
-        runId: 'a',
-        prompt: 'Hello',
-        text: 'Done',
-        tools: [{ name: 'update_current_page', status: 'completed', summary: 'ok' }],
-        status: 'completed',
-      },
-    ] as ChatTurn[]
-    const messages = conversationMessages(turns)
-    expect(messages).toHaveLength(2)
-    expect(messages[1]?.parts[0]).not.toHaveProperty('input')
-    expect(messages[1]?.parts[0]).toHaveProperty('output', { summary: 'ok' })
-  })
-  it('renders mid-run steers as user messages between the prompt and the reply', () => {
-    const turns = [
-      {
-        runId: 'a',
-        actor: 'user',
-        createdAt: '2026-01-01T00:00:00Z',
-        prompt: 'Hello',
-        text: 'Done',
-        tools: [],
-        status: 'completed',
-        steers: ['标题再短一点', '换个配色'],
-      },
-    ] as ChatTurn[]
-    const messages = conversationMessages(turns)
-    expect(messages.map((message) => [message.id, message.role])).toEqual([
-      ['a-user', 'user'],
-      ['a-steer-0', 'user'],
-      ['a-steer-1', 'user'],
-      ['a-assistant', 'assistant'],
-    ])
-    expect(messages[1]?.parts[0]).toMatchObject({ text: '标题再短一点' })
-    expect(messages[2]?.parts[0]).toMatchObject({ text: '换个配色' })
   })
 })
 
