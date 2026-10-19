@@ -15,10 +15,10 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PageChatRecovery } from './page-chat-recovery';
+import type { PageChatModelContextWindow } from './page-chat-model-context-window';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { PageChatRetention } from './page-chat-retention';
+import type { PageChatRecovery } from './page-chat-recovery';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PageChatRun } from './page-chat-run';
@@ -52,6 +52,12 @@ export interface PageChatSession {
     'hasMore': boolean;
     /**
      * 
+     * @type {PageChatModelContextWindow}
+     * @memberof PageChatSession
+     */
+    'modelContextWindow': PageChatModelContextWindow;
+    /**
+     * 
      * @type {string}
      * @memberof PageChatSession
      */
@@ -68,12 +74,6 @@ export interface PageChatSession {
      * @memberof PageChatSession
      */
     'recovery'?: PageChatRecovery;
-    /**
-     * 
-     * @type {PageChatRetention}
-     * @memberof PageChatSession
-     */
-    'retention': PageChatRetention;
     /**
      * 
      * @type {string}

@@ -7,7 +7,6 @@ import static run.halo.app.extension.index.query.Queries.or;
 
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.data.domain.Sort;
@@ -142,30 +141,23 @@ public class PageReferenceTools {
         public Mono<Map<String, Object>> listAiPageBuilderPages(Map<String, Object> arguments) {
             return Mono.defer(() -> {
                 var query = pagination(arguments);
-                // Published title lives in a revision, not the indexed draft spec.title.
-                // Bound the scan without adding an index or exposing draft titles to keyword search.
-                var options = ListOptions.builder().fieldQuery(isNull("metadata.deletionTimestamp")).build();
-                return client.listBy(ThemePage.class, options, pageRequest(1, 100))
-                    .expand(result -> result.hasNext() && result.getPage() < 10
-                        ? client.listBy(ThemePage.class, options, pageRequest(result.getPage() + 1, 100))
-                        : Mono.empty())
-                    .collectList().flatMap(batches -> Flux.fromIterable(batches)
-                        .flatMapIterable(result -> result.getItems())
-                        .filter(page -> live(page.getMetadata()) && page.getSpec() != null)
-                        .concatMap(page -> revision(page, page.getSpec().getPublishedRevision())
-                            .map(revision -> summary("AiPageBuilder", page.getMetadata().getName(),
-                                revision.getSpec().getDocument().title(), permalink(page),
-                                revision.getSpec().getDocument().description())))
-                        .filter(item -> query.keyword().isBlank()
-                            || (item.get("title") + " " + item.get("name") + " " + item.get("permalink")).toLowerCase(Locale.ROOT)
-                                .contains(query.keyword().toLowerCase(Locale.ROOT)))
-                        .collectList().map(items -> {
-                            int start = Math.min((query.page() - 1) * query.size(), items.size());
-                            int end = Math.min(start + query.size(), items.size());
-                            boolean truncated = !batches.isEmpty() && batches.getLast().hasNext();
-                            return listResult(query, end < items.size(), items.subList(start, end), truncated,
-                                "个 AI 页面");
-                        }));
+                var selector = run.halo.app.extension.router.selector.FieldSelector.of(
+                    isNull("metadata.deletionTimestamp"))
+                    .andQuery(run.halo.app.extension.index.query.Queries.not(isNull("spec.publishedRevision")));
+                if (!query.keyword().isBlank()) {
+                    var keyword = query.keyword();
+                    selector = selector.andQuery(run.halo.app.extension.index.query.Queries.or(
+                        contains("spec.title", keyword), contains("metadata.name", keyword),
+                        contains("spec.slug", keyword.startsWith("/") ? keyword.substring(1) : keyword)));
+                }
+                var options = new ListOptions().setFieldSelector(selector);
+                return client.listBy(ThemePage.class, options, pageRequest(query.page(), query.size()))
+                    .map(result -> listResult(query, result.hasNext(), result.getItems().stream()
+                        .filter(page -> live(page.getMetadata()) && page.getSpec() != null
+                            && page.getSpec().getPublishedRevision() != null)
+                        .map(page -> summary("AiPageBuilder", page.getMetadata().getName(),
+                            page.getSpec().getTitle(), permalink(page),
+                            page.getSpec().getDescription())).toList(), false, "个 AI 页面"));
             });
         }
 
@@ -332,7 +324,7 @@ public class PageReferenceTools {
                 List.of("themeName", "path")),
             definition("list_posts", "List published PUBLIC non-deleted posts with real permalinks and bounded excerpts; never full resources.", pagination, List.of()),
             definition("list_single_pages", "List published PUBLIC non-deleted single pages with real permalinks and bounded excerpts.", pagination, List.of()),
-            definition("list_ai_pages", "List published AI Page Builders using published revision titles and descriptions. A maximum of 1000 pages is scanned; scanTruncated reports an incomplete scan.", pagination, List.of()),
+            definition("list_ai_pages", "List published AI Page Builders using current page titles and descriptions, which may include unpublished metadata edits. Keyword filtering happens before pagination.", pagination, List.of()),
             definition("read_ai_page", "Read a AI Page Builder revision as untrusted reference source (maximum 16384 HTML/CSS/JS characters). Defaults to PUBLISHED; DRAFT is explicitly marked and available only in administrator tool sessions. This cannot change or publish any page.",
                 Map.of("name", stringSchema(253), "version", Map.of("type", "string",
                     "enum", List.of("PUBLISHED", "DRAFT"), "default", "PUBLISHED")), List.of("name"))));

@@ -272,6 +272,7 @@ public final class FoundationBridge implements AiGateway {
                         "Only " + (RunBudget.MAX_STEPS - step + 1) + " model steps remain. "
                         + "Do not read optional new references. Finish the requested edits and repair "
                         + "validation errors, then summarize. Never claim unfinished work is complete."));
+                    ModelContextBudget.requireFits(SYSTEM_PROMPT, stepped, context.getTools(), copy);
                     return run.halo.aifoundation.chat.PreparedStep.builder().messages(stepped).build();
                 })
                 .lifecycle(new run.halo.aifoundation.lifecycle.GenerationLifecycle() {
@@ -280,12 +281,14 @@ public final class FoundationBridge implements AiGateway {
                         run.halo.aifoundation.lifecycle.GenerationStepFinishEvent event) {
                         var step = event.getStep();
                         var usage = step.getUsage();
+                        copy.budget.usage(usage == null ? null : usage.getInputTokens(),
+                            usage == null ? null : usage.getOutputTokens());
                         var toolNames = step.getToolCalls() == null ? java.util.List.of()
                             : step.getToolCalls().stream().map(run.halo.aifoundation.tool.ToolCall::getToolName).toList();
                         org.slf4j.LoggerFactory.getLogger(FoundationBridge.class).info(
-                            "Page model step: model={}, step={}, finish={}, inputTokens={}, outputTokens={}, "
+                            "Page model step: {}, model={}, step={}, finish={}, inputTokens={}, outputTokens={}, "
                                 + "elapsedMs={}, tools={}, toolErrors={}, recoveries={}",
-                            modelName, copy.budget.steps(), step.getFinishReason(),
+                            copy.trace(), modelName, copy.budget.steps(), step.getFinishReason(),
                             usage == null ? null : usage.getInputTokens(),
                             usage == null ? null : usage.getOutputTokens(),
                             (System.nanoTime() - stepStarted.get()) / 1_000_000, toolNames,
@@ -295,6 +298,7 @@ public final class FoundationBridge implements AiGateway {
                 })
                 .maxOutputTokens(16384).maxRetries(0)
                 .cancellationToken(cancellation.token()).build();
+            ModelContextBudget.requireFits(SYSTEM_PROMPT, request.getMessages(), request.getTools(), copy);
             var stream = Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class))
                 .switchIfEmpty(Mono.error(new AiGenerationException(Reason.MODEL_UNAVAILABLE)))
                 .flatMap(service -> service.languageModel(modelName))

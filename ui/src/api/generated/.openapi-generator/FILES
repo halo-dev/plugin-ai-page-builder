@@ -27,12 +27,12 @@ models/page-chat-answer-item.ts
 models/page-chat-answer-request.ts
 models/page-chat-checkpoint-detail.ts
 models/page-chat-display-part.ts
+models/page-chat-model-context-window.ts
 models/page-chat-question-item.ts
 models/page-chat-question-option.ts
 models/page-chat-question.ts
 models/page-chat-recovery.ts
 models/page-chat-request.ts
-models/page-chat-retention.ts
 models/page-chat-run.ts
 models/page-chat-session-list.ts
 models/page-chat-session-summary.ts
@@ -40,6 +40,7 @@ models/page-chat-session.ts
 models/page-chat-steer-request.ts
 models/page-chat-tool.ts
 models/page-chat-turn.ts
+models/page-chat-usage.ts
 models/page-detail.ts
 models/page-document.ts
 models/page-list.ts

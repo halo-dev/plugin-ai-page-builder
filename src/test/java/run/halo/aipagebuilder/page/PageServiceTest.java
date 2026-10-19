@@ -65,6 +65,17 @@ class PageServiceTest {
             .thenReturn(Flux.empty());
         when(client.listAll(eq(run.halo.aipagebuilder.model.PageChatTurnRecord.class), any(ListOptions.class), any()))
             .thenReturn(Flux.empty());
+        when(client.listBy(eq(ThemePageRevision.class), any(), any())).thenAnswer(invocation -> {
+            ListOptions options = invocation.getArgument(1);
+            var matching = revisions.values().stream().filter(revision ->
+                run.halo.aipagebuilder.QueryTestSupport.matches(options, field -> switch (field) {
+                    case "spec.pageName" -> revision.getSpec().getPageName();
+                    case "spec.runId" -> revision.getSpec().getRunId();
+                    default -> null;
+                })).map(Json::deepCopy).toList();
+            return Mono.just(new run.halo.app.extension.ListResult<>(1, 1, matching.size(),
+                matching.stream().limit(1).toList()));
+        });
         when(client.fetch(eq(ThemePage.class), anyString())).thenAnswer(invocation ->
             Mono.defer(() -> Mono.justOrEmpty(pages.get(invocation.<String>getArgument(1)))
                 .map(Json::deepCopy)));
@@ -100,7 +111,9 @@ class PageServiceTest {
         }));
         when(client.delete(any(ThemePage.class))).thenAnswer(invocation -> Mono.fromSupplier(() -> {
             ThemePage page = invocation.getArgument(0);
-            pages.remove(page.getMetadata().getName());
+            page.getMetadata().setDeletionTimestamp(Instant.now());
+            page.getMetadata().setVersion(page.getMetadata().getVersion() + 1);
+            pages.put(page.getMetadata().getName(), Json.deepCopy(page));
             return page;
         }));
         when(client.delete(any(ThemePageRevision.class))).thenAnswer(invocation ->
@@ -111,7 +124,96 @@ class PageServiceTest {
             }));
         when(client.listAll(eq(ThemePageRevision.class), any(ListOptions.class), any()))
             .thenAnswer(invocation -> Flux.defer(() -> Flux.fromIterable(
-                revisions.values().stream().map(Json::deepCopy).toList())));
+                revisions.values().stream().filter(revision ->
+                    run.halo.aipagebuilder.QueryTestSupport.matches(invocation.getArgument(1), field ->
+                        "spec.pageName".equals(field) ? revision.getSpec().getPageName() : null))
+                    .map(Json::deepCopy).toList())));
+    }
+
+    @Test
+    void runReservationExcludesDeletionUntilTheReservationFinishes() {
+        var created = service.create(new CreatePageRequest("about", "Initial"), "admin").block();
+        var name = created.page().name();
+        var reservation = Sinks.<Void>empty();
+        var execution = service.reserveRun(name, created.page().version(), reservation::asMono).subscribe();
+        assertThatThrownBy(() -> service.delete(name, created.page().version()).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(pages.get(name).getMetadata().getDeletionTimestamp()).isNull();
+        reservation.tryEmitEmpty();
+        service.delete(name, created.page().version()).block();
+        assertThat(pages.get(name).getMetadata().getDeletionTimestamp()).isNotNull();
+        var createdChild = new java.util.concurrent.atomic.AtomicBoolean();
+        assertThatThrownBy(() -> service.withLivePage(name,
+            () -> Mono.fromRunnable(() -> createdChild.set(true))).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+        assertThat(createdChild).isFalse();
+        execution.dispose();
+    }
+
+    @Test
+    void reconcilerAddsFinalizerToExistingPages() {
+        var created = service.create(new CreatePageRequest("legacy", "Legacy"), "admin").block();
+        var stored = pages.get(created.page().name());
+        stored.getMetadata().setFinalizers(null);
+        new PageReconciler(client).reconcilePage(created.page().name()).block();
+        assertThat(pages.get(created.page().name()).getMetadata().getFinalizers())
+            .contains(PageReconciler.FINALIZER);
+    }
+
+    @Test
+    void uncertainCreateKeepsReferencedRevisionAndReturnsTheCommittedPage() {
+        when(client.create(any(ThemePage.class))).thenAnswer(i -> Mono.defer(() -> {
+            ThemePage value = i.getArgument(0);
+            value.getMetadata().setVersion(1L);
+            pages.put(value.getMetadata().getName(), Json.deepCopy(value));
+            return Mono.error(new java.util.concurrent.TimeoutException("response lost"));
+        }));
+        var created = service.create(new CreatePageRequest("about", "Created"), "admin").block();
+        assertThat(revisions).containsKey(created.page().draftRevision());
+        assertThat(service.get(created.page().name()).block().document().title()).isEqualTo("Created");
+    }
+
+    @Test
+    void deletionFailureKeepsFinalizerAndReconcilerRetriesWithoutDeletingOtherPages() {
+        var page = service.create(new CreatePageRequest("delete", "Delete"), "admin").block();
+        var other = service.create(new CreatePageRequest("keep", "Keep"), "admin").block();
+        when(client.delete(any(ThemePageRevision.class))).thenReturn(Mono.error(new IllegalStateException("failed")));
+        assertThatThrownBy(() -> service.delete(page.page().name(), page.page().version()).block())
+            .isInstanceOf(IllegalStateException.class);
+        var deleting = pages.get(page.page().name());
+        assertThat(deleting.getMetadata().getDeletionTimestamp()).isNotNull();
+        assertThat(deleting.getMetadata().getFinalizers()).contains(PageReconciler.FINALIZER);
+        when(client.delete(any(ThemePageRevision.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            ThemePageRevision value = i.getArgument(0);
+            revisions.remove(value.getMetadata().getName());
+            return value;
+        }));
+        new PageReconciler(client).reconcilePage(page.page().name()).block();
+        assertThat(pages.get(page.page().name()).getMetadata().getFinalizers()).isEmpty();
+        assertThat(revisions).containsOnlyKeys(other.page().draftRevision());
+    }
+
+    @Test
+    void currentMetadataTracksDraftEditsWithoutChangingPublishedRevision() {
+        var created = service.create(new CreatePageRequest("about", "Public title"), "admin").block();
+        var published = service.publish(created.page().name(), created.page().version()).block();
+        service.save(created.page().name(), new SavePageRequest(published.page().version(),
+            document("Draft secret"), "manual"), "admin").block();
+        var page = pages.get(created.page().name());
+        assertThat(page.getSpec().getTitle()).isEqualTo("Draft secret");
+        assertThat(page.getSpec().getPublishedRevision()).isEqualTo(published.page().publishedRevision());
+        assertThat(revisions.get(page.getSpec().getPublishedRevision()).getSpec().getDocument().title())
+            .isEqualTo("Public title");
+    }
+
+    @Test
+    void newRunIdDoesNotReadEveryHistoricalRevision() {
+        var created = service.create(new CreatePageRequest("about", "Initial"), "admin").block();
+        org.mockito.Mockito.clearInvocations(client);
+        assertThat(service.committedAiRevision(created.page().name(), "new-run").block()).isNull();
+        org.mockito.Mockito.verify(client, org.mockito.Mockito.never()).fetch(eq(ThemePageRevision.class), anyString());
     }
 
     @Test
@@ -147,11 +249,21 @@ class PageServiceTest {
     }
 
     @Test
-    void failedImportedPageCreationCleansUpInitialRevision() throws Exception {
+    void uncertainImportedPageCreationRetainsRevisionForReconciliation() throws Exception {
         when(client.create(any(ThemePage.class))).thenReturn(Mono.error(new IllegalStateException("failed")));
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
         assertThatThrownBy(() -> service.importPage(bytes, "recipient").block())
             .isInstanceOf(IllegalStateException.class);
+        assertThat(pages).isEmpty();
+        assertThat(revisions).hasSize(1);
+    }
+
+    @Test
+    void rejectedImportedPageCreationCleansUpInitialRevision() throws Exception {
+        when(client.create(any(ThemePage.class))).thenReturn(Mono.error(new OptimisticLockingFailureException("rejected")));
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        assertThatThrownBy(() -> service.importPage(bytes, "recipient").block())
+            .isInstanceOf(ResponseStatusException.class);
         assertThat(pages).isEmpty();
         assertThat(revisions).isEmpty();
     }

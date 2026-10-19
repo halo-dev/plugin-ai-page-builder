@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
@@ -50,6 +51,11 @@ class PageChatServiceTest {
 
     @BeforeEach
     void setup() {
+        when(pages.withLivePage(anyString(), any())).thenAnswer(i ->
+            i.<java.util.function.Supplier<Mono<Object>>>getArgument(1).get());
+        when(pages.reserveRun(anyString(), any(), any())).thenAnswer(i ->
+            i.<java.util.function.Supplier<Mono<Void>>>getArgument(2).get());
+
         var type = run.halo.aipagebuilder.model.PageChatCheckpoint.class;
         when(client.fetch(eq(type), anyString())).thenAnswer(i -> Mono.defer(() ->
             Mono.justOrEmpty(checkpoints.get(i.<String>getArgument(1))).map(Json::deepCopy)));
@@ -142,6 +148,339 @@ class PageChatServiceTest {
         when(gateway.available()).thenReturn(Mono.just(true));
         when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any()))
             .thenReturn(Mono.just(fixture.changed));
+    }
+
+    private void useRealPageLock() {
+        var page = new run.halo.aipagebuilder.model.ThemePage();
+        var metadata = new run.halo.app.extension.Metadata();
+        metadata.setName("page");
+        metadata.setVersion(1L);
+        page.setMetadata(metadata);
+        page.setSpec(new run.halo.aipagebuilder.model.ThemePage.Spec());
+        when(client.fetch(run.halo.aipagebuilder.model.ThemePage.class, "page"))
+            .thenReturn(Mono.just(page));
+        // Exercise the production page lock rather than the usual pass-through fixture.
+        var coordinatedPages = new PageService(client, policy);
+        doAnswer(i -> coordinatedPages.withLivePage(i.getArgument(0), i.getArgument(1)))
+            .when(pages).withLivePage(anyString(), any());
+        doAnswer(i -> coordinatedPages.reserveRun(i.getArgument(0), i.getArgument(1), i.getArgument(2)))
+            .when(pages).reserveRun(anyString(), any(), any());
+    }
+
+    @Test
+    void concurrentFirstReadsShareOneDefaultSessionInitialization() {
+        var created = Sinks.<PageChatSession>one();
+        var candidate = new AtomicReference<PageChatSession>();
+        when(client.create(any(PageChatSession.class))).thenAnswer(invocation -> {
+            candidate.set(invocation.getArgument(0));
+            return created.asMono();
+        });
+        var first = service.session("page").toFuture();
+        var second = service.session("page").toFuture();
+        verify(client, times(1)).create(any(PageChatSession.class));
+        candidate.get().getMetadata().setVersion(1L);
+        stored.put("page", Json.deepCopy(candidate.get()));
+        created.tryEmitValue(candidate.get());
+        assertThat(first.join().sessionId()).isEqualTo("page");
+        assertThat(second.join().sessionId()).isEqualTo("page");
+    }
+
+    @Test
+    void readingInitializedSessionDoesNotCompeteWithPageWrites() {
+        service.session("page").block();
+        doReturn(Mono.error(new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
+            "page write in progress"))).when(pages).withLivePage(anyString(), any());
+        assertThat(service.session("page").block().sessionId()).isEqualTo("page");
+        assertThat(service.sessions("page").block().items()).hasSize(1);
+    }
+
+    @Test
+    void completedNoOpSurvivesArchiveFailureWithoutBecomingAnUncertainCommit() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.empty());
+        when(client.create(any(PageChatTurnRecord.class)))
+            .thenReturn(Mono.error(new IllegalStateException("archive unavailable")));
+        service.start("page", request(), "admin").block().collectList().block();
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("completed");
+        when(client.create(any(PageChatTurnRecord.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            PageChatTurnRecord record = i.getArgument(0);
+            record.getMetadata().setVersion(1L);
+            turns.put(record.getMetadata().getName(), Json.deepCopy(record));
+            return record;
+        }));
+        assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
+        assertThat(stored.get("page").getSpec().getActive()).isNull();
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void terminalRecoveryExcludesNewRunUntilOldCheckpointCleanupFinishes() {
+        useRealPageLock();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.empty());
+        when(client.create(any(PageChatTurnRecord.class)))
+            .thenReturn(Mono.error(new IllegalStateException("archive unavailable")));
+        service.start("page", request(), "admin").block().blockLast();
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("completed");
+        when(client.create(any(PageChatTurnRecord.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            PageChatTurnRecord record = i.getArgument(0);
+            record.getMetadata().setVersion(1L);
+            turns.put(record.getMetadata().getName(), Json.deepCopy(record));
+            return record;
+        }));
+        var delayed = Sinks.<Void>empty();
+        var first = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var type = run.halo.aipagebuilder.model.PageChatCheckpoint.class;
+        when(client.fetch(eq(type), anyString())).thenAnswer(i -> {
+            String key = i.getArgument(1);
+            var fetch = Mono.defer(() -> Mono.justOrEmpty(checkpoints.get(key)).map(Json::deepCopy));
+            return Mono.defer(() -> first.compareAndSet(true, false)
+                ? delayed.asMono().then(fetch) : fetch);
+        });
+        var recovery = service.result("page", runId).toFuture();
+        assertThat(recovery).isNotDone();
+        var next = new ChatApi.Request(UUID.randomUUID().toString(), 1L, "model", "new task");
+        assertThatThrownBy(() -> service.start("page", next, "admin").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode().value()).isEqualTo(409));
+        delayed.tryEmitEmpty();
+        assertThat(recovery.join().status()).isEqualTo("completed");
+        waitingGateway(Flux.empty());
+        service.start("page", next, "admin").block();
+        assertThat(service.result("page", next.runId()).block().status()).isEqualTo("waiting_for_user");
+        assertThat(checkpoints.values()).singleElement().satisfies(checkpoint ->
+            assertThat(checkpoint.getSpec().getRequest().runId()).isEqualTo(next.runId()));
+        service.stop();
+    }
+
+    @Test
+    void pluginStopInterruptsAndPreservesCheckpointInsteadOfCancelling() {
+        var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(
+            Flux.<Map<String, Object>>never().doOnCancel(() -> cancelled.set(true)));
+        service.start("page", request(), "admin").block();
+        service.stop();
+        assertThat(cancelled).isTrue();
+        assertThat(service.result("page", runId).block().status()).isEqualTo("interrupted");
+        assertThat(service.checkpoint("page", "page", "admin").block().recovery().canResume()).isTrue();
+        assertThat(stored.get("page").getSpec().getActive()).isNull();
+        assertThatThrownBy(() -> service.start("page",
+            new ChatApi.Request(UUID.randomUUID().toString(), 1L, "model", "new"), "admin").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode().value()).isEqualTo(503));
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(30)
+    void forcedStopRejectsRequestStillPreparingHistory() {
+        var readingHistory = new java.util.concurrent.atomic.AtomicBoolean();
+        var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        when(client.listBy(eq(PageChatTurnRecord.class), any(), any())).thenAnswer(i -> {
+            PageRequest request = i.getArgument(2);
+            return request.getPageSize() == PageChatService.MAX_TURNS
+                ? Mono.never().doOnSubscribe(ignored -> readingHistory.set(true))
+                    .doOnCancel(() -> cancelled.set(true))
+                : Mono.just(new ListResult<>(1, 1, 0, List.of()));
+        });
+        var accepted = service.start("page", request(), "admin").toFuture();
+        assertThat(readingHistory).isTrue();
+        assertThat(accepted).isNotDone();
+
+        service.stop();
+
+        assertThat(cancelled).isTrue();
+        assertThat(accepted).isCompletedExceptionally();
+        assertThatThrownBy(accepted::join).hasCauseInstanceOf(ResponseStatusException.class)
+            .satisfies(error -> assertThat(((ResponseStatusException) error.getCause())
+                .getStatusCode().value()).isEqualTo(503));
+        assertThat(stored.get("page").getSpec().getActive()).isNull();
+        verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void forcedStopClosesAcceptedStreamWhenInterruptCannotBePersisted() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        var events = service.start("page", request(), "admin").block().collectList().toFuture();
+        when(client.update(any(PageChatSession.class)))
+            .thenReturn(Mono.error(new IllegalStateException("storage temporarily unavailable")));
+
+        service.stop();
+
+        assertThat(events).isDone();
+        assertThat(events.join()).singleElement().satisfies(event ->
+            assertThat(event).containsEntry("type", "error")
+                .containsEntry("errorText", "运行结果待确认，请查询运行状态"));
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("running");
+        assertThat(checkpoints).hasSize(1);
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void forcedStopQueuesCompletionBehindInFlightEventDelivery() throws Exception {
+        var chunks = Sinks.many().unicast().<Map<String, Object>>onBackpressureBuffer();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(chunks.asFlux());
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var deliver = new java.util.concurrent.CountDownLatch(1);
+        var events = service.start("page", request(), "admin").block().doOnNext(event -> {
+            if ("text-delta".equals(event.get("type"))) {
+                entered.countDown();
+                try {
+                    if (!deliver.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        throw new AssertionError("event delivery timed out");
+                    }
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(error);
+                }
+            }
+        }).collectList().toFuture();
+        var emitting = java.util.concurrent.CompletableFuture.runAsync(() ->
+            chunks.tryEmitNext(Map.of("type", "text-delta", "id", "text", "delta", "hello")));
+        try {
+            assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            when(client.update(any(PageChatSession.class)))
+                .thenReturn(Mono.error(new IllegalStateException("storage temporarily unavailable")));
+            service.stop();
+            assertThat(events).isNotDone();
+        } finally {
+            deliver.countDown();
+        }
+        emitting.get(2, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(events.get(2, java.util.concurrent.TimeUnit.SECONDS))
+            .extracting(event -> event.get("type")).containsExactly("text-delta", "error");
+        assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("running");
+        assertThat(checkpoints).hasSize(1);
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void forcedReleaseDoesNotReplaceInFlightSuccessfulCompletion() throws Exception {
+        var chunks = Sinks.many().unicast().<Map<String, Object>>onBackpressureBuffer();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
+            ((PageWorkingCopy) i.getArgument(3)).update(Map.of("html", "<p>new</p>", "css", ""));
+            return chunks.asFlux();
+        }));
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var deliver = new java.util.concurrent.CountDownLatch(1);
+        var events = service.start("page", request(), "admin").block().doOnNext(event -> {
+            if ("data-page-committed".equals(event.get("type"))) {
+                entered.countDown();
+                try {
+                    if (!deliver.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        throw new AssertionError("event delivery timed out");
+                    }
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(error);
+                }
+            }
+        }).collectList().toFuture();
+        var coordinator = (PageRunCoordinator) org.springframework.test.util.ReflectionTestUtils
+            .getField(service, "runs");
+        var run = coordinator.get("page");
+        var completing = java.util.concurrent.CompletableFuture.runAsync(chunks::tryEmitComplete);
+        try {
+            assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            // Exercise the shutdown deadline's release path without waiting another 20 seconds.
+            run.execution.dispose();
+            coordinator.release("page", run);
+            coordinator.release("page", run);
+        } finally {
+            deliver.countDown();
+        }
+        completing.get(2, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(events.get(2, java.util.concurrent.TimeUnit.SECONDS))
+            .extracting(event -> event.get("type")).containsExactly("data-page-committed", "finish");
+        assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
+    }
+
+    @Test
+    void unansweredQuestionExpiresWithoutDiscardingWork() {
+        var clock = reactor.test.scheduler.VirtualTimeScheduler.getOrSet();
+        try {
+            waitingGateway(Flux.empty());
+            service.start("page", request(), "admin").block();
+            clock.advanceTimeBy(PageRunCoordinator.WAIT_TIMEOUT.minusSeconds(1));
+            assertThat(service.result("page", runId).block().status()).isEqualTo("waiting_for_user");
+            clock.advanceTimeBy(java.time.Duration.ofSeconds(1));
+            assertThat(service.result("page", runId).block().status()).isEqualTo("interrupted");
+            assertThat(service.checkpoint("page", "page", "admin").block().recovery().canResume()).isTrue();
+            assertThat(stored.get("page").getSpec().getActive()).isNull();
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        } finally { reactor.test.scheduler.VirtualTimeScheduler.reset(); }
+    }
+
+    @Test
+    void pluginWideAdmissionIsBoundedAndReleasesCompletedRuns() {
+        when(pages.get(anyString())).thenReturn(Mono.just(fixture.base));
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        for (int i = 0; i < PageRunCoordinator.MAX_ACTIVE_RUNS; i++) {
+            service.start("page-" + i, request(), "admin").block();
+        }
+        assertThatThrownBy(() -> service.start("excess", request(), "admin").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode().value()).isEqualTo(429));
+        service.cancel("page-0", runId).block();
+        service.start("excess", request(), "admin").block();
+        verify(gateway, times(PageRunCoordinator.MAX_ACTIVE_RUNS + 1))
+            .chat(anyString(), any(), anyString(), any());
+        service.stop();
+    }
+
+    @Test
+    void resumedSessionCleanupFinishesAfterAChildDeletionFails() {
+        stagedSuccess();
+        service.start("page", request(), "admin").block().blockLast();
+        var version = service.session("page").block().version();
+        when(client.delete(any(PageChatTurnRecord.class)))
+            .thenReturn(Mono.error(new IllegalStateException("storage unavailable")));
+        assertThatThrownBy(() -> service.deleteSession("page", "page", version).block())
+            .isInstanceOf(IllegalStateException.class);
+        assertThat(stored.get("page").getSpec().getDeletingSessionId()).isEqualTo("page");
+        when(client.delete(any(PageChatTurnRecord.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
+            PageChatTurnRecord record = i.getArgument(0);
+            turns.remove(record.getMetadata().getName());
+            return record;
+        }));
+        assertThat(service.session("page").block().turns()).isEmpty();
+        assertThat(stored.get("page").getSpec().getDeletingSessionId()).isNull();
+    }
+
+    @Test
+    void sessionDeletionExcludesReadRecoveryAndNewRunsUntilCleanupFinishes() {
+        useRealPageLock();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.empty());
+        service.start("page", request(), "admin").block().blockLast();
+        var version = service.session("page").block().version();
+        var delayed = Sinks.<PageChatTurnRecord>one();
+        var oldRecord = new AtomicReference<PageChatTurnRecord>();
+        when(client.delete(any(PageChatTurnRecord.class))).thenAnswer(i -> {
+            oldRecord.set(i.getArgument(0));
+            return delayed.asMono().doOnNext(record -> turns.remove(record.getMetadata().getName()));
+        });
+
+        var deletion = service.deleteSession("page", "page", version).toFuture();
+        assertThat(deletion).isNotDone();
+        var next = new ChatApi.Request(UUID.randomUUID().toString(), 1L, "model", "new task");
+        assertThatThrownBy(() -> service.session("page").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode().value()).isEqualTo(409));
+        assertThatThrownBy(() -> service.start("page", next, "admin").block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode().value()).isEqualTo(409));
+        verify(client, times(1)).delete(any(PageChatTurnRecord.class));
+        assertThat(stored.get("page").getSpec().getDeletingSessionId()).isEqualTo("page");
+
+        delayed.tryEmitValue(oldRecord.get());
+        deletion.join();
+        assertThat(service.session("page").block().turns()).isEmpty();
+        waitingGateway(Flux.empty());
+        service.start("page", next, "admin").block();
+        assertThat(service.result("page", next.runId()).block().status()).isEqualTo("waiting_for_user");
+        assertThat(checkpoints.values()).singleElement().satisfies(checkpoint -> {
+            assertThat(checkpoint.getSpec().getRequest().runId()).isEqualTo(next.runId());
+            assertThat(checkpoint.getSpec().getDocument().html()).isEqualTo("<p>new</p>");
+        });
+        service.stop();
     }
 
     @Test

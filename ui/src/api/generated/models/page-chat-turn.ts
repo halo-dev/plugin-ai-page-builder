@@ -28,6 +28,9 @@ import type { PageChatRecovery } from './page-chat-recovery';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PageChatTool } from './page-chat-tool';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PageChatUsage } from './page-chat-usage';
 
 /**
  * 
@@ -119,5 +122,11 @@ export interface PageChatTurn {
      * @memberof PageChatTurn
      */
     'tools': Array<PageChatTool>;
+    /**
+     * 
+     * @type {PageChatUsage}
+     * @memberof PageChatTurn
+     */
+    'usage'?: PageChatUsage;
 }
 

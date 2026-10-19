@@ -42,7 +42,20 @@ public final class ChatApi {
     public record Turn(String runId, String actor, Instant createdAt, String prompt, String text,
                        List<Tool> tools, String status, String revision, String error,
                        List<DisplayPart> parts, List<Annotation> annotations,
-                       List<Question> questions, List<String> steers, Recovery recovery) {
+                       List<Question> questions, List<String> steers, Recovery recovery,
+                       @Schema(description = "Reported model usage and bounded resource counters for this run") Usage usage) {
+        public Turn(String runId, String actor, Instant createdAt, String prompt, String text,
+            List<Tool> tools, String status, String revision, String error, List<DisplayPart> parts,
+            List<Annotation> annotations, List<Question> questions, List<String> steers, Recovery recovery) {
+            this(runId, actor, createdAt, prompt, text, tools, status, revision, error,
+                parts, annotations, questions, steers, recovery, null);
+        }
+
+        public Turn withUsage(Usage value) {
+            return new Turn(runId, actor, createdAt, prompt, text, tools, status, revision, error,
+                parts, annotations, questions, steers, recovery, value);
+        }
+
         public Turn(String runId, String actor, Instant createdAt, String prompt, String text,
             List<Tool> tools, String status, String revision, String error, List<DisplayPart> parts,
             List<Annotation> annotations, List<Question> questions, List<String> steers) {
@@ -52,7 +65,7 @@ public final class ChatApi {
 
         public Turn withRecovery(Recovery value) {
             return new Turn(runId, actor, createdAt, prompt, text, tools, status, revision, error,
-                parts, annotations, questions, steers, value);
+                parts, annotations, questions, steers, value, usage);
         }
         public Turn {
             steers = steers == null ? List.of() : List.copyOf(steers);
@@ -79,6 +92,11 @@ public final class ChatApi {
                 List.of(), List.of());
         }
     }
+
+    @Schema(name = "PageChatUsage", description = "Reported provider usage; null token totals mean unknown. Context size is UTF-8 bytes, not a tokenizer estimate.")
+    public record Usage(String model, String promptVersion, int steps, int reportedSteps,
+                         int missingUsageSteps, Long inputTokens, Long outputTokens,
+                         long elapsedMillis, long toolBytes, long previewBytes, int maxContextBytes) { }
 
     @Schema(name = "PageChatSteerRequest", requiredProperties = {"text"})
     public record SteerRequest(String text) { }
@@ -124,28 +142,29 @@ public final class ChatApi {
     public record Question(String id, List<QuestionItem> questions, List<AnswerItem> answers,
                            Instant createdAt, Instant answeredAt) { }
 
-    @Schema(name = "PageChatRetention", requiredProperties = {"maxTurns", "maxBytes"})
-    public record Retention(int maxTurns, int maxBytes) { }
+    @Schema(name = "PageChatModelContextWindow", description = "History selected for the model; archived conversations are not deleted by these limits.", requiredProperties = {"maxTurns", "maxBytes"})
+    public record ModelContextWindow(int maxTurns, int maxBytes) { }
 
-    @Schema(name = "PageChatSession", requiredProperties = {"pageName", "version", "turns", "retention", "sessionId", "title", "hasMore"})
+    @Schema(name = "PageChatSession", requiredProperties = {"pageName", "version", "turns", "modelContextWindow", "sessionId", "title", "hasMore"})
     public record Session(String pageName, Long version, List<Turn> turns, Run activeRun,
-                          Retention retention, String sessionId, String title, Instant createdAt,
+                          @Schema(description = "Model history window; does not delete archived turns")
+                          ModelContextWindow modelContextWindow, String sessionId, String title, Instant createdAt,
                           Instant updatedAt, boolean hasMore, String nextBefore, Recovery recovery) {
         public Session(String pageName, Long version, List<Turn> turns, Run activeRun,
-            Retention retention, String sessionId, String title, Instant createdAt,
+            ModelContextWindow modelContextWindow, String sessionId, String title, Instant createdAt,
             Instant updatedAt, boolean hasMore, String nextBefore) {
-            this(pageName, version, turns, activeRun, retention, sessionId, title,
+            this(pageName, version, turns, activeRun, modelContextWindow, sessionId, title,
                 createdAt, updatedAt, hasMore, nextBefore, null);
         }
 
         public Session withRecovery(Recovery value) {
             return new Session(pageName, version, turns.stream().map(turn -> turn.withRecovery(
                 value != null && turn.runId().equals(value.sourceRunId()) ? value : null)).toList(),
-                activeRun, retention, sessionId, title, createdAt, updatedAt, hasMore, nextBefore, value);
+                activeRun, modelContextWindow, sessionId, title, createdAt, updatedAt, hasMore, nextBefore, value);
         }
         public Session(String pageName, Long version, List<Turn> turns, Run activeRun,
-            Retention retention) {
-            this(pageName, version, turns, activeRun, retention, pageName, "默认会话",
+            ModelContextWindow modelContextWindow) {
+            this(pageName, version, turns, activeRun, modelContextWindow, pageName, "默认会话",
                 null, null, false, null);
         }
     }

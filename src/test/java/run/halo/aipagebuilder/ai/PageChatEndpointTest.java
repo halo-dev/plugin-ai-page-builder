@@ -81,7 +81,7 @@ class PageChatEndpointTest {
         when(service.renameSession(eq("page"), eq("session"), any())).thenReturn(Mono.just(summary));
         when(service.deleteSession("page", "session", 2L)).thenReturn(Mono.empty());
         when(service.session("page", "session", "cursor", 5)).thenReturn(Mono.just(
-            new ChatApi.Session("page", 2L, List.of(), null, new ChatApi.Retention(20, 262144),
+            new ChatApi.Session("page", 2L, List.of(), null, new ChatApi.ModelContextWindow(20, 262144),
                 "session", "讨论", summary.createdAt(), summary.updatedAt(), false, null)));
         admin().get().uri("/pages/page/sessions").exchange().expectStatus().isOk()
             .expectBody().jsonPath("$.items[0].sessionId").isEqualTo("session");

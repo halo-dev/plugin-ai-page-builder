@@ -15,21 +15,21 @@
 
 
 /**
- * 
+ * History selected for the model; archived conversations are not deleted by these limits.
  * @export
- * @interface PageChatRetention
+ * @interface PageChatModelContextWindow
  */
-export interface PageChatRetention {
+export interface PageChatModelContextWindow {
     /**
      * 
      * @type {number}
-     * @memberof PageChatRetention
+     * @memberof PageChatModelContextWindow
      */
     'maxBytes': number;
     /**
      * 
      * @type {number}
-     * @memberof PageChatRetention
+     * @memberof PageChatModelContextWindow
      */
     'maxTurns': number;
 }
