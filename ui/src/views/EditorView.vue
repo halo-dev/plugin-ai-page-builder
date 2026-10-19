@@ -437,7 +437,7 @@ function applySettings(value: Parameters<typeof patch>[0]) {
         v-if="publicUrl"
         type="button"
         class="apb-chip max-w-44 shrink-0 bg-blue-50 text-blue-700 hover:bg-blue-100"
-        :title="`打开公开页面：${publicUrl}`"
+        v-tooltip="`打开公开页面：${publicUrl}`"
         @click="openPublicPage"
       >
         <IconExternal class="shrink-0 text-xs" />
