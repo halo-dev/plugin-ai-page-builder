@@ -122,7 +122,8 @@ public class PageReferenceTools {
                     .map(result -> listResult(query, result.hasNext(), result.getItems().stream()
                         .filter(PageReferenceTools::publicPost)
                         .map(post -> summary("Post", post.getMetadata().getName(), post.getSpec().getTitle(),
-                            post.getStatus().getPermalink(), post.getStatus().getExcerpt())).toList(), false));
+                            post.getStatus().getPermalink(), post.getStatus().getExcerpt())).toList(), false,
+                        "篇文章"));
             });
         }
 
@@ -133,7 +134,8 @@ public class PageReferenceTools {
                     .map(result -> listResult(query, result.hasNext(), result.getItems().stream()
                         .filter(PageReferenceTools::publicSinglePage)
                         .map(page -> summary("SinglePage", page.getMetadata().getName(), page.getSpec().getTitle(),
-                            page.getStatus().getPermalink(), page.getStatus().getExcerpt())).toList(), false));
+                            page.getStatus().getPermalink(), page.getStatus().getExcerpt())).toList(), false,
+                        "个独立页面"));
             });
         }
 
@@ -161,7 +163,8 @@ public class PageReferenceTools {
                             int start = Math.min((query.page() - 1) * query.size(), items.size());
                             int end = Math.min(start + query.size(), items.size());
                             boolean truncated = !batches.isEmpty() && batches.getLast().hasNext();
-                            return listResult(query, end < items.size(), items.subList(start, end), truncated);
+                            return listResult(query, end < items.size(), items.subList(start, end), truncated,
+                                "个 AI 页面");
                         }));
             });
         }
@@ -187,6 +190,9 @@ public class PageReferenceTools {
                             result.put("version", version);
                             result.put("revision", revision.getMetadata().getName());
                             result.put("draft", "DRAFT".equals(version));
+                            var title = clip(doc.title(), 200);
+                            result.put("summary", (title.isBlank() ? name : "《" + title + "》")
+                                + ("DRAFT".equals(version) ? " · 草稿版本" : " · 已发布版本"));
                             var html = clip(doc.html(), MAX_SOURCE_CHARS);
                             var css = clip(doc.css(), MAX_SOURCE_CHARS - html.length());
                             var js = clip(doc.js(), MAX_SOURCE_CHARS - html.length() - css.length());
@@ -254,9 +260,16 @@ public class PageReferenceTools {
     }
 
     private static Map<String, Object> listResult(Pagination query, boolean hasNext,
-        List<Map<String, Object>> items, boolean scanTruncated) {
+        List<Map<String, Object>> items, boolean scanTruncated, String unit) {
+        var summary = new StringBuilder();
+        if (!query.keyword().isBlank()) {
+            summary.append("关键词 “").append(query.keyword()).append("” · ");
+        }
+        if (query.page() > 1) summary.append("第 ").append(query.page()).append(" 页 · ");
+        summary.append("找到 ").append(items.size()).append(" ").append(unit);
         return Map.of("items", items, "page", query.page(), "size", query.size(), "hasNext", hasNext,
-            "truncated", hasNext || scanTruncated, "scanTruncated", scanTruncated);
+            "truncated", hasNext || scanTruncated, "scanTruncated", scanTruncated,
+            "summary", summary.toString());
     }
 
     private static PageRequestImpl pageable(Pagination query) {

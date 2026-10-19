@@ -44,23 +44,20 @@ final class ChatDisplay {
             var summary = old == null ? "" : old.summary();
             if ("tool-output-available".equals(type)) {
                 var output = chunk.get("output") instanceof Map<?, ?> value ? value : Map.of();
-                boolean memory = PageMemoryTools.NAME.equals(name);
-                boolean apiDetails = "get_public_api".equals(name);
-                // A rejected ask_user returns {error: ...} without recording a question;
-                // persist the failure so restored history pairs questions like the live view.
-                boolean askUser = "ask_user".equals(name);
+                // Reference tools report a refused read as {error: ...}.
                 boolean invalid = Boolean.FALSE.equals(output.get("valid"))
-                    || (memory || apiDetails || askUser) && output.containsKey("error");
+                    || output.get("error") instanceof String;
                 status = invalid ? "error" : "completed";
-                summary = (memory || apiDetails)
-                    && output.get("summary") instanceof String message ? message
-                    : invalid ? String.valueOf(output.getOrDefault("error", null))
+                summary = output.get("summary") instanceof String message && !message.isBlank()
+                    ? message
+                    : output.get("error") instanceof String error ? error
                     : "rename_session".equals(name) ? "已更新会话名称"
                     : Boolean.TRUE.equals(output.get("staged")) ? "修改已通过校验并暂存"
                     : Boolean.TRUE.equals(output.get("valid")) ? "内容未发生变化" : "读取完成";
             } else if (type.endsWith("-error") || type.endsWith("-denied")) {
                 status = "error";
-                summary = "工具未完成";
+                var error = string(chunk, "errorText");
+                summary = error.isBlank() ? "工具未完成" : error;
             }
             parts.put(key, new ChatApi.DisplayPart("tool", id, null, name, status,
                 summary.substring(0, Math.min(300, summary.length())), false));

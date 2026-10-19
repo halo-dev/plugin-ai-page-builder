@@ -20,7 +20,8 @@ class ApiReferenceToolsTest {
     void defaultsSearchAndReturnsEmptyResultsNormally() {
         var result = Map.<String, Object>of("items", List.of(), "totalMatches", 0, "truncated", false);
         when(catalog.search("", 8)).thenReturn(result);
-        assertThat(tools.execute("search_public_apis", Map.of()).block()).isEqualTo(result);
+        assertThat(tools.execute("search_public_apis", Map.of()).block())
+            .containsAllEntriesOf(result).containsEntry("summary", "0 个接口");
         verify(catalog).search("", 8);
     }
 

@@ -44,6 +44,10 @@ public class ApiReferenceTools {
             items.removeLast();
             result.put("truncated", true);
         }
+        var summary = new StringBuilder();
+        if (!text.isBlank()) summary.append("关键词 “").append(text).append("” · ");
+        summary.append(items.size()).append(" 个接口");
+        result.put("summary", summary.toString());
         return result;
     }
 

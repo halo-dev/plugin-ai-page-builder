@@ -169,6 +169,32 @@ class ChatDisplayTest {
     }
 
     @Test
+    void retainsReadSummariesAndToolErrorReasons() {
+        var display = new ChatDisplay();
+        display.accept(Map.of("type", "tool-input-start", "toolCallId", "read",
+            "toolName", "read_theme_file"));
+        display.accept(Map.of("type", "tool-output-available", "toolCallId", "read",
+            "output", Map.of("path", "templates/page.html", "content", "raw-source-marker",
+                "summary", "templates/page.html · 共 120 字符")));
+        display.accept(Map.of("type", "tool-input-start", "toolCallId", "refused",
+            "toolName", "fetch_webpage"));
+        display.accept(Map.of("type", "tool-output-available", "toolCallId", "refused",
+            "output", Map.of("error", "Active theme changed")));
+        display.accept(Map.of("type", "tool-input-start", "toolCallId", "failed",
+            "toolName", "fetch_webpage"));
+        display.accept(Map.of("type", "tool-output-error", "toolCallId", "failed",
+            "errorText", "Web page returned HTTP 404"));
+
+        var parts = display.snapshot("completed");
+        assertThat(parts).extracting(ChatApi.DisplayPart::status)
+            .containsExactly("completed", "error", "error");
+        assertThat(parts).extracting(ChatApi.DisplayPart::summary).containsExactly(
+            "templates/page.html · 共 120 字符", "Active theme changed",
+            "Web page returned HTTP 404");
+        assertThat(Json.toJson(parts)).doesNotContain("raw-source-marker");
+    }
+
+    @Test
     void boundsReasoningAndFinishesInterruptedTools() {
         var display = new ChatDisplay();
         display.accept(Map.of("type", "reasoning-delta", "id", "r", "delta", "思".repeat(20_000)));

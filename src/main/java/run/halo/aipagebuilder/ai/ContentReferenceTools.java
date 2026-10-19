@@ -120,6 +120,8 @@ public class ContentReferenceTools {
         result.put("version", "PUBLISHED");
         result.put("format", "html");
         result.put("source", source.substring(start, end));
+        result.put("summary", reference.name() + " · 已读取 " + (end - start) + " / "
+            + source.length() + " 字符");
         result.put("offset", start);
         result.put("limit", limit);
         result.put("totalLength", source.length());
@@ -171,6 +173,15 @@ public class ContentReferenceTools {
                     result.put("truncated", end < items.size() || scanTruncated);
                     result.put("total", scanTruncated ? null : items.size());
                     result.put("matchedInScan", items.size());
+                    var summary = new StringBuilder();
+                    if (!keyword.isBlank()) summary.append("关键词 “").append(keyword).append("”");
+                    if (!mediaType.isBlank()) {
+                        if (!summary.isEmpty()) summary.append(" · ");
+                        summary.append(mediaType);
+                    }
+                    if (!summary.isEmpty()) summary.append(" · ");
+                    summary.append(items.size()).append(" 个附件");
+                    result.put("summary", summary.toString());
                     result.put("scanned", batches.stream().mapToInt(batch -> batch.getItems().size()).sum());
                     result.put("dimensionsSupported", false);
                     return (Map<String, Object>) result;

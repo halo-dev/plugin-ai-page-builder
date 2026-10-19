@@ -82,10 +82,11 @@ public class ThemeContextService {
             paths.sort(Comparator.naturalOrder());
             var start = Math.min(offset, paths.size());
             var end = Math.min(start + limit, paths.size());
-            return Map.<String, Object>of("themeName", themeName, "path",
-                root.relativize(folder).toString().replace('\\', '/'), "items",
+            var relative = root.relativize(folder).toString().replace('\\', '/');
+            return Map.<String, Object>of("themeName", themeName, "path", relative, "items",
                 paths.subList(start, end), "offset", offset, "limit", limit,
-                "truncated", scanTruncated || end < paths.size(), "scanTruncated", scanTruncated);
+                "truncated", scanTruncated || end < paths.size(), "scanTruncated", scanTruncated,
+                "summary", relative + " · 共 " + paths.size() + " 个文件");
         });
     }
 
@@ -103,10 +104,13 @@ public class ThemeContextService {
             var source = new String(bytes, 0, Math.min(bytes.length, 256 * 1024), StandardCharsets.UTF_8);
             var start = Math.min(offset, source.length());
             var end = Math.min(start + limit, source.length());
+            var summary = path + " · " + (start == 0 && !byteTruncated && end == source.length()
+                ? "共 " + source.length() + " 字符"
+                : "已读取 " + (end - start) + " / " + source.length() + " 字符");
             return Map.<String, Object>of("themeName", themeName, "path", path,
                 "content", source.substring(start, end), "offset", offset, "limit", limit,
                 "nextOffset", end, "truncated", byteTruncated || end < source.length(),
-                "byteTruncated", byteTruncated);
+                "byteTruncated", byteTruncated, "summary", summary);
         });
     }
 

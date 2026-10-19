@@ -158,23 +158,32 @@ watch(preview, (value) => emit('preview', value), { immediate: true })
 watch([running, loading], ([value, fetching]) => emit('running', value || fetching), {
   immediate: true,
 })
+// Streaming emits many deltas per paint; coalescing the layout read and the scroll
+// into one animation frame keeps long conversations responsive.
+let scrollFrame = 0
+let nearBottom = true
 watch(
   messages,
-  async () => {
-    const hadMessages = !!messages.value?.length
-    const nearBottom =
-      !feed.value || feed.value.scrollHeight - feed.value.scrollTop - feed.value.clientHeight < 100
-    await nextTick()
+  () => {
     if (!feed.value) return
+    const hadMessages = !!messages.value?.length
     // The empty state can be taller than the panel (the preset catalog), so a
     // fresh session must start at the top instead of inheriting the old scroll.
     if (!hadMessages) {
       feed.value.scrollTop = 0
+      nearBottom = true
       return
     }
+    if (scrollFrame) return
+    nearBottom = feed.value.scrollHeight - feed.value.scrollTop - feed.value.clientHeight < 100
     // The question card positions its first question itself; keeping the feed at
     // the bottom here would push that question back above the fold.
-    if (nearBottom && !waitingForUser.value) feed.value.scrollTop = feed.value.scrollHeight
+    if (!nearBottom || waitingForUser.value) return
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0
+      if (feed.value && nearBottom && !waitingForUser.value)
+        feed.value.scrollTop = feed.value.scrollHeight
+    })
   },
   { deep: true },
 )

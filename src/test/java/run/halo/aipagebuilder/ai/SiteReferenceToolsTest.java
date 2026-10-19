@@ -60,7 +60,9 @@ class SiteReferenceToolsTest {
             "codeInjection", "PRIVATE_SCRIPT", "authProvider", "PRIVATE_AUTH"));
         when(urls.getRaw()).thenReturn(URI.create("https://example.org/blog").toURL());
         var result = tools.execute("get_site_profile", Map.of()).block();
-        assertThat(result).containsOnlyKeys("title", "subtitle", "logo", "favicon", "language", "url", "truncated")
+        assertThat(result).containsOnlyKeys("title", "subtitle", "logo", "favicon", "language", "url",
+                "truncated", "summary")
+            .containsEntry("summary", "Public title · https://example.org/blog")
             .containsEntry("title", "Public title").containsEntry("subtitle", "")
             .containsEntry("logo", "/logo.png").containsEntry("language", "zh-CN")
             .containsEntry("url", "https://example.org/blog").containsEntry("favicon", "");

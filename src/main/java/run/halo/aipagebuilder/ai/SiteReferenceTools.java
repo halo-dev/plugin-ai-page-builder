@@ -73,8 +73,12 @@ public class SiteReferenceTools {
                 }
                 var url = externalUrls.getRaw();
                 var value = url == null ? externalUrls.get().toString() : url.toExternalForm();
-                result.put("url", safeLink(value) ? value : "");
+                var siteUrl = safeLink(value) ? value : "";
+                var title = (String) result.getOrDefault("title", "");
+                result.put("url", siteUrl);
                 result.put("truncated", truncated);
+                result.put("summary", title.isBlank() ? (siteUrl.isBlank() ? "站点资料" : siteUrl)
+                    : siteUrl.isBlank() ? title : title + " · " + siteUrl);
                 return result;
             });
     }
@@ -130,10 +134,17 @@ public class SiteReferenceTools {
                     return Mono.empty();
                 }
                 return menu(menu, budget);
-            }).collectList().map(items -> Map.of("menus", items,
-                "page", menuName.isBlank() ? page : 1, "size", menuName.isBlank() ? size : 1,
-                "hasNext", batch.hasNext(), "truncated", batch.hasNext() || budget.truncated,
-                "scanTruncated", budget.scanTruncated)));
+            }).collectList().map(items -> {
+                var label = items.isEmpty() ? ""
+                    : String.valueOf(items.getFirst().get("displayName"));
+                var summary = menuName.isBlank() ? items.size() + " 个菜单"
+                    : items.isEmpty() ? "未找到菜单"
+                    : (label.isBlank() ? menuName : label) + " · " + nodeCount(items) + " 个条目";
+                return Map.of("menus", items,
+                    "page", menuName.isBlank() ? page : 1, "size", menuName.isBlank() ? size : 1,
+                    "hasNext", batch.hasNext(), "truncated", batch.hasNext() || budget.truncated,
+                    "scanTruncated", budget.scanTruncated, "summary", summary);
+            }));
     }
 
     private Mono<Map<String, Object>> menu(Menu menu, Budget budget) {
@@ -268,6 +279,16 @@ public class SiteReferenceTools {
         } catch (IllegalArgumentException error) {
             return false;
         }
+    }
+
+    private static int nodeCount(List<?> items) {
+        int count = 0;
+        for (var item : items) {
+            if (!(item instanceof Map<?, ?> map)) continue;
+            count++;
+            if (map.get("children") instanceof List<?> children) count += nodeCount(children);
+        }
+        return count;
     }
 
     private static boolean hasText(String value) { return value != null && !value.isBlank(); }

@@ -58,6 +58,8 @@ interface DisplayPart {
     active: boolean
     status: string
     summary: string
+    hint: string
+    openable: boolean
     question?: PageChatQuestion
   }
 }
@@ -103,6 +105,18 @@ const parts = computed(() => {
       ask_user: '确认页面需求',
       update_site_memory: '记忆业务资料',
     }
+    const summary =
+      typeof output.summary === 'string'
+        ? output.summary
+        : typeof output.error === 'string'
+          ? output.error
+          : (part as ToolPart).errorText || ''
+    // Failures show their reason inline; "读取完成" is the old history fallback and
+    // repeats the row status, so neither is worth an expander.
+    const openable = !failed && summary.trim() !== '' && summary !== '读取完成'
+    // The first segment of a read summary is its subject (path, keyword, title),
+    // which tells repeated calls apart without expanding the row.
+    const hint = openable && summary.includes(' · ') ? summary.slice(0, summary.indexOf(' · ')) : ''
     return [
       {
         type: 'tool' as const,
@@ -124,18 +138,15 @@ const parts = computed(() => {
                 ? '内容未变化'
                 : changing && output.staged === true
                   ? '已暂存'
-                  : '完成'
+                  : ''
               : props.waiting && part.toolName === 'ask_user'
                 ? '等待回答'
                 : props.active
                   ? '进行中'
                   : '已结束',
-          summary:
-            typeof output.summary === 'string'
-              ? output.summary
-              : typeof output.error === 'string'
-                ? output.error
-                : (part as ToolPart).errorText || '',
+          summary,
+          hint,
+          openable,
           question:
             part.toolName === 'ask_user' && !failed
               ? props.questions?.[askUserIndex++]
@@ -160,7 +171,7 @@ const parts = computed(() => {
       <ChatMarkdown :content="part.text" :final="!part.active" />
     </details>
     <template v-else-if="'tool' in part && part.tool">
-      <details class="group my-0.5">
+      <details v-if="part.tool.openable" class="group my-0.5">
         <summary
           class="flex cursor-pointer select-none items-center gap-1.5 py-1 text-xs text-gray-500 marker:hidden"
         >
@@ -169,13 +180,30 @@ const parts = computed(() => {
           <IconCheck v-else-if="part.tool.state === 'success'" class="text-emerald-600" />
           <IconCheck v-else class="text-gray-300" />
           <span class="text-gray-600">{{ part.tool.label }}</span>
-          <span class="text-gray-400">{{ part.tool.status }}</span>
-          <IconChevron class="ml-auto text-gray-300 transition-transform group-open:rotate-90" />
+          <span v-if="part.tool.hint" class="min-w-0 truncate text-gray-400">{{ part.tool.hint }}</span>
+          <span v-if="part.tool.status" class="text-gray-400">{{ part.tool.status }}</span>
+          <IconChevron class="ml-auto shrink-0 text-gray-300 transition-transform group-open:rotate-90" />
         </summary>
-        <p v-if="part.tool.summary" class="mb-1 break-all pl-[22px] text-xs leading-5 text-gray-400">
+        <p class="mb-1 break-all pl-[22px] text-xs leading-5 text-gray-400">
           {{ part.tool.summary }}
         </p>
       </details>
+      <div v-else class="my-0.5">
+        <div class="flex items-center gap-1.5 py-1 text-xs text-gray-500">
+          <IconSpinner v-if="part.tool.active" class="animate-spin text-gray-400" />
+          <IconError v-else-if="part.tool.state === 'error'" class="text-red-500" />
+          <IconCheck v-else-if="part.tool.state === 'success'" class="text-emerald-600" />
+          <IconCheck v-else class="text-gray-300" />
+          <span class="text-gray-600">{{ part.tool.label }}</span>
+          <span v-if="part.tool.status" class="text-gray-400">{{ part.tool.status }}</span>
+        </div>
+        <p
+          v-if="part.tool.state === 'error' && part.tool.summary"
+          class="mb-1 break-all pl-[22px] text-xs leading-5 text-red-500"
+        >
+          {{ part.tool.summary }}
+        </p>
+      </div>
       <ChatQuestions
         v-if="part.tool.question"
         :question="part.tool.question"

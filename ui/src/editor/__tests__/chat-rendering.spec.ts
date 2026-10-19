@@ -49,7 +49,9 @@ describe('streaming conversation rendering', () => {
     })
     await wrapper.setProps({ message: state.message, active: false })
     expect(wrapper.text()).toContain(label)
-    expect(wrapper.text()).toContain('完成')
+    // A successful row ends with the check icon; the redundant "完成" label is gone.
+    expect(wrapper.text()).not.toContain('完成')
+    expect(wrapper.find('.text-emerald-600').exists()).toBe(true)
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
     wrapper.unmount()
 
@@ -73,7 +75,9 @@ describe('streaming conversation rendering', () => {
       },
     })
     expect(restored.text()).toContain(label)
-    expect(restored.text()).toContain('读取完成')
+    // The generic history fallback is not detail, so the row stays flat.
+    expect(restored.text()).not.toContain('读取完成')
+    expect(restored.find('details').exists()).toBe(false)
     expect(restored.text()).not.toContain('处理页面')
     restored.unmount()
   })
@@ -123,15 +127,47 @@ describe('streaming conversation rendering', () => {
     ])[1]!
     for (const message of [state.message, restored]) {
       const wrapper = mount(ChatMessageParts, { props: { message, active: false } })
-      expect(wrapper.get('summary').text()).toContain('读取接口文档')
-      expect(wrapper.get('summary').text()).toContain(status === 'error' ? '读取失败' : '完成')
+      expect(wrapper.text()).toContain('读取接口文档')
       expect(wrapper.find('.text-red-500').exists()).toBe(status === 'error')
       expect(wrapper.find('.text-emerald-600').exists()).toBe(status === 'completed')
-      expect(wrapper.get('details p').text()).toBe(summary)
-      expect(wrapper.get('details').attributes('open')).toBeUndefined()
+      if (status === 'error') {
+        // Failures show their reason inline instead of behind an expander.
+        expect(wrapper.find('details').exists()).toBe(false)
+        expect(wrapper.text()).toContain(summary)
+      } else {
+        expect(wrapper.get('summary').text()).not.toContain('完成')
+        expect(wrapper.get('details p').text()).toBe(summary)
+        expect(wrapper.get('details').attributes('open')).toBeUndefined()
+      }
       expect(wrapper.text()).not.toContain('GET /')
       wrapper.unmount()
     }
+  })
+  it('shows a read subject inline and keeps the count in details', () => {
+    const wrapper = mount(ChatMessageParts, {
+      props: {
+        active: false,
+        message: {
+          id: 'm',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-list_theme_files',
+              toolCallId: 'files',
+              toolName: 'list_theme_files',
+              state: 'output-available',
+              input: {},
+              output: { summary: 'templates · 共 3 个文件' },
+            },
+          ],
+        },
+      },
+    })
+    expect(wrapper.get('summary').text()).toContain('查找主题文件')
+    expect(wrapper.get('summary').text()).toContain('templates')
+    expect(wrapper.get('summary').text()).not.toContain('共 3 个文件')
+    expect(wrapper.get('details p').text()).toBe('templates · 共 3 个文件')
+    wrapper.unmount()
   })
   it('renders durable memory outcomes separately from page staging', async () => {
     const part = {

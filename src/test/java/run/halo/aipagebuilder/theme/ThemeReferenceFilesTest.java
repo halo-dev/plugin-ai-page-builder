@@ -48,14 +48,16 @@ class ThemeReferenceFilesTest {
         Files.writeString(root.resolve("templates/config.yaml"), "secret: value");
         Files.writeString(root.resolve("templates/.secret.js"), "private");
         var first = service.listFiles("theme-a", null, 0, 2).block();
-        assertThat(first).containsEntry("themeName", "theme-a").containsEntry("truncated", true);
+        assertThat(first).containsEntry("themeName", "theme-a").containsEntry("truncated", true)
+            .containsEntry("summary", "templates · 共 3 个文件");
         assertThat(first.get("items")).isEqualTo(java.util.List.of("templates/a.html", "templates/assets/b.css"));
         var last = service.listFiles("theme-a", "templates", 2, 2).block();
         assertThat(last.get("items")).isEqualTo(java.util.List.of("templates/c.js"));
         assertThat(last).containsEntry("truncated", false);
         var read = service.readFile("theme-a", "templates/c.js", 7, 5).block();
         assertThat(read).containsEntry("content", "alert").containsEntry("nextOffset", 12)
-            .containsEntry("path", "templates/c.js").containsEntry("truncated", true);
+            .containsEntry("path", "templates/c.js").containsEntry("truncated", true)
+            .containsEntry("summary", "templates/c.js · 已读取 5 / 23 字符");
     }
 
     @Test

@@ -128,6 +128,7 @@ public class WebReferenceTools {
         var result = new LinkedHashMap<String, Object>();
         result.put("url", uri.toString());
         result.put("title", clip(title, 500));
+        result.put("summary", title.isBlank() ? uri.getHost() : clip(title, 200) + " · " + uri.getHost());
         result.put("description", clip(description, 1000));
         result.put("text", clip(text, MAX_TEXT_CHARS));
         result.put("truncated", text.length() > MAX_TEXT_CHARS);
