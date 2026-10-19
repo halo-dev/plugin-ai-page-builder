@@ -334,6 +334,7 @@ watch(model, () => {
       <div v-else class="mt-4">
         <VAlert
           type="warning"
+          title="AI 审查不可用"
           :closable="false"
           :description="aiStatusMessage || 'AI Foundation 暂不可用，请先安装、启用并配置语言模型。'"
         />
@@ -342,6 +343,7 @@ watch(model, () => {
       <div class="mt-3">
         <VAlert
           type="warning"
+          title="安全提示"
           :closable="false"
           description="导入前会先由 AI 审查页面包；发布后脚本仍会在访客浏览器中执行。"
         />
@@ -350,6 +352,7 @@ watch(model, () => {
       <div v-if="pending && phase === 'select'" class="mt-3">
         <VAlert
           type="info"
+          title="正在审查"
           :closable="false"
           description="正在审查页面包，可能需要几十秒到几分钟…"
         />
