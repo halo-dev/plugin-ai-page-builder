@@ -160,6 +160,7 @@ export function usePageChat(options: {
   let polling: ReturnType<typeof setTimeout> | undefined
   let request: PageChatRequest | undefined
   let historicalAnnotations = false
+  let sessionRefresh = 0
   const applied = new Set<string>()
   function apply(page: PageDetail) {
     const revision = page.page.draftRevision
@@ -211,20 +212,23 @@ export function usePageChat(options: {
       error.value = errorMessage(e)
     },
   })
-  // The agent names the conversation on its first step; refresh the session list
-  // as soon as that lands so the sidebar stops showing the default title.
+  // The agent names the conversation on every turn; refresh the session list as soon
+  // as each rename lands so the sidebar stops showing the previous title.
   watch(
     () =>
-      chat.messages.value?.some((message) =>
-        message.parts.some(
-          (part) =>
-            'toolName' in part &&
-            part.toolName === 'rename_session' &&
-            part.state === 'output-available',
-        ),
-      ),
-    (renamed) => {
-      if (renamed && activeRun.value) void refreshSessions()
+      chat.messages.value?.reduce(
+        (count, message) =>
+          count +
+          message.parts.filter(
+            (part) =>
+              'toolName' in part &&
+              part.toolName === 'rename_session' &&
+              part.state === 'output-available',
+          ).length,
+        0,
+      ) ?? 0,
+    (count, previous) => {
+      if (count > (previous ?? 0) && activeRun.value) void refreshSessions().catch(() => {})
     },
   )
   const streamPreview = useStreamingPreview({
@@ -313,8 +317,11 @@ export function usePageChat(options: {
     () => running.value || preparing.value || loading.value || loadingEarlier.value,
   )
   async function refreshSessions() {
-    sessions.value =
+    const seq = ++sessionRefresh
+    const items =
       (await aiPageBuilderChatApi.listPageChatSessions({ name: options.name })).data.items || []
+    // A refresh started earlier can resolve later; only the newest response may win.
+    if (seq === sessionRefresh) sessions.value = items
   }
   async function selectSession(id: string) {
     if (sessionBusy.value || id === sessionId.value) return

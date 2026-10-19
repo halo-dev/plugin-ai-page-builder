@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, shallowRef } from 'vue'
+import { effectScope, nextTick, shallowRef } from 'vue'
 import { conversationMessages, upsertQuestion, usePageChat } from '../usePageChat'
 import type { UIMessage } from '@halo-dev/ai-foundation-sdk'
 import type { ChatTurn } from '../../api/clients'
@@ -250,6 +250,29 @@ describe('persistent page chat', () => {
     await poll
     expect(state.waitingForUser.value).toBe(false)
     expect(state.activeRun.value?.status).toBe('running')
+  })
+  it('refreshes the session list after every completed rename, not only the first', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    api.chat.listPageChatSessions.mockClear()
+    const rename = (toolCallId: string) => ({
+      type: 'tool-rename_session',
+      toolCallId,
+      toolName: 'rename_session',
+      state: 'output-available',
+      input: {},
+      output: { valid: true, renamed: true },
+    })
+    sdk.setMessages([{ id: 'm1', role: 'assistant', parts: [rename('r1')] }])
+    await nextTick()
+    expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(1)
+    sdk.setMessages([
+      { id: 'm1', role: 'assistant', parts: [rename('r1')] },
+      { id: 'm2', role: 'assistant', parts: [rename('r2')] },
+    ])
+    await nextTick()
+    expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(2)
   })
   it('submits once through the generated endpoint and polls the resumed run to commit', async () => {
     waitingConversation()

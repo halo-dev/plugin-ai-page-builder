@@ -320,6 +320,25 @@ public class PageChatService {
     }
 
     private Mono<Map<String, Object>> renameSessionFromTool(Active run, String title) {
+        synchronized (run) {
+            // The default session shares the coordinator record with run state updates,
+            // so a rename must not interleave with steer/cancel optimistic writes.
+            if (run.transition != null) {
+                return run.transition.onErrorComplete()
+                    .then(Mono.defer(() -> renameSessionFromTool(run, title)));
+            }
+            var update = updateSessionTitle(run, title).cache();
+            var barrier = update.then();
+            run.transition = barrier;
+            return update.doFinally(signal -> {
+                synchronized (run) {
+                    if (run.transition == barrier) run.transition = null;
+                }
+            });
+        }
+    }
+
+    private Mono<Map<String, Object>> updateSessionTitle(Active run, String title) {
         return client.fetch(PageChatSession.class, run.sessionId)
             .filter(session -> session.getMetadata().getDeletionTimestamp() == null)
             .switchIfEmpty(Mono.error(conflict("会话不存在")))

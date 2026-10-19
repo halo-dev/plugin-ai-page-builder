@@ -45,6 +45,19 @@ class ChatDisplayTest {
     }
 
     @Test
+    void retainsRenameSessionOutcomeInHistory() {
+        var display = new ChatDisplay();
+        display.accept(Map.of("type", "tool-input-start", "toolCallId", "n",
+            "toolName", "rename_session"));
+        display.accept(Map.of("type", "tool-output-available", "toolCallId", "n",
+            "output", Map.of("valid", true, "renamed", true, "title", "公司介绍页")));
+        var parts = display.snapshot("completed");
+        assertThat(parts.getFirst().status()).isEqualTo("completed");
+        assertThat(parts.getFirst().summary()).isEqualTo("已更新会话名称");
+        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("公司介绍页");
+    }
+
+    @Test
     void retainsFailedPublicApiDetailsAndSummaryInHistory() {
         var catalog = org.mockito.Mockito.mock(PublicApiCatalog.class);
         var ids = java.util.List.of("GET /missing", "GET /unavailable", "GET /ambiguous");

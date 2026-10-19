@@ -268,8 +268,9 @@ watch(blankPage, () => (activePresetGroup.value = 0))
             v-close-popper
             @click="selectSession(session.sessionId)"
           >
-            <template v-if="session.sessionId === sessionId" #prefix-icon>
-              <IconCheck class="text-xs text-emerald-600" />
+            <template #prefix-icon>
+              <IconCheck v-if="session.sessionId === sessionId" class="text-xs text-emerald-600" />
+              <span v-else class="w-3.5 shrink-0" aria-hidden="true" />
             </template>
             {{ session.title || '新会话' }}
           </VDropdownItem>
