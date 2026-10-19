@@ -55,8 +55,6 @@ import RuntimePreview from '../components/RuntimePreview.vue'
 import StreamingCanvas from '../components/chat/StreamingCanvas.vue'
 
 const VisualEditor = defineAsyncComponent(() => import('../components/VisualEditor.vue'))
-// History embeds CodeMirror's diff view (~420 kB); load it only when opened.
-const HistoryPanel = defineAsyncComponent(() => import('../components/HistoryPanel.vue'))
 const route = useRoute()
 const router = useRouter()
 // One-shot handoff from the create-page dialog: start the assistant right away.
@@ -154,6 +152,20 @@ queryClient
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
+// History embeds CodeMirror's diff view (~420 kB); load it only when opened.
+const HistoryPanel = defineAsyncComponent({
+  loader: () => import('../components/HistoryPanel.vue'),
+  // Without this a failed chunk leaves historyOpen true, which keeps the chat
+  // disabled with no visible panel.
+  onError: (_error, _retry, fail) => {
+    historyOpen.value = false
+    Toast.error('历史版本加载失败，请重试')
+    fail()
+  },
+})
+function preloadHistory() {
+  void import('../components/HistoryPanel.vue').catch(() => {})
+}
 // First publish also saves title/path; lock editing until all writes finish.
 const publishPending = shallowRef(false)
 function onPublishPending(pending: boolean) {
@@ -485,6 +497,8 @@ function applySettings(value: Parameters<typeof patch>[0]) {
           :disabled="locked"
           v-tooltip="'历史版本'"
           aria-label="历史版本"
+          @pointerenter="preloadHistory"
+          @focus="preloadHistory"
           @click="historyOpen = true"
         >
           <IconHistory class="text-base" />

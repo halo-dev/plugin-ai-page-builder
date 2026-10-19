@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  shallowRef,
+  useTemplateRef,
+  watch,
+} from 'vue'
 import { Dialog, VDropdown, VDropdownItem, VLoading } from '@halo-dev/components'
 import IconSparkles from '~icons/mingcute/sparkles-line'
 import IconAdd from '~icons/mingcute/add-line'
@@ -187,6 +195,41 @@ watch(
   },
   { deep: true },
 )
+// Async Markdown rendering changes message heights after the frame above. Keep
+// the feed pinned while the reader was already at the bottom.
+let resizeFrame = 0
+const contentObserver =
+  typeof ResizeObserver === 'undefined'
+    ? undefined
+    : new ResizeObserver(() => {
+        if (!visibleMessages.value.length || !nearBottom || waitingForUser.value || resizeFrame)
+          return
+        resizeFrame = requestAnimationFrame(() => {
+          resizeFrame = 0
+          if (feed.value && nearBottom && !waitingForUser.value)
+            feed.value.scrollTop = feed.value.scrollHeight
+        })
+      })
+function onFeedScroll() {
+  if (!feed.value) return
+  nearBottom = feed.value.scrollHeight - feed.value.scrollTop - feed.value.clientHeight < 100
+}
+watch(
+  () => visibleMessages.value.map((message) => message.id).join('|'),
+  async () => {
+    await nextTick()
+    if (!contentObserver || !feed.value) return
+    contentObserver.disconnect()
+    if (!visibleMessages.value.length) return
+    for (const child of Array.from(feed.value.children)) contentObserver.observe(child)
+  },
+  { flush: 'post' },
+)
+onBeforeUnmount(() => {
+  contentObserver?.disconnect()
+  if (scrollFrame) cancelAnimationFrame(scrollFrame)
+  if (resizeFrame) cancelAnimationFrame(resizeFrame)
+})
 watch(sessionId, () => {
   prompt.value = ''
 })
@@ -211,13 +254,24 @@ async function earlier() {
   await nextTick()
   if (feed.value) feed.value.scrollTop = top + feed.value.scrollHeight - height
 }
+let markdownPreloaded = false
+function preloadMarkdown() {
+  if (markdownPreloaded) return
+  markdownPreloaded = true
+  void import('./chat/ChatMarkdown.vue').catch(() => {})
+}
 onMounted(async () => {
   await recover()
-  // Markdown rendering is a large async chunk; warm it during idle so the first
-  // streamed reply does not wait on the download. The chat is always visible here.
-  const preload = () => void import('./chat/ChatMarkdown.vue')
-  if ('requestIdleCallback' in window) window.requestIdleCallback(preload, { timeout: 2000 })
-  else setTimeout(preload, 2000)
+  // The editor keeps the chat visible on desktop, so warm the Markdown chunk
+  // during idle. On mobile the panel starts hidden; wait for focus inside it.
+  if (
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(min-width: 768px)').matches
+  ) {
+    if ('requestIdleCallback' in window)
+      window.requestIdleCallback(preloadMarkdown, { timeout: 2000 })
+    else setTimeout(preloadMarkdown, 2000)
+  }
   if (props.initialModel) modelName.value = props.initialModel
   if (props.initialPrompt) {
     prompt.value = props.initialPrompt
@@ -262,7 +316,11 @@ watch(blankPage, () => (activePresetGroup.value = 0))
 </script>
 
 <template>
-  <aside class="h-full min-h-0 min-w-0 flex-col bg-white" aria-label="页面助手">
+  <aside
+    class="h-full min-h-0 min-w-0 flex-col bg-white"
+    aria-label="页面助手"
+    @focusin="preloadMarkdown"
+  >
     <header class="flex h-12 shrink-0 items-center gap-1 border-b border-gray-100 px-3">
       <IconSparkles class="text-base text-gray-700" />
       <VDropdown>
@@ -319,7 +377,13 @@ watch(blankPage, () => (activePresetGroup.value = 0))
         </VDropdown>
       </div>
     </header>
-    <div ref="feed" class="min-h-0 flex-1 overflow-auto px-4 py-4" role="log" aria-label="页面对话">
+    <div
+      ref="feed"
+      class="min-h-0 flex-1 overflow-auto px-4 py-4"
+      role="log"
+      aria-label="页面对话"
+      @scroll="onFeedScroll"
+    >
       <div v-if="hasMore" class="mb-4 text-center">
         <button
           type="button"

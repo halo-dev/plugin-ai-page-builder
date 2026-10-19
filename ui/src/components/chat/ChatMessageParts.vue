@@ -25,7 +25,7 @@ export function questionSlotCount(parts: DeepReadonly<MessagePart[]> | MessagePa
 </script>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h } from 'vue'
 import IconCheck from '~icons/mingcute/check-line'
 import IconError from '~icons/mingcute/warning-line'
 import IconSpinner from '~icons/mingcute/loading-line'
@@ -35,7 +35,19 @@ import type { PageChatAnswerItem, PageChatQuestion } from '../../api/generated'
 import ChatQuestions from './ChatQuestions.vue'
 // The Markdown renderer brings its own parser (~660 kB); keep it out of the
 // editor chunk until a message actually needs it.
-const ChatMarkdown = defineAsyncComponent(() => import('./ChatMarkdown.vue'))
+// Keep messages readable if the async renderer cannot be fetched (for example a
+// stale chunk hash after a deploy) instead of rendering nothing.
+const MarkdownFallback = defineComponent({
+  // Mirrors ChatMarkdown's props so the async component keeps its inferred type.
+  props: { content: { type: String, required: true }, final: { type: Boolean, required: true } },
+  setup: (props) => () =>
+    h('div', { class: 'break-anywhere whitespace-pre-wrap leading-7' }, props.content),
+})
+const ChatMarkdown = defineAsyncComponent({
+  // Resolve to the fallback instead of rejecting so the original props are still
+  // forwarded (Vue only passes `error` to `errorComponent`).
+  loader: () => import('./ChatMarkdown.vue').catch(() => MarkdownFallback),
+})
 
 const props = defineProps<{
   message: DeepReadonly<UIMessage> | UIMessage
