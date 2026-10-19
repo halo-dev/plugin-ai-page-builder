@@ -314,6 +314,54 @@ class PageRunTest {
     }
 
     @Test
+    void settleThenWaitsForASuccessorBarrier() {
+        var run = run();
+        var first = Sinks.<Void>empty();
+        var second = Sinks.<Void>empty();
+        persistence.activeGates.add(first);
+        persistence.activeGates.add(second);
+
+        var decided = new AtomicReference<PageRun.State>();
+        run.steer("first", "admin").subscribe(ignored -> { }, ignored -> { });
+        run.cancel().subscribe(ignored -> { }, ignored -> { });
+        run.settleThen(() -> Mono.fromSupplier(() -> {
+            decided.set(run.state());
+            return true;
+        })).subscribe();
+
+        persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
+        first.tryEmitEmpty();
+
+        assertThat(decided.get()).isNull();
+
+        second.tryEmitEmpty();
+
+        assertThat(decided.get()).isEqualTo(PageRun.State.CANCELLED);
+    }
+
+    @Test
+    void settleThenDecidesAfterAFailedSuccessorBarrierRollsBack() {
+        var run = run();
+        var first = Sinks.<Void>empty();
+        persistence.activeGates.add(first);
+
+        var decided = new AtomicReference<PageRun.State>();
+        run.steer("first", "admin").subscribe(ignored -> { }, ignored -> { });
+        run.cancel().subscribe(ignored -> { }, ignored -> { });
+        run.settleThen(() -> Mono.fromSupplier(() -> {
+            decided.set(run.state());
+            return true;
+        })).subscribe();
+
+        persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
+        persistence.activeFailure = new IllegalStateException("cancel failed");
+        first.tryEmitEmpty();
+
+        // The cancel write failed and rolled back; the decision must not see its CANCELLED state.
+        assertThat(decided.get()).isEqualTo(PageRun.State.RUNNING);
+    }
+
+    @Test
     void failedAskPersistenceRestoresRunning() {
         var run = run();
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");

@@ -420,27 +420,27 @@ public class PageChatService {
                     })).then();
                 }
                 // Cancellation can still fail to persist and roll back its provisional status.
-                // Classify model failures only after that transition has settled.
-                return run.settleTransitions().then(Mono.defer(() -> {
-                    synchronized (run) {
-                        if (!run.is(PageRun.State.CANCELLED)
-                            && !run.is(PageRun.State.INTERRUPTED)) {
-                            var reason = failureReason(error, run.copy);
-                            var message = error instanceof ResponseStatusException status
-                                && status.getStatusCode().value() == 409
-                                ? "页面已变化，请重新载入（409）" : reason.message;
-                            switch (reason) {
-                                case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, CONTEXT_LIMIT, TOKEN_LIMIT,
-                                    TRUNCATED, RUN_TIMEOUT -> run.incomplete(message);
-                                default -> run.fail(message);
-                            }
-                            org.slf4j.LoggerFactory.getLogger(PageChatService.class).warn(
-                                "Page chat failed: {}, reason={}, exception={}",
-                                run.copy.trace(), reason.name(), error.getClass().getName());
+                // Classify model failures only after that transition has settled, and decide in
+                // the same monitor section that finds no pending transition.
+                return run.settleThen(() -> {
+                    if (!run.is(PageRun.State.CANCELLED)
+                        && !run.is(PageRun.State.INTERRUPTED)) {
+                        var reason = failureReason(error, run.copy);
+                        var message = error instanceof ResponseStatusException status
+                            && status.getStatusCode().value() == 409
+                            ? "页面已变化，请重新载入（409）" : reason.message;
+                        switch (reason) {
+                            case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, CONTEXT_LIMIT, TOKEN_LIMIT,
+                                TRUNCATED, RUN_TIMEOUT -> run.incomplete(message);
+                            default -> run.fail(message);
                         }
+                        org.slf4j.LoggerFactory.getLogger(PageChatService.class).warn(
+                            "Page chat failed: {}, reason={}, exception={}",
+                            run.copy.trace(), reason.name(), error.getClass().getName());
                     }
-                    return run.finish(null);
-                }));
+                    // finish() closes edits eagerly, so build it after the lock is released.
+                    return Mono.defer(() -> run.finish(null));
+                });
             }).doFinally(signal -> timeout.dispose());
     }
 
@@ -480,22 +480,22 @@ public class PageChatService {
                         }
                     }
                 }
-            }).then(Mono.defer(run::settleTransitions)).then(Mono.defer(() -> {
+            }).then(run.settleThen(() -> {
                 List<String> steers;
-                synchronized (run) {
-                    if (run.is(PageRun.State.CANCELLED)
-                        || run.is(PageRun.State.INTERRUPTED)) {
-                        return run.finish(null);
-                    }
-                    // A steer that missed the last model step gets a bounded continuation call.
-                    steers = run.continuations < MAX_CONTINUATIONS && !run.copy.exhausted()
-                        ? run.copy.drainSteers() : List.of();
-                    if (!steers.isEmpty()) run.continuations++;
-                    else run.markCommitting();
+                if (run.is(PageRun.State.CANCELLED)
+                    || run.is(PageRun.State.INTERRUPTED)) {
+                    return Mono.defer(() -> run.finish(null));
                 }
+                // A steer that missed the last model step gets a bounded continuation call.
+                steers = run.continuations < MAX_CONTINUATIONS && !run.copy.exhausted()
+                    ? run.copy.drainSteers() : List.of();
+                if (!steers.isEmpty()) run.continuations++;
+                else run.markCommitting();
                 if (!steers.isEmpty()) {
-                    return converse(name, run, continuedHistory(run, history, steers.size()),
-                        FoundationBridge.steerMessage(steers), runTimeout);
+                    var missed = steers;
+                    return Mono.defer(() -> converse(name, run,
+                        continuedHistory(run, history, missed.size()),
+                        FoundationBridge.steerMessage(missed), runTimeout));
                 }
                 return commit(name, run);
             }));

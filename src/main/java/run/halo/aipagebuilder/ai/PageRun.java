@@ -155,6 +155,23 @@ final class PageRun {
         });
     }
 
+    /**
+     * Run a decision once no transition is pending. The empty check and the decision share one
+     * monitor acquisition, so a command cannot install a new barrier in between. The decision's
+     * Mono is subscribed after the lock is released.
+     */
+    <T> Mono<T> settleThen(Supplier<Mono<T>> decision) {
+        return Mono.defer(() -> {
+            synchronized (this) {
+                if (transition == null) {
+                    return decision.get();
+                }
+            }
+            return Mono.defer(this::settleTransitions)
+                .then(Mono.defer(() -> settleThen(decision)));
+        });
+    }
+
     synchronized Mono<Void> settleCheckpoints() {
         return checkpointWrites.onErrorComplete();
     }
