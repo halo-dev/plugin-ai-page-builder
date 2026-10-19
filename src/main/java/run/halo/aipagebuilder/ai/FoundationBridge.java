@@ -1,7 +1,5 @@
 package run.halo.aipagebuilder.ai;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -24,15 +22,12 @@ import run.halo.aifoundation.exception.UnsupportedModelCapabilityException;
 import run.halo.aifoundation.part.PartType;
 import run.halo.aifoundation.schema.OutputSpec;
 import run.halo.app.plugin.extensionpoint.ExtensionGetter;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.ai.AiGenerationException.Reason;
 
 /** Loaded reflectively on demand only. Must never be a Spring/PF4J component. */
 public final class FoundationBridge implements AiGateway {
     static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(120);
-
-    private static final ObjectMapper REVIEW_MAPPER = run.halo.app.infra.utils.JsonUtils.mapper()
-        .copy()
-        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private static final String SYSTEM_PROMPT = """
         You are the editing assistant for the current page. Call read_current_page for the latest content before making changes.
@@ -123,7 +118,7 @@ public final class FoundationBridge implements AiGateway {
             throw new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT);
         }
         try {
-            return REVIEW_MAPPER.convertValue(result.getOutput(), AiReview.class);
+            return Json.MAPPER.convertValue(result.getOutput(), AiReview.class);
         } catch (IllegalArgumentException error) {
             throw new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT, error);
         }
@@ -187,9 +182,9 @@ public final class FoundationBridge implements AiGateway {
                     run.halo.aifoundation.ui.UIMessageRole.USER,
                     java.util.List.of(new run.halo.aifoundation.ui.TextPart("text", turn.prompt())), null));
                 var text = turn.text() + "\nTurn result: " + turn.status() + "\nTool summary: "
-                    + run.halo.app.infra.utils.JsonUtils.objectToJson(turn.tools())
+                    + Json.toJson(turn.tools())
                     + "\nUser questions and answers (conversation data): "
-                    + run.halo.app.infra.utils.JsonUtils.objectToJson(turn.questions());
+                    + Json.toJson(turn.questions());
                 messages.add(run.halo.aifoundation.ui.UIMessage.assistant(turn.runId(),
                     java.util.List.of(new run.halo.aifoundation.ui.TextPart("text", text))));
             }

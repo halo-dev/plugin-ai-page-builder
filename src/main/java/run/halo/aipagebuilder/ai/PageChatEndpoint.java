@@ -21,7 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 import run.halo.app.core.extension.endpoint.CustomEndpoint;
 import run.halo.app.extension.GroupVersion;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 
 @Component
@@ -124,7 +124,7 @@ public class PageChatEndpoint implements CustomEndpoint {
             ServerResponse.ok().contentType(MediaType.TEXT_EVENT_STREAM)
                 .header("Cache-Control", "no-store")
                 .header("X-Halo-AI-UI-Message-Stream", "v1")
-                .body(events.map(chunk -> ServerSentEvent.builder(JsonUtils.objectToJson(chunk)).build())
+                .body(events.map(chunk -> ServerSentEvent.builder(Json.toJson(chunk)).build())
                     .concatWithValues(ServerSentEvent.builder("[DONE]").build()),
                     new ParameterizedTypeReference<ServerSentEvent<String>>() { }));
     }

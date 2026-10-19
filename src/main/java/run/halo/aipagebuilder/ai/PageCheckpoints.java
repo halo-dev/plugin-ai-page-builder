@@ -9,7 +9,7 @@ import run.halo.aipagebuilder.model.PageChatCheckpoint;
 import run.halo.aipagebuilder.page.PageApi.PageDetail;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 
 /** One bounded durable snapshot per session; writes run under the page-wide reservation. */
 final class PageCheckpoints {
@@ -26,7 +26,7 @@ final class PageCheckpoints {
     Mono<Void> save(PageChatCheckpoint.Spec snapshot) {
         return Mono.defer(() -> {
             snapshot.setUpdatedAt(Instant.now());
-            if (JsonUtils.objectToJson(snapshot).getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
+            if (Json.toJson(snapshot).getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
                 return Mono.error(new AiGenerationException(AiGenerationException.Reason.CHECKPOINT_FAILED));
             }
             // Halo delete marks a tombstone first. Wait for GC before reusing the stable name;

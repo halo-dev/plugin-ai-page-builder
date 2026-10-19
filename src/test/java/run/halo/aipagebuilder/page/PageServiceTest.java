@@ -8,7 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static run.halo.app.extension.index.query.QueryFactory.equal;
+import static run.halo.app.extension.index.query.Queries.equal;
 
 import java.time.Instant;
 import java.util.HashMap;
@@ -31,7 +31,7 @@ import run.halo.app.extension.ListResult;
 import run.halo.app.extension.PageRequest;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.router.selector.FieldSelector;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.model.ThemePage;
@@ -55,7 +55,7 @@ class PageServiceTest {
                 ListOptions options = invocation.getArgument(1);
                 return Flux.fromIterable(pages.values()).filter(page -> options.equals(
                     new ListOptions().setFieldSelector(FieldSelector.of(equal("spec.slug", PagePaths.slug(page))))))
-                    .map(JsonUtils::deepCopy);
+                    .map(Json::deepCopy);
             }));
         when(client.fetch(eq(run.halo.aipagebuilder.model.PageChatSession.class), anyString()))
             .thenReturn(Mono.empty());
@@ -67,17 +67,17 @@ class PageServiceTest {
             .thenReturn(Flux.empty());
         when(client.fetch(eq(ThemePage.class), anyString())).thenAnswer(invocation ->
             Mono.defer(() -> Mono.justOrEmpty(pages.get(invocation.<String>getArgument(1)))
-                .map(JsonUtils::deepCopy)));
+                .map(Json::deepCopy)));
         when(client.fetch(eq(ThemePageRevision.class), anyString())).thenAnswer(invocation ->
             Mono.defer(() -> Mono.justOrEmpty(revisions.get(invocation.<String>getArgument(1)))
-                .map(JsonUtils::deepCopy)));
+                .map(Json::deepCopy)));
         when(client.create(any(ThemePage.class))).thenAnswer(invocation -> Mono.fromSupplier(() -> {
             ThemePage page = invocation.getArgument(0);
             if (pages.containsKey(page.getMetadata().getName())) {
                 throw new OptimisticLockingFailureException("Already exists");
             }
             page.getMetadata().setVersion(1L);
-            pages.put(page.getMetadata().getName(), JsonUtils.deepCopy(page));
+            pages.put(page.getMetadata().getName(), Json.deepCopy(page));
             return page;
         }));
         when(client.create(any(ThemePageRevision.class))).thenAnswer(invocation ->
@@ -85,7 +85,7 @@ class PageServiceTest {
                 ThemePageRevision revision = invocation.getArgument(0);
                 revision.getMetadata().setVersion(1L);
                 revision.getMetadata().setCreationTimestamp(Instant.now());
-                revisions.put(revision.getMetadata().getName(), JsonUtils.deepCopy(revision));
+                revisions.put(revision.getMetadata().getName(), Json.deepCopy(revision));
                 return revision;
             }));
         when(client.update(any(ThemePage.class))).thenAnswer(invocation -> Mono.fromSupplier(() -> {
@@ -95,7 +95,7 @@ class PageServiceTest {
                 throw new OptimisticLockingFailureException("Changed");
             }
             page.getMetadata().setVersion(page.getMetadata().getVersion() + 1);
-            pages.put(page.getMetadata().getName(), JsonUtils.deepCopy(page));
+            pages.put(page.getMetadata().getName(), Json.deepCopy(page));
             return page;
         }));
         when(client.delete(any(ThemePage.class))).thenAnswer(invocation -> Mono.fromSupplier(() -> {
@@ -111,7 +111,7 @@ class PageServiceTest {
             }));
         when(client.listAll(eq(ThemePageRevision.class), any(ListOptions.class), any()))
             .thenAnswer(invocation -> Flux.defer(() -> Flux.fromIterable(
-                revisions.values().stream().map(JsonUtils::deepCopy).toList())));
+                revisions.values().stream().map(Json::deepCopy).toList())));
     }
 
     @Test
@@ -256,7 +256,7 @@ class PageServiceTest {
         service.save(created.page().name(), new SavePageRequest(saved.page().version(), document("Manual"), "manual"),
             "admin").block();
         assertThat(service.committedAiRevision(created.page().name(), "run-1").block()).isEqualTo(saved.page().draftRevision());
-        var orphan = JsonUtils.deepCopy(revisions.get(saved.page().draftRevision()));
+        var orphan = Json.deepCopy(revisions.get(saved.page().draftRevision()));
         orphan.getMetadata().setName("orphan");
         orphan.getSpec().setRunId("uncommitted-run");
         revisions.put("orphan", orphan);
@@ -533,7 +533,7 @@ class PageServiceTest {
             ThemePage page = invocation.getArgument(0);
             return commit.asMono().then(Mono.fromSupplier(() -> {
                 page.getMetadata().setVersion(1L);
-                pages.put(page.getMetadata().getName(), JsonUtils.deepCopy(page));
+                pages.put(page.getMetadata().getName(), Json.deepCopy(page));
                 return page;
             }));
         });
@@ -556,7 +556,7 @@ class PageServiceTest {
             ThemePage page = invocation.getArgument(0);
             return commit.asMono().then(Mono.fromSupplier(() -> {
                 page.getMetadata().setVersion(page.getMetadata().getVersion() + 1);
-                pages.put(page.getMetadata().getName(), JsonUtils.deepCopy(page));
+                pages.put(page.getMetadata().getName(), Json.deepCopy(page));
                 return page;
             }));
         });

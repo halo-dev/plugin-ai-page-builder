@@ -25,10 +25,10 @@ import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.ListResult;
 import run.halo.app.extension.PageRequest;
-import run.halo.app.extension.index.query.Query;
+import run.halo.app.extension.index.query.Condition;
 import run.halo.app.extension.index.query.IndexCondition;
 import run.halo.aipagebuilder.model.PageChatTurnRecord;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageChatSession;
 import run.halo.aipagebuilder.model.PageDocument;
@@ -52,12 +52,12 @@ class PageChatServiceTest {
     void setup() {
         var type = run.halo.aipagebuilder.model.PageChatCheckpoint.class;
         when(client.fetch(eq(type), anyString())).thenAnswer(i -> Mono.defer(() ->
-            Mono.justOrEmpty(checkpoints.get(i.<String>getArgument(1))).map(JsonUtils::deepCopy)));
+            Mono.justOrEmpty(checkpoints.get(i.<String>getArgument(1))).map(Json::deepCopy)));
         when(client.create(any(type))).thenAnswer(i -> Mono.fromSupplier(() -> {
             run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
             if (checkpoints.containsKey(value.getMetadata().getName())) throw new OptimisticLockingFailureException("CAS");
             value.getMetadata().setVersion(1L);
-            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            checkpoints.put(value.getMetadata().getName(), Json.deepCopy(value));
             return value;
         }));
         when(client.update(any(type))).thenAnswer(i -> Mono.fromSupplier(() -> {
@@ -65,7 +65,7 @@ class PageChatServiceTest {
             var previous = checkpoints.get(value.getMetadata().getName());
             if (!previous.getMetadata().getVersion().equals(value.getMetadata().getVersion())) throw new OptimisticLockingFailureException("CAS");
             value.getMetadata().setVersion(value.getMetadata().getVersion() + 1);
-            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            checkpoints.put(value.getMetadata().getName(), Json.deepCopy(value));
             return value;
         }));
         when(client.delete(any(type))).thenAnswer(i -> Mono.fromSupplier(() -> {
@@ -76,15 +76,16 @@ class PageChatServiceTest {
         when(client.listAll(eq(type), any(), any())).thenAnswer(i -> Flux.defer(() -> {
             ListOptions options = i.getArgument(1);
             return Flux.fromIterable(checkpoints.values().stream().filter(value -> matches(
-                options.getFieldSelector().query(), field -> "spec.pageName".equals(field)
-                    ? value.getSpec().getPageName() : null)).map(JsonUtils::deepCopy).toList());
+                (Condition) options.getFieldSelector().query(),
+                field -> "spec.pageName".equals(field) ? value.getSpec().getPageName() : null))
+                .map(Json::deepCopy).toList());
         }));
         when(client.fetch(eq(PageChatSession.class), anyString())).thenAnswer(i -> Mono.defer(() ->
-            Mono.justOrEmpty(stored.get(i.<String>getArgument(1))).map(JsonUtils::deepCopy)));
+            Mono.justOrEmpty(stored.get(i.<String>getArgument(1))).map(Json::deepCopy)));
         when(client.create(any(PageChatSession.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
             PageChatSession session = i.getArgument(0);
             session.getMetadata().setVersion(1L);
-            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            stored.put(session.getMetadata().getName(), Json.deepCopy(session));
             return session;
         }));
         when(client.update(any(PageChatSession.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
@@ -94,18 +95,18 @@ class PageChatServiceTest {
                 throw new OptimisticLockingFailureException("CAS");
             }
             session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            stored.put(session.getMetadata().getName(), Json.deepCopy(session));
             return session;
         }));
         when(client.fetch(eq(PageChatTurnRecord.class), anyString())).thenAnswer(i -> Mono.defer(() ->
-            Mono.justOrEmpty(turns.get(i.<String>getArgument(1))).map(JsonUtils::deepCopy)));
+            Mono.justOrEmpty(turns.get(i.<String>getArgument(1))).map(Json::deepCopy)));
         when(client.create(any(PageChatTurnRecord.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
             PageChatTurnRecord record = i.getArgument(0);
             if (turns.containsKey(record.getMetadata().getName())) {
                 throw new OptimisticLockingFailureException("already exists");
             }
             record.getMetadata().setVersion(1L);
-            turns.put(record.getMetadata().getName(), JsonUtils.deepCopy(record));
+            turns.put(record.getMetadata().getName(), Json.deepCopy(record));
             return record;
         }));
         when(client.listBy(eq(PageChatTurnRecord.class), any(), any())).thenAnswer(i -> Mono.fromSupplier(() -> {
@@ -120,11 +121,11 @@ class PageChatServiceTest {
         when(client.listAll(eq(PageChatSession.class), any(), any())).thenAnswer(i -> Flux.defer(() -> {
             ListOptions options = i.getArgument(1);
             return Flux.fromIterable(stored.values().stream().filter(session -> matches(
-                options.getFieldSelector().query(), field -> switch (field) {
+                (Condition) options.getFieldSelector().query(), field -> switch (field) {
                     case "metadata.name" -> session.getMetadata().getName();
                     case "spec.pageName" -> session.getSpec().getPageName();
                     default -> null;
-                })).map(JsonUtils::deepCopy).toList());
+                })).map(Json::deepCopy).toList());
         }));
         when(client.delete(any(PageChatTurnRecord.class))).thenAnswer(i -> Mono.fromSupplier(() -> {
             PageChatTurnRecord record = i.getArgument(0);
@@ -208,7 +209,7 @@ class PageChatServiceTest {
                     throw new OptimisticLockingFailureException("CAS");
                 }
                 session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-                stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+                stored.put(session.getMetadata().getName(), Json.deepCopy(session));
                 applied.add(session.getSpec().getTitle());
                 return session;
             });
@@ -376,7 +377,7 @@ class PageChatServiceTest {
         assertThat(session.activeRun()).isNull();
         assertThat(session.turns()).hasSize(1);
         assertThat(session.turns().getFirst().tools()).hasSize(3);
-        assertThat(JsonUtils.objectToJson(session)).doesNotContain("<p>new</p>", "<script>");
+        assertThat(Json.toJson(session)).doesNotContain("<p>new</p>", "<script>");
         assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
         assertThatThrownBy(() -> service.start("page", request(), "admin").block())
             .hasMessageContaining("409");
@@ -400,7 +401,7 @@ class PageChatServiceTest {
         assertThat(events.get(4)).containsEntry("name", "page-committed").containsEntry("id", runId);
         var turn = service.session("page").block().turns().getFirst();
         assertThat(turn.parts()).extracting(ChatApi.DisplayPart::type).containsExactly("reasoning", "tool");
-        assertThat(JsonUtils.objectToJson(turn)).contains("provider explanation").doesNotContain("<p>new</p>");
+        assertThat(Json.toJson(turn)).contains("provider explanation").doesNotContain("<p>new</p>");
     }
 
     @Test
@@ -521,7 +522,7 @@ class PageChatServiceTest {
                 && "cancelled".equals(session.getSpec().getActive().status())
                 && failures.getAndIncrement() == 0) throw new IllegalStateException("storage unavailable");
             session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            stored.put(session.getMetadata().getName(), Json.deepCopy(session));
             return session;
         }));
         assertThatThrownBy(() -> service.cancel("page", runId).block())
@@ -543,7 +544,7 @@ class PageChatServiceTest {
                 && "cancelled".equals(session.getSpec().getActive().status())) return cancellationWrite.asMono();
             return Mono.fromSupplier(() -> {
                 session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-                stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+                stored.put(session.getMetadata().getName(), Json.deepCopy(session));
                 return session;
             });
         });
@@ -657,7 +658,7 @@ class PageChatServiceTest {
         var turn = service.session("page").block().turns().getFirst();
         assertThat(turn.annotations().getFirst().comment()).isEqualTo("修改这一段");
         assertThat(turn.annotations().getFirst().path()).isEmpty();
-        assertThat(JsonUtils.objectToJson(turn)).doesNotContain("private-dom-marker");
+        assertThat(Json.toJson(turn)).doesNotContain("private-dom-marker");
     }
 
     @Test
@@ -713,7 +714,7 @@ class PageChatServiceTest {
                 return persisted.asMono();
             }
             session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            stored.put(session.getMetadata().getName(), Json.deepCopy(session));
             return Mono.just(session);
         });
         service.steer("page", runId, new ChatApi.SteerRequest("电话改成 0571-12345678"), "admin").subscribe();
@@ -722,7 +723,7 @@ class PageChatServiceTest {
         assertThat(prompts).hasSize(1);
         var session = candidate.get();
         session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-        stored.put("page", JsonUtils.deepCopy(session));
+        stored.put("page", Json.deepCopy(session));
         persisted.tryEmitValue(session);
         assertThat(events.block()).extracting(value -> value.get("type")).contains("finish");
         assertThat(prompts).hasSize(2);
@@ -744,7 +745,7 @@ class PageChatServiceTest {
                 return Mono.error(new IllegalStateException("failed steer save"));
             }
             session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-            stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+            stored.put(session.getMetadata().getName(), Json.deepCopy(session));
             return Mono.just(session);
         });
         assertThatThrownBy(() -> service.steer("page", runId,
@@ -896,7 +897,7 @@ class PageChatServiceTest {
         }
         var window = PageChatService.contextWindow(history);
         assertThat(window.size()).isLessThanOrEqualTo(20).isGreaterThan(0);
-        assertThat(JsonUtils.objectToJson(window).getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
+        assertThat(Json.toJson(window).getBytes(java.nio.charset.StandardCharsets.UTF_8).length)
             .isLessThanOrEqualTo(PageChatService.MAX_BYTES);
         assertThat(window.getLast().runId()).isEqualTo("r29");
         assertThat(history).hasSize(30);
@@ -979,7 +980,7 @@ class PageChatServiceTest {
     @Test
     void rejectsCrossPageSessionAndDefaultDeletionClearsHistory() {
         service.session("page").block();
-        var foreign = JsonUtils.deepCopy(stored.get("page"));
+        var foreign = Json.deepCopy(stored.get("page"));
         foreign.getMetadata().setName("foreign");
         foreign.getSpec().setPageName("other");
         stored.put("foreign", foreign);
@@ -1204,7 +1205,7 @@ class PageChatServiceTest {
             if (updates.incrementAndGet() == 2) return Mono.error(new IllegalStateException("storage"));
             return Mono.fromSupplier(() -> {
                 session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-                stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+                stored.put(session.getMetadata().getName(), Json.deepCopy(session));
                 return session;
             });
         }).when(client).update(any(PageChatSession.class));
@@ -1231,7 +1232,7 @@ class PageChatServiceTest {
             if (updates.incrementAndGet() == 1) return Mono.error(new IllegalStateException("storage"));
             return Mono.fromSupplier(() -> {
                 session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-                stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+                stored.put(session.getMetadata().getName(), Json.deepCopy(session));
                 return session;
             });
         }).when(client).update(any(PageChatSession.class));
@@ -1313,7 +1314,7 @@ class PageChatServiceTest {
             run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
             if (value.getSpec().getDocument().html().contains("not persisted")) return Mono.error(new IllegalStateException("storage"));
             value.getMetadata().setVersion(value.getMetadata().getVersion() + 1);
-            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            checkpoints.put(value.getMetadata().getName(), Json.deepCopy(value));
             return Mono.just(value);
         });
         org.mockito.Mockito.doAnswer(i -> {
@@ -1437,7 +1438,7 @@ class PageChatServiceTest {
         when(client.delete(any(run.halo.aipagebuilder.model.PageChatCheckpoint.class))).thenAnswer(i -> {
             run.halo.aipagebuilder.model.PageChatCheckpoint value = i.getArgument(0);
             value.getMetadata().setDeletionTimestamp(Instant.now());
-            checkpoints.put(value.getMetadata().getName(), JsonUtils.deepCopy(value));
+            checkpoints.put(value.getMetadata().getName(), Json.deepCopy(value));
             return Mono.just(value);
         });
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
@@ -1478,17 +1479,19 @@ class PageChatServiceTest {
     }
 
     private List<PageChatTurnRecord> matchingTurns(ListOptions options) {
-        return turns.values().stream().filter(record -> matches(options.getFieldSelector().query(), field -> switch (field) {
-            case "spec.pageName" -> record.getSpec().getPageName();
-            case "spec.sessionId" -> record.getSpec().getSessionId();
-            case "spec.runId" -> record.getSpec().getRunId();
-            case "spec.sortKey" -> record.getSpec().getSortKey();
-            default -> null;
-        })).sorted(java.util.Comparator.comparing((PageChatTurnRecord record) -> record.getSpec().getSortKey()).reversed())
-            .map(JsonUtils::deepCopy).toList();
+        return turns.values().stream().filter(record -> matches(
+            (Condition) options.getFieldSelector().query(), field -> switch (field) {
+                case "spec.pageName" -> record.getSpec().getPageName();
+                case "spec.sessionId" -> record.getSpec().getSessionId();
+                case "spec.runId" -> record.getSpec().getRunId();
+                case "spec.sortKey" -> record.getSpec().getSortKey();
+                default -> null;
+            })).sorted(java.util.Comparator.comparing((PageChatTurnRecord record) -> record.getSpec().getSortKey()).reversed())
+            .map(Json::deepCopy).toList();
     }
 
-    private static boolean matches(Query query, java.util.function.Function<String, String> value) {
+    private static boolean matches(Condition query,
+        java.util.function.Function<String, String> value) {
         var type = query.getClass().getSimpleName();
         if (query instanceof IndexCondition condition) {
             var actual = value.apply(condition.indexName());
@@ -1499,12 +1502,12 @@ class PageChatServiceTest {
                 default -> throw new AssertionError(type);
             };
         }
-        boolean left = matches((Query) component(query, "left"), value);
-        boolean right = matches((Query) component(query, "right"), value);
+        boolean left = matches((Condition) component(query, "left"), value);
+        boolean right = matches((Condition) component(query, "right"), value);
         return type.equals("OrCondition") ? left || right : left && right;
     }
 
-    private static Object component(Query query, String name) {
+    private static Object component(Condition query, String name) {
         try {
             var accessor = query.getClass().getDeclaredMethod(name);
             accessor.setAccessible(true);

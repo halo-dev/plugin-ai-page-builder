@@ -1,6 +1,5 @@
 package run.halo.aipagebuilder.page;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -13,8 +12,9 @@ import java.util.Set;
 import java.util.zip.ZipInputStream;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.model.PageDocument;
+import tools.jackson.databind.JsonNode;
 
 /** Versioned source package; uploaded entries are never extracted onto the filesystem. */
 final class PageArchive {
@@ -41,26 +41,26 @@ final class PageArchive {
         JsonNode metadata;
         try {
             var json = files.get("page.json");
-            metadata = JsonUtils.jsonToObject(json.startsWith("﻿") ? json.substring(1) : json,
+            metadata = Json.fromJson(json.startsWith("﻿") ? json.substring(1) : json,
                 JsonNode.class);
         } catch (RuntimeException error) {
             throw invalid("page.json 不是有效的 JSON");
         }
         if (metadata == null || !metadata.isObject()
-            || !FORMAT.equals(metadata.path("format").asText())
+            || !FORMAT.equals(metadata.path("format").asString())
             || !metadata.path("version").isIntegralNumber()
             || !metadata.path("version").canConvertToInt()
             || metadata.path("version").intValue() != 1) {
             throw invalid("不支持的页面包格式或版本");
         }
-        if (!metadata.path("title").isTextual()
+        if (!metadata.path("title").isString()
             || !metadata.path("themeLayout").isBoolean()
-            || (metadata.hasNonNull("description") && !metadata.get("description").isTextual())) {
+            || (metadata.hasNonNull("description") && !metadata.get("description").isString())) {
             throw invalid("page.json 的页面信息无效");
         }
         var document = new PageDocument(2, "code", null, null,
-            files.get("page.html"), files.get("styles.css"), metadata.get("title").textValue(),
-            metadata.path("description").asText(null), files.get("script.js"));
+            files.get("page.html"), files.get("styles.css"), metadata.get("title").stringValue(),
+            metadata.path("description").asString(null), files.get("script.js"));
         return new ImportedPage(document, metadata.get("themeLayout").booleanValue());
     }
 

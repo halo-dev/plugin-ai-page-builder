@@ -6,7 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.jsoup.nodes.Entities;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.page.PageApi.PageDetail;
 
 /** Source export intentionally leaves online assets and theme dependencies as references. */
@@ -24,7 +24,7 @@ final class PageExport {
             + document.html() + (document.js().isEmpty() ? "" : "\n<script src=\"script.js\"></script>")
             + "\n</body></html>\n";
         try (var bytes = new ByteArrayOutputStream(); var zip = new ZipOutputStream(bytes, StandardCharsets.UTF_8)) {
-            entry(zip, "page.json", JsonUtils.objectToJson(metadata));
+            entry(zip, "page.json", Json.toJson(metadata));
             entry(zip, "page.html", document.html());
             entry(zip, "index.html", html);
             entry(zip, "styles.css", document.css());

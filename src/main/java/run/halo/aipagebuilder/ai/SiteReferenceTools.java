@@ -30,7 +30,7 @@ import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.Ref;
 import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.app.infra.SystemSetting;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 
 /** Public read-only site references; the caller owns authorization and the shared output budget. */
 @Service
@@ -86,10 +86,10 @@ public class SiteReferenceTools {
             if (json == null) return result;
             if (json.length() > 64 * 1024) throw new IllegalArgumentException("Site profile unavailable");
             // Do not propagate parser diagnostics containing raw configuration into a tool result.
-            com.fasterxml.jackson.databind.JsonNode basic;
+            tools.jackson.databind.JsonNode basic;
             try {
-                basic = JsonUtils.mapper().readTree(json);
-            } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+                basic = Json.MAPPER.readTree(json);
+            } catch (tools.jackson.core.JacksonException error) {
                 throw new IllegalArgumentException("Site profile unavailable");
             }
             if (basic == null || (!basic.isObject() && !basic.isNull())) {
@@ -98,7 +98,7 @@ public class SiteReferenceTools {
             for (var field : PROFILE_FIELDS) {
                 if (basic.isNull() || basic.has(field)) {
                     var value = basic.get(field);
-                    result.put(field, value != null && value.isTextual() ? value.asText() : "");
+                    result.put(field, value != null && value.isString() ? value.asString() : "");
                 }
             }
             return result;

@@ -8,7 +8,7 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 
 @Component
 public class ApiReferenceTools {
@@ -109,7 +109,7 @@ public class ApiReferenceTools {
     }
 
     private static int bytes(Map<String, Object> result) {
-        return JsonUtils.objectToJson(result).getBytes(StandardCharsets.UTF_8).length;
+        return Json.toJson(result).getBytes(StandardCharsets.UTF_8).length;
     }
 
     public static List<PageReferenceTools.Definition> definitions() {

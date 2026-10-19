@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 
 class ChatDisplayTest {
     @Test
@@ -21,7 +21,7 @@ class ChatDisplayTest {
         var parts = display.snapshot("completed");
         assertThat(parts).extracting(ChatApi.DisplayPart::type).containsExactly("text", "reasoning", "tool", "text");
         assertThat(parts.get(2).status()).isEqualTo("completed");
-        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("raw-html-marker", "private-signature");
+        assertThat(Json.toJson(parts)).doesNotContain("raw-html-marker", "private-signature");
     }
 
     @Test
@@ -41,7 +41,7 @@ class ChatDisplayTest {
             assertThat(part.status()).isEqualTo("completed");
             assertThat(part.summary()).isEqualTo("读取完成");
         });
-        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("raw-contract-marker");
+        assertThat(Json.toJson(parts)).doesNotContain("raw-contract-marker");
     }
 
     @Test
@@ -54,7 +54,7 @@ class ChatDisplayTest {
         var parts = display.snapshot("completed");
         assertThat(parts.getFirst().status()).isEqualTo("completed");
         assertThat(parts.getFirst().summary()).isEqualTo("已更新会话名称");
-        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("公司介绍页");
+        assertThat(Json.toJson(parts)).doesNotContain("公司介绍页");
     }
 
     @Test
@@ -91,7 +91,7 @@ class ChatDisplayTest {
         var parts = display.snapshot("completed");
         assertThat(parts.getFirst().status()).isEqualTo("error");
         assertThat(parts.getFirst().summary()).isEqualTo("已读取 0/3 项接口文档，3 项失败：未找到接口");
-        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("raw-contract-marker", "items");
+        assertThat(Json.toJson(parts)).doesNotContain("raw-contract-marker", "items");
     }
 
     @Test
@@ -110,7 +110,7 @@ class ChatDisplayTest {
         var parts = display.snapshot("completed");
         assertThat(parts.getFirst().status()).isEqualTo("completed");
         assertThat(parts.getFirst().summary()).isEqualTo("已读取 1/2 项接口文档，1 项失败：未找到接口");
-        assertThat(JsonUtils.objectToJson(parts)).doesNotContain("raw-contract-marker", "items");
+        assertThat(Json.toJson(parts)).doesNotContain("raw-contract-marker", "items");
     }
 
     @Test
@@ -125,7 +125,7 @@ class ChatDisplayTest {
         display.accept(Map.of("type", "tool-output-available", "toolCallId", "m", "output",
             Map.of("summary", "保存结果待确认", "error", "保存结果待确认")));
         assertThat(display.snapshot("completed").getFirst().status()).isEqualTo("error");
-        assertThat(JsonUtils.objectToJson(display.snapshot("completed"))).doesNotContain("private-source");
+        assertThat(Json.toJson(display.snapshot("completed"))).doesNotContain("private-source");
     }
 
     @Test

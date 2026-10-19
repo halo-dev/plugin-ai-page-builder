@@ -105,7 +105,7 @@ public class PageImportReviewService {
                 var archiveHash = input.archiveHash();
                 if (store.getMalicious(archiveHash) != null) {
                     return Mono.error(new ResponseStatusException(
-                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        HttpStatus.UNPROCESSABLE_CONTENT,
                         "该页面包在 30 分钟内已被 AI 判定为恶意，已阻止重新审查和导入。"));
                 }
                 return Mono.using(
@@ -155,7 +155,7 @@ public class PageImportReviewService {
             }
             switch (store.importBlock(archiveHash)) {
                 case MALICIOUS -> throw new ResponseStatusException(
-                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    HttpStatus.UNPROCESSABLE_CONTENT,
                     "该页面包在 30 分钟内已被 AI 判定为恶意，已阻止导入。");
                 case REVIEWING -> throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "该页面包正在审查中，请等待审查完成后再导入。");
@@ -165,12 +165,12 @@ public class PageImportReviewService {
                 case "safe" -> { }
                 case "suspicious" -> {
                     if (!confirmed) {
-                        throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT,
                             "AI 审查发现可疑内容，请确认风险后重试。");
                     }
                 }
                 case "malicious" -> throw new ResponseStatusException(
-                    HttpStatus.UNPROCESSABLE_ENTITY, "AI 审查发现恶意内容，已阻止导入。");
+                    HttpStatus.UNPROCESSABLE_CONTENT, "AI 审查发现恶意内容，已阻止导入。");
                 default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "审查结果无效，请重新审查。");
             }

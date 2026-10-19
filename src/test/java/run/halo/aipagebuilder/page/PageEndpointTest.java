@@ -35,7 +35,7 @@ import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 import run.halo.app.infra.ExternalUrlSupplier;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.app.theme.TemplateNameResolver;
 import run.halo.aipagebuilder.ai.PublicApiCatalog;
 import run.halo.aipagebuilder.content.ContentPolicy;
@@ -191,10 +191,10 @@ class PageEndpointTest {
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
         when(reviewService.authorize(eq("review-1"), any(byte[].class), eq("admin"), eq(false)))
             .thenReturn(Mono.error(new ResponseStatusException(
-                HttpStatus.UNPROCESSABLE_ENTITY, "blocked")));
+                HttpStatus.UNPROCESSABLE_CONTENT, "blocked")));
         var result = asAdmin(endpoint, importRequest(bytes));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
-            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
         verify(service, org.mockito.Mockito.never()).importPage(any(byte[].class), any());
     }
 
@@ -217,7 +217,7 @@ class PageEndpointTest {
     void oversizedUploadIsRejectedBeforeImport() {
         var result = asAdmin(endpoint, importRequest(new byte[PageArchive.MAX_BYTES + 1]));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
-            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE));
+            error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE));
         verifyNoInteractions(service, renderer);
     }
 
@@ -251,7 +251,7 @@ class PageEndpointTest {
             .thenReturn(Mono.just("theme:custom-ai-page-builder"));
 
         var response = (RenderingResponse) asAdmin(renderingEndpoint,
-            previewRequest(JsonUtils.objectToJson(candidate))).block();
+            previewRequest(Json.toJson(candidate))).block();
         var getResponse = (RenderingResponse) asAdmin(renderingEndpoint,
             request("/pages/about/preview")).block();
 
@@ -281,7 +281,7 @@ class PageEndpointTest {
         when(service.updateSlug("about", input)).thenReturn(Mono.just(detail(document)));
         var request = ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest
                 .put("/pages/about/slug").contentType(MediaType.APPLICATION_JSON)
-                .body(JsonUtils.objectToJson(input))), HandlerStrategies.withDefaults().messageReaders());
+                .body(Json.toJson(input))), HandlerStrategies.withDefaults().messageReaders());
         assertThat(asAdmin(endpoint, request).block().statusCode()).isEqualTo(HttpStatus.OK);
         verify(service).updateSlug("about", input);
         verifyNoMoreInteractions(service);
@@ -295,7 +295,7 @@ class PageEndpointTest {
             .thenReturn(ServerResponse.ok().build());
         assertThat(asAdmin(endpoint, request("/pages/about/preview")).block().statusCode())
             .isEqualTo(HttpStatus.OK);
-        assertThat(asAdmin(endpoint, previewRequest(JsonUtils.objectToJson(document))).block().statusCode())
+        assertThat(asAdmin(endpoint, previewRequest(Json.toJson(document))).block().statusCode())
             .isEqualTo(HttpStatus.OK);
         verify(renderer, times(2)).preview(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
     }
@@ -323,7 +323,7 @@ class PageEndpointTest {
     void candidatePreviewRequiresExistingPage() {
         var candidate = new PageDocument(1, "code", null, null, "<p>Unsaved</p>", "", "Title", null);
         when(service.get("about")).thenReturn(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND)));
-        var result = asAdmin(endpoint, previewRequest(JsonUtils.objectToJson(candidate)));
+        var result = asAdmin(endpoint, previewRequest(Json.toJson(candidate)));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
         verify(service).get("about");
@@ -344,7 +344,7 @@ class PageEndpointTest {
             "css".equals(invalidField) ? "@import url('https://example.com/style.css');" : "",
             "Title", null);
         when(service.get("about")).thenReturn(Mono.just(detail(stored)));
-        var result = asAdmin(renderingEndpoint, previewRequest(JsonUtils.objectToJson(candidate)));
+        var result = asAdmin(renderingEndpoint, previewRequest(Json.toJson(candidate)));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
         verify(service).get("about");

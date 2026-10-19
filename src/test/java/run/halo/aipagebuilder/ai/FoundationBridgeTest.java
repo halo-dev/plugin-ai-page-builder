@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import run.halo.aifoundation.part.PartType;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -254,7 +255,7 @@ class FoundationBridgeTest {
         copy.memory(tools);
         bridge.chat("model", java.util.List.of(), "公司电话 0571-12345678", copy).blockLast();
         assertThat(request.get().getTools()).extracting(tool -> tool.getName()).contains("update_site_memory");
-        assertThat(run.halo.app.infra.utils.JsonUtils.objectToJson(request.get().getMessages()))
+        assertThat(Json.toJson(request.get().getMessages()))
             .contains("currentRunSources", "r/prompt", "0571-12345678");
         assertThat(request.get().getMessages().getLast().getRole().toString()).isEqualTo("USER");
         assertThat(request.get().getSystem())

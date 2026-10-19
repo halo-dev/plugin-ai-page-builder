@@ -15,7 +15,7 @@ import run.halo.app.core.extension.Theme;
 import run.halo.app.extension.ConfigMap;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.SystemSetting;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 
 @Service
@@ -174,14 +174,14 @@ public class ThemeContextService {
         return Mono.fromCallable(() -> {
             var json = config.getData() == null ? null : config.getData().get(SystemSetting.Theme.GROUP);
             if (json == null) return null;
-            var group = JsonUtils.mapper().readTree(json);
+            var group = Json.MAPPER.readTree(json);
             if (group.isNull()) return "";
             if (!group.isObject()) throw new IllegalArgumentException("Invalid theme group");
             if (!group.has("active")) return null;
             var active = group.get("active");
             if (active.isNull()) return "";
-            if (!active.isTextual()) throw new IllegalArgumentException("Invalid active theme");
-            return active.asText();
+            if (!active.isString()) throw new IllegalArgumentException("Invalid active theme");
+            return active.asString();
         });
     }
 

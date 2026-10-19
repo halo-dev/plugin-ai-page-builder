@@ -265,7 +265,7 @@ public class PageEndpoint implements CustomEndpoint {
             .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.BAD_REQUEST,
                 "请选择 ZIP 文件")))
             .onErrorMap(DataBufferLimitException.class, error ->
-                new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "ZIP 文件不能超过 4 MB"));
+                new ResponseStatusException(HttpStatus.CONTENT_TOO_LARGE, "ZIP 文件不能超过 4 MB"));
     }
 
     private static <T> Mono<T> body(ServerRequest request, Class<T> type) {

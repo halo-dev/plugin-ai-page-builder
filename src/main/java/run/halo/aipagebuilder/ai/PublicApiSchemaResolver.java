@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.util.LRUMap;
+import com.fasterxml.jackson.databind.util.LookupCache;
 import io.swagger.v3.core.converter.AnnotatedType;
 import io.swagger.v3.core.converter.ModelConverter;
 import io.swagger.v3.core.converter.ModelConverterContext;
@@ -56,7 +57,8 @@ final class PublicApiSchemaResolver {
         private final Map<String, Object> reachable = new LinkedHashMap<>();
 
         Resolution() {
-            mapper.setTypeFactory(mapper.getTypeFactory().withCache(new LRUMap<>(16, 200)));
+            mapper.setTypeFactory(mapper.getTypeFactory().withCache(
+                (LookupCache<Object, JavaType>) new LRUMap<Object, JavaType>(16, 200)));
             context = new ModelConverterContextImpl(new LocalModelResolver()) {
                 private final Map<String, JavaType> modelTypes = new LinkedHashMap<>();
 
@@ -114,8 +116,11 @@ final class PublicApiSchemaResolver {
                                 || member.hasAnnotation(io.swagger.v3.oas.annotations.Hidden.class)) {
                                 continue;
                             }
-                            for (var annotation : member.annotations()) {
-                                safeAnnotation(annotation);
+                            var memberAnnotations = member.getAllAnnotations();
+                            if (memberAnnotations != null) {
+                                for (var annotation : memberAnnotations.annotations()) {
+                                    safeAnnotation(annotation);
+                                }
                             }
                         }
                     }

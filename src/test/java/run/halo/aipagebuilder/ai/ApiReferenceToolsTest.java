@@ -10,7 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 
 class ApiReferenceToolsTest {
     private final PublicApiCatalog catalog = mock(PublicApiCatalog.class);
@@ -186,6 +186,6 @@ class ApiReferenceToolsTest {
     }
 
     private static int bytes(Map<String, Object> result) {
-        return JsonUtils.objectToJson(result).getBytes(StandardCharsets.UTF_8).length;
+        return Json.toJson(result).getBytes(StandardCharsets.UTF_8).length;
     }
 }

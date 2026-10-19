@@ -27,7 +27,7 @@ import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.memory.SiteMemoryService.Change;
 import run.halo.aipagebuilder.memory.SiteMemoryService.SourceContext;
 import run.halo.aipagebuilder.model.SiteMemory;
@@ -44,14 +44,14 @@ class SiteMemoryServiceTest {
     @BeforeEach
     void setUp() {
         when(client.fetch(SiteMemory.class, SiteMemory.NAME)).thenAnswer(invocation ->
-            Mono.defer(() -> Mono.justOrEmpty(stored.get()).map(JsonUtils::deepCopy)));
+            Mono.defer(() -> Mono.justOrEmpty(stored.get()).map(Json::deepCopy)));
         when(client.create(any(SiteMemory.class))).thenAnswer(invocation -> Mono.fromSupplier(() -> {
-            SiteMemory memory = JsonUtils.deepCopy(invocation.getArgument(0));
+            SiteMemory memory = Json.deepCopy(invocation.getArgument(0));
             memory.getMetadata().setVersion(1L);
             if (!stored.compareAndSet(null, memory)) {
                 throw new OptimisticLockingFailureException("Already exists");
             }
-            return JsonUtils.deepCopy(memory);
+            return Json.deepCopy(memory);
         }));
         when(client.update(any(SiteMemory.class))).thenAnswer(invocation ->
             Mono.fromSupplier(() -> commit(invocation.getArgument(0))));
@@ -345,7 +345,7 @@ class SiteMemoryServiceTest {
             entries.add(entry("id-" + i, "key" + i, "v".repeat(500)));
         }
         stored.set(memory(1L, entries));
-        var snapshot = JsonUtils.deepCopy(stored.get());
+        var snapshot = Json.deepCopy(stored.get());
         assertStatus(422, () -> apply(add("Brand", "last", "v".repeat(500))));
         assertThat(stored.get()).isEqualTo(snapshot);
         verify(client, never()).update(any(SiteMemory.class));
@@ -368,7 +368,7 @@ class SiteMemoryServiceTest {
         stored.set(memory(1L, IntStream.range(0, 29).mapToObj(i ->
             new Entry("id-" + i, "Brand", "key" + i, "fact", "v", chineseSource, Instant.now()))
             .toList()));
-        while (JsonUtils.objectToJson(stored.get()).getBytes(StandardCharsets.UTF_8).length
+        while (Json.toJson(stored.get()).getBytes(StandardCharsets.UTF_8).length
             > 64 * 1024) {
             stored.get().getSpec().getEntries().removeLast();
         }
@@ -411,12 +411,12 @@ class SiteMemoryServiceTest {
             proposed.getMetadata().getVersion())) {
             throw new OptimisticLockingFailureException("Changed");
         }
-        var next = JsonUtils.deepCopy(proposed);
+        var next = Json.deepCopy(proposed);
         next.getMetadata().setVersion(current.getMetadata().getVersion() + 1);
         if (!stored.compareAndSet(current, next)) {
             throw new OptimisticLockingFailureException("Changed");
         }
-        return JsonUtils.deepCopy(next);
+        return Json.deepCopy(next);
     }
 
     private static Change add(String subject, String key, String value) {

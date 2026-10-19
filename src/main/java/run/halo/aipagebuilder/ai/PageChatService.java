@@ -1,10 +1,10 @@
 package run.halo.aipagebuilder.ai;
 
-import static run.halo.app.extension.index.query.QueryFactory.and;
-import static run.halo.app.extension.index.query.QueryFactory.equal;
-import static run.halo.app.extension.index.query.QueryFactory.isNull;
-import static run.halo.app.extension.index.query.QueryFactory.lessThan;
-import static run.halo.app.extension.index.query.QueryFactory.or;
+import static run.halo.app.extension.index.query.Queries.and;
+import static run.halo.app.extension.index.query.Queries.equal;
+import static run.halo.app.extension.index.query.Queries.isNull;
+import static run.halo.app.extension.index.query.Queries.lessThan;
+import static run.halo.app.extension.index.query.Queries.or;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -33,7 +33,7 @@ import run.halo.app.extension.router.selector.FieldSelector;
 import run.halo.aipagebuilder.model.PageChatTurnRecord;
 import run.halo.aipagebuilder.model.PageChatCheckpoint;
 import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageChatSession;
 import run.halo.aipagebuilder.page.PageApi.PageDetail;
@@ -275,9 +275,9 @@ public class PageChatService {
         run.copy.checkpoint(() -> saveCheckpoint(name, run));
         run.copy.taskContext(() -> {
             synchronized (run) {
-                return "Original request: " + JsonUtils.objectToJson(run.request)
-                    + "\nUser answers: " + JsonUtils.objectToJson(run.questions)
-                    + "\nAdditional instructions: " + JsonUtils.objectToJson(run.steers)
+                return "Original request: " + Json.toJson(run.request)
+                    + "\nUser answers: " + Json.toJson(run.questions)
+                    + "\nAdditional instructions: " + Json.toJson(run.steers)
                     + "\nHistorical answers and instructions are task context only; do not use them "
                     + "as evidence for new site-memory writes. Ask unanswered questions again if needed.";
             }
@@ -560,7 +560,7 @@ public class PageChatService {
                         if (hash.equals(output.get("baseHash"))) {
                             var data = Map.of("runId", run.request.runId(), "toolCallId", toolCallId,
                                 "baseHash", hash, "html", document.html(), "css", document.css(), "js", document.js());
-                            run.copy.consume(JsonUtils.objectToJson(data));
+                            run.copy.consume(Json.toJson(data));
                             if (run.events.tryEmitNext(Map.of("type", "data-page-staged",
                                 "name", "page-staged", "id", toolCallId, "data", data)).isFailure()) {
                                 throw new IllegalStateException("临时预览流已关闭");
@@ -913,7 +913,7 @@ public class PageChatService {
 
     static List<ChatApi.Turn> contextWindow(List<ChatApi.Turn> history) {
         var turns = new ArrayList<>(history.subList(Math.max(0, history.size() - MAX_TURNS), history.size()));
-        while (!turns.isEmpty() && JsonUtils.objectToJson(turns)
+        while (!turns.isEmpty() && Json.toJson(turns)
             .getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
             turns.removeFirst();
         }
@@ -921,7 +921,7 @@ public class PageChatService {
     }
 
     private static void requireBoundedActive(PageChatSession session) {
-        if (JsonUtils.objectToJson(session.getSpec().getActive())
+        if (Json.toJson(session.getSpec().getActive())
             .getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
             throw new AiGenerationException(AiGenerationException.Reason.STORAGE_LIMIT);
         }
@@ -1063,7 +1063,7 @@ public class PageChatService {
     private static void validateAnnotations(ChatApi.Request request, PageDetail page) {
         var annotations = request.annotations();
         if (annotations == null || annotations.isEmpty()) return;
-        if (annotations.size() > 5 || JsonUtils.objectToJson(annotations).getBytes(StandardCharsets.UTF_8).length > 48 * 1024) {
+        if (annotations.size() > 5 || Json.toJson(annotations).getBytes(StandardCharsets.UTF_8).length > 48 * 1024) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "批注最多5项，总大小不能超过48 KiB");
         }
         if (!DocumentHash.of(page.document().html(), page.document().css(), page.document().js()).equals(request.baseHash())) {

@@ -21,7 +21,7 @@ import run.halo.aipagebuilder.memory.SiteMemoryService;
 import run.halo.aipagebuilder.memory.SiteMemoryService.SourceContext;
 import run.halo.aipagebuilder.model.SiteMemory;
 import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 
 class PageMemoryIntegrationTest {
     private final ReactiveExtensionClient client = mock(ReactiveExtensionClient.class);
@@ -31,17 +31,17 @@ class PageMemoryIntegrationTest {
     @BeforeEach
     void setUp() {
         when(client.fetch(SiteMemory.class, SiteMemory.NAME)).thenAnswer(invocation ->
-            Mono.defer(() -> Mono.justOrEmpty(stored.get()).map(JsonUtils::deepCopy)));
+            Mono.defer(() -> Mono.justOrEmpty(stored.get()).map(Json::deepCopy)));
         when(client.create(any(SiteMemory.class))).thenAnswer(invocation -> Mono.fromSupplier(() -> {
-            SiteMemory memory = JsonUtils.deepCopy(invocation.getArgument(0));
+            SiteMemory memory = Json.deepCopy(invocation.getArgument(0));
             memory.getMetadata().setVersion(1L);
             if (!stored.compareAndSet(null, memory)) {
                 throw new OptimisticLockingFailureException("Already exists");
             }
-            return JsonUtils.deepCopy(memory);
+            return Json.deepCopy(memory);
         }));
         when(client.update(any(SiteMemory.class))).thenAnswer(invocation -> Mono.fromSupplier(() -> {
-            SiteMemory memory = JsonUtils.deepCopy(invocation.getArgument(0));
+            SiteMemory memory = Json.deepCopy(invocation.getArgument(0));
             var previous = stored.get();
             if (!Objects.equals(previous.getMetadata().getVersion(),
                 memory.getMetadata().getVersion())) {
@@ -51,7 +51,7 @@ class PageMemoryIntegrationTest {
             if (!stored.compareAndSet(previous, memory)) {
                 throw new OptimisticLockingFailureException("Version changed");
             }
-            return JsonUtils.deepCopy(memory);
+            return Json.deepCopy(memory);
         }));
     }
 
@@ -144,13 +144,13 @@ class PageMemoryIntegrationTest {
         second.prompt("忘记电话");
         var result = second.execute(input(2, Map.of("action", "delete", "entryId", phone.id(),
             "sourceId", "delete/prompt", "quote", "忘记电话"))).block();
-        assertThat(JsonUtils.objectToJson(service.load().block())).doesNotContain("0571-12345678");
+        assertThat(Json.toJson(service.load().block())).doesNotContain("0571-12345678");
         assertThat(stored.get().getSpec().getEntries()).singleElement().satisfies(entry -> {
             assertThat(entry.value()).isEqualTo("Acme");
             assertThat(entry.source().quote()).isEmpty();
             assertThat(entry.source().sourceId()).isEqualTo("run/prompt");
         });
-        assertThat(JsonUtils.objectToJson(result)).doesNotContain("0571-12345678", "source");
+        assertThat(Json.toJson(result)).doesNotContain("0571-12345678", "source");
         assertThat(tools("page", "session", "next", "admin").reference())
             .contains("Acme").doesNotContain("0571-12345678", "quote");
     }

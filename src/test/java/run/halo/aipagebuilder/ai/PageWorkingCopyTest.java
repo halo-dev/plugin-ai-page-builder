@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.theme.ThemeContextExtractor;
@@ -63,7 +63,7 @@ class PageWorkingCopyTest {
         copy.memory(memory);
         var input = PageMemoryToolsTest.input(1, "run/prompt", "0571-12345678");
         copy.consume("x".repeat(PageWorkingCopy.MAX_BYTES
-            - JsonUtils.objectToJson(input).getBytes(java.nio.charset.StandardCharsets.UTF_8).length - 1));
+            - Json.toJson(input).getBytes(java.nio.charset.StandardCharsets.UTF_8).length - 1));
         assertThatThrownBy(() -> copy.updateMemory("memory", input).block())
             .hasMessageContaining("预算");
         copy.closeMemory().block();
@@ -522,7 +522,7 @@ class PageWorkingCopyTest {
         assertThat(reads).hasValue(1);
         assertThat(copy.document()).isSameAs(document);
         assertThat(copy.summaries()).hasSize(PageWorkingCopy.MAX_CALLS);
-        assertThat(JsonUtils.objectToJson(copy.summaries())).contains("get_theme_context")
+        assertThat(Json.toJson(copy.summaries())).contains("get_theme_context")
             .doesNotContain("theme-source-marker", "--accent");
         assertThatThrownBy(() -> copy.readTheme().block()).isInstanceOf(IllegalStateException.class);
         assertThat(copy.exhausted()).isTrue();

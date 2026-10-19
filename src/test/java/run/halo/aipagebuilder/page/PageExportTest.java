@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.zip.ZipInputStream;
 import org.junit.jupiter.api.Test;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.model.PageDocument;
 
 class PageExportTest {
@@ -44,12 +45,12 @@ class PageExportTest {
         assertThat(files).containsOnlyKeys("page.json", "page.html", "index.html", "styles.css",
             "script.js", "README.txt");
         assertThat(files.get("page.html")).isEqualTo(document.html());
-        var metadata = run.halo.app.infra.utils.JsonUtils.jsonToObject(files.get("page.json"),
-            com.fasterxml.jackson.databind.JsonNode.class);
+        var metadata = Json.fromJson(files.get("page.json"),
+            tools.jackson.databind.JsonNode.class);
         assertThat(metadata.size()).isEqualTo(5);
-        assertThat(metadata.get("format").asText()).isEqualTo("ai-page-builder");
+        assertThat(metadata.get("format").asString()).isEqualTo("ai-page-builder");
         assertThat(metadata.get("version").asInt()).isEqualTo(1);
-        assertThat(metadata.get("title").asText()).isEqualTo(document.title());
+        assertThat(metadata.get("title").asString()).isEqualTo(document.title());
         assertThat(metadata.get("themeLayout").asBoolean()).isFalse();
         assertThat(files.get("styles.css")).isEqualTo(document.css());
         assertThat(files.get("script.js")).isEqualTo(document.js());

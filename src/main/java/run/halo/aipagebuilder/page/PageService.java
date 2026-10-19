@@ -1,10 +1,10 @@
 package run.halo.aipagebuilder.page;
 
-import static run.halo.app.extension.index.query.QueryFactory.contains;
-import static run.halo.app.extension.index.query.QueryFactory.equal;
-import static run.halo.app.extension.index.query.QueryFactory.isNotNull;
-import static run.halo.app.extension.index.query.QueryFactory.isNull;
-import static run.halo.app.extension.index.query.QueryFactory.or;
+import static run.halo.app.extension.index.query.Queries.contains;
+import static run.halo.app.extension.index.query.Queries.equal;
+import static run.halo.app.extension.index.query.Queries.isNull;
+import static run.halo.app.extension.index.query.Queries.not;
+import static run.halo.app.extension.index.query.Queries.or;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -31,7 +31,7 @@ import run.halo.app.extension.Metadata;
 import run.halo.app.extension.PageRequestImpl;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.router.selector.FieldSelector;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.model.ThemePage;
@@ -66,7 +66,7 @@ public class PageService {
                 contains("spec.slug", keyword)));
         }
         if ("published".equals(status)) {
-            selector = selector.andQuery(isNotNull("spec.publishedRevision"));
+            selector = selector.andQuery(not(isNull("spec.publishedRevision")));
         } else if ("unpublished".equals(status)) {
             selector = selector.andQuery(isNull("spec.publishedRevision"));
         } else if (status != null && !status.isBlank()) {
@@ -405,8 +405,8 @@ public class PageService {
         spec.setCreatedBy(actor);
         spec.setSource(source);
         // Snapshot editor project data too, so caller mutations cannot modify a revision.
-        var json = JsonUtils.objectToJson(document);
-        spec.setDocument(JsonUtils.jsonToObject(json, PageDocument.class));
+        var json = Json.toJson(document);
+        spec.setDocument(Json.fromJson(json, PageDocument.class));
         spec.setContentHash(sha256(json));
         revision.setSpec(spec);
         return revision;

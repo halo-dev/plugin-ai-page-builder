@@ -9,6 +9,7 @@ import com.helger.css.decl.CSSSupportsRule;
 import com.helger.css.decl.CascadingStyleSheet;
 import com.helger.css.decl.ECSSSelectorCombinator;
 import com.helger.css.reader.CSSReader;
+import com.helger.css.reader.CSSReaderSettings;
 import com.helger.css.reader.errorhandler.ThrowingCSSParseErrorHandler;
 import com.helger.css.writer.CSSWriter;
 import java.net.URI;
@@ -23,7 +24,7 @@ import org.jsoup.nodes.TextNode;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.theme.ThemeStyleContext;
 
@@ -59,7 +60,7 @@ public class ContentPolicy {
         validateCss(document.css());
         validateJs(document.js());
         if (document.projectData() != null) {
-            require(JsonUtils.objectToJson(document.projectData()).length() <= MAX_PROJECT,
+            require(Json.toJson(document.projectData()).length() <= MAX_PROJECT,
                 "可视化编辑数据超过 600 KB 限制");
             validateProject(document.projectData(), 0, false);
         }
@@ -192,8 +193,10 @@ public class ContentPolicy {
         }
         try {
             var parseProblem = new AtomicReference<String>();
-            var sheet = CSSReader.readFromString(css, new ThrowingCSSParseErrorHandler(),
-                error -> parseProblem.compareAndSet(null, error.getMessage()));
+            var sheet = CSSReader.readFromStringReader(css, new CSSReaderSettings()
+                .setCustomErrorHandler(new ThrowingCSSParseErrorHandler())
+                .setCustomExceptionHandler(
+                    error -> parseProblem.compareAndSet(null, error.getMessage())));
             require(sheet != null, "CSS 语法无效" + detail(parseProblem.get()));
             require(sheet.getAllImportRules().isEmpty() && sheet.getAllNamespaceRules().isEmpty(),
                 "不支持 CSS @import 或 @namespace");

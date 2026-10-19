@@ -106,7 +106,7 @@ class PageImportReviewServiceTest {
         assertThatThrownBy(() -> service.authorize(report.reviewId(), bytes, "admin", false)
             .block()).isInstanceOfSatisfying(ResponseStatusException.class,
                 error -> assertThat(error.getStatusCode())
-                    .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
         assertThat(service.authorize(report.reviewId(), bytes, "admin", true).block()).isNull();
     }
 
@@ -123,7 +123,7 @@ class PageImportReviewServiceTest {
         assertThatThrownBy(() -> service.authorize(report.reviewId(), bytes, "admin", true)
             .block()).isInstanceOfSatisfying(ResponseStatusException.class,
                 error -> assertThat(error.getStatusCode())
-                    .isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
     }
 
     @Test
@@ -252,7 +252,7 @@ class PageImportReviewServiceTest {
             .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
         assertThatThrownBy(() -> service.review(bytes, "other", "model-b").block())
             .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
         verify(gateway, times(1)).review(anyString(), anyString());
         verify(gateway, never()).review(eq("model-b"), anyString(), anyString());
     }
@@ -271,7 +271,7 @@ class PageImportReviewServiceTest {
 
         assertThatThrownBy(() -> service.authorize("safe-review", bytes, "admin", false).block())
             .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
     }
 
     @Test
@@ -290,7 +290,7 @@ class PageImportReviewServiceTest {
 
         assertThatThrownBy(() -> service.authorize(safe.reviewId(), bytes, "admin", false).block())
             .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY));
+                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
     }
 
     @Test

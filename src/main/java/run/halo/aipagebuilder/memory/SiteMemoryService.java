@@ -17,7 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 import run.halo.app.extension.Metadata;
 import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.app.infra.utils.JsonUtils;
+import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.model.SiteMemory;
 import run.halo.aipagebuilder.model.SiteMemory.Entry;
 import run.halo.aipagebuilder.model.SiteMemory.Source;
@@ -57,7 +57,7 @@ public class SiteMemoryService {
                 if (!expectedVersion.equals(current.getMetadata().getVersion())) {
                     throw conflict("Site memory changed; reload before applying changes");
                 }
-                var updated = JsonUtils.deepCopy(current);
+                var updated = Json.deepCopy(current);
                 var entries = new ArrayList<>(updated.getSpec().getEntries());
                 var touchedKeys = new HashSet<MemoryKey>();
                 var touchedIds = new HashSet<String>();
@@ -229,7 +229,7 @@ public class SiteMemoryService {
         if (sourceCharacters > MAX_SOURCE_CHARACTERS) {
             throw capacity("Site memory source metadata must not exceed 24000 characters");
         }
-        if (JsonUtils.objectToJson(memory).getBytes(StandardCharsets.UTF_8).length
+        if (Json.toJson(memory).getBytes(StandardCharsets.UTF_8).length
             > MAX_SERIALIZED_BYTES) {
             throw capacity("Serialized site memory must not exceed 64 KiB");
         }
@@ -261,7 +261,7 @@ public class SiteMemoryService {
     }
 
     private static ResponseStatusException capacity(String reason) {
-        return new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, reason);
+        return new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, reason);
     }
 
     private record MemoryKey(String subject, String key) {
