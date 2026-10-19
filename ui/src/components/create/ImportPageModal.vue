@@ -248,6 +248,14 @@ function guardEscape(event: KeyboardEvent) {
   if (pending.value) event.stopImmediatePropagation()
 }
 
+function guardClose(event: MouseEvent) {
+  if (!pending.value) return
+  // The default VModal header close button cannot be disabled, so stop the
+  // click before it reaches VModal and hides the dialog mid-review.
+  if ((event.target as HTMLElement | null)?.closest('.modal-header-actions'))
+    event.stopPropagation()
+}
+
 // The report belongs to the model that produced it; changing the model invalidates it.
 watch(model, () => {
   if (!review.value || isMalicious.value) return
@@ -263,6 +271,7 @@ watch(model, () => {
     :width="640"
     :layer-closable="false"
     @keyup.esc.capture="guardEscape"
+    @click.capture="guardClose"
     mount-to-body
     @close="close"
     ref="modal"

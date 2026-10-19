@@ -166,7 +166,10 @@ watch(
     const nearBottom =
       !feed.value || feed.value.scrollHeight - feed.value.scrollTop - feed.value.clientHeight < 100
     await nextTick()
-    if (nearBottom && feed.value) feed.value.scrollTop = feed.value.scrollHeight
+    // The question card positions its first question itself; keeping the feed at
+    // the bottom here would push that question back above the fold.
+    if (nearBottom && feed.value && !waitingForUser.value)
+      feed.value.scrollTop = feed.value.scrollHeight
   },
   { deep: true },
 )

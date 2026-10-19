@@ -94,10 +94,14 @@ function report(
   }
 }
 
+// The modal mounts to the body, so keep its teleported content inside the
+// wrapper for the DOM queries below.
+const modalOptions = {
+  global: { stubs: { teleport: true }, components: { FormKit: FormKitStub } },
+}
+
 function modal() {
-  return mount(ImportPageModal, {
-    global: { components: { FormKit: FormKitStub } },
-  })
+  return mount(ImportPageModal, modalOptions)
 }
 function button(wrapper: ReturnType<typeof mount>, text: string) {
   return wrapper.findAll('button').find((node) => node.text() === text)!
@@ -118,9 +122,10 @@ async function reviewed(wrapper: ReturnType<typeof modal>, file: File) {
 
 describe('page archive import', () => {
   it('opens the import modal next to manual creation and cancels it', async () => {
+    vi.useFakeTimers()
     const wrapper = mount(CreatePagePanel, {
       global: {
-        stubs: { ChatComposer: true, ManualCreateModal: true },
+        stubs: { ChatComposer: true, ManualCreateModal: true, teleport: true },
         components: { FormKit: FormKitStub },
       },
     })
@@ -132,6 +137,7 @@ describe('page archive import', () => {
     await entry.trigger('click')
     expect(wrapper.findComponent(ImportPageModal).exists()).toBe(true)
     await button(wrapper, '取消').trigger('click')
+    await vi.advanceTimersByTimeAsync(250)
     expect(wrapper.findComponent(ImportPageModal).exists()).toBe(false)
   })
 
@@ -179,8 +185,8 @@ describe('page archive import', () => {
 
   it('shows the AI Foundation status and disables review when unavailable', () => {
     const wrapper = mount(ImportPageModal, {
+      ...modalOptions,
       props: { aiAvailable: false, aiStatusMessage: 'AI Foundation 未启用' },
-      global: { components: { FormKit: FormKitStub } },
     })
 
     expect(wrapper.find('[data-test=model-selector]').exists()).toBe(false)
@@ -338,9 +344,9 @@ describe('page archive import', () => {
     expect(wrapper.get('input').attributes('disabled')).toBeDefined()
     expect(reviewButton.attributes('disabled')).toBeDefined()
     expect(button(wrapper, '取消').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[aria-label=关闭]').attributes('disabled')).toBeDefined()
+    const headerClose = wrapper.get('.modal-header-actions > span')
     await button(wrapper, '取消').trigger('click')
-    await wrapper.get('[aria-label=关闭]').trigger('click')
+    await headerClose.trigger('click')
     await wrapper.get('.modal-layer').trigger('click')
     await wrapper.get('input').trigger('keyup', { key: 'Escape' })
     await wrapper.get('[role=dialog]').trigger('keyup', { key: 'Escape' })
@@ -351,11 +357,13 @@ describe('page archive import', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(0)
     expect(button(wrapper, '取消').attributes('disabled')).toBeUndefined()
-    await wrapper.get('[aria-label=关闭]').trigger('click')
+    await headerClose.trigger('click')
+    await vi.advanceTimersByTimeAsync(250)
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
   it('cancels a pending review and unlocks the modal', async () => {
+    vi.useFakeTimers()
     let options: { signal?: AbortSignal; timeout?: number } | undefined
     mocks.reviewPageImport.mockImplementation((_request, requestOptions) => {
       options = requestOptions
@@ -376,6 +384,7 @@ describe('page archive import', () => {
     expect(mocks.toastInfo).toHaveBeenCalledWith('已取消审查。')
     expect(button(wrapper, '取消').attributes('disabled')).toBeUndefined()
     await button(wrapper, '取消').trigger('click')
+    await vi.advanceTimersByTimeAsync(250)
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 

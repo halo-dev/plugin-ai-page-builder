@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
 import IconSpinner from '~icons/mingcute/loading-line'
 import type { PageChatAnswerItem, PageChatQuestion } from '../../api/generated'
 
@@ -29,6 +29,39 @@ const invalid = computed(() =>
   }),
 )
 const answered = computed(() => !!props.question.answers?.length)
+const form = useTemplateRef<HTMLFormElement>('form')
+let focusedQuestionId = ''
+// Focusing here would interrupt a steer instruction or annotation comment the
+// user was already typing somewhere outside this card. An empty composer keeps
+// focus after sending, so only non-empty drafts count as active typing.
+function typingElsewhere() {
+  const active = document.activeElement
+  if (!(active instanceof HTMLElement) || form.value?.contains(active)) return false
+  if (active.isContentEditable) return !!active.textContent?.trim()
+  if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)
+    return !!active.value.trim()
+  return active instanceof HTMLSelectElement
+}
+// Bring question 1 into view once this batch becomes answerable. The feed keeps
+// itself scrolled to the bottom, which leaves question 1 above the fold when
+// the card is taller than the panel.
+watch(
+  () => [props.pending, props.submitting, props.question.id, answered.value] as const,
+  async ([pending, submitting]) => {
+    if (!pending || answered.value || focusedQuestionId === props.question.id) return
+    await nextTick()
+    const fieldset = form.value?.querySelector('fieldset')
+    // Position even while a draft elsewhere keeps focus; only skip stealing it.
+    fieldset?.scrollIntoView?.({ block: 'start' })
+    if (submitting || typingElsewhere()) return
+    const control = form.value?.querySelector<HTMLElement>('input[type="radio"], textarea')
+    if (!control) return
+    control.focus({ preventScroll: true })
+    if (document.activeElement !== control) return
+    focusedQuestionId = props.question.id
+  },
+  { immediate: true },
+)
 function answerText(id: string) {
   const answer = props.question.answers?.find((item) => item.questionId === id)
   const question = props.question.questions.find((item) => item.id === id)
@@ -55,6 +88,7 @@ function submit() {
 
 <template>
   <form
+    ref="form"
     class="my-3 space-y-3 rounded-lg border border-gray-200 px-3 py-3 text-xs"
     aria-label="助手的问题"
     :aria-busy="submitting || undefined"
