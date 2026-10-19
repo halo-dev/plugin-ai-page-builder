@@ -66,6 +66,16 @@ const listQuery = useQuery({
 })
 const items = computed(() => listQuery.data.value?.items || [])
 const total = computed(() => listQuery.data.value?.total || 0)
+// The empty workspace shows the create panel instead; keep the toolbar only
+// when there is something to search or filter, or while loading/erroring.
+const showToolbar = computed(
+  () =>
+    !!items.value.length ||
+    !!keyword.value ||
+    !!status.value ||
+    listQuery.isLoading.value ||
+    listQuery.isError.value,
+)
 const cloneTarget = ref<PageSummary>()
 
 function openEditor(name: string) {
@@ -389,7 +399,7 @@ function unpublishFromSettings() {
     </template>
   </VPageHeader>
   <div class="m-2 md:m-4">
-    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+    <div v-if="showToolbar" class="mb-6 flex flex-wrap items-center justify-between gap-3">
       <div class="flex w-full flex-1 items-center sm:w-auto">
         <SearchInput v-model="keyword" placeholder="搜索标题或路径" />
       </div>
