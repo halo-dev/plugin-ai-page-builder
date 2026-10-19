@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, shallowRef } from 'vue'
-import { aiPageBuilderApi, aiPageBuilderChatApi } from '../api/clients'
+import { aiPageBuilderChatApi } from '../api/clients'
+import { usePageWrites } from './usePageWrites'
 import { errorMessage } from '../utils/error'
-import { pageKeys, queryClient } from '../lib/query-client'
 import type { PageDetail, PageDocument } from '../api/generated'
 import {
   cloneDocument,
@@ -11,10 +11,8 @@ import {
 } from '../editor/document'
 
 export function useWorkingDocument() {
-  const detail = shallowRef<PageDetail>()
   const document = shallowRef<PageDocument>()
   const layout = shallowRef(false)
-  const busy = shallowRef(false)
   const saving = shallowRef(false)
   const agentRunning = shallowRef(false)
   const preparing = shallowRef(false)
@@ -27,11 +25,16 @@ export function useWorkingDocument() {
   let sequence = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   let controller: AbortController | undefined
+  const writes = usePageWrites((result, content) => {
+    if (content) applyDocument(result)
+  })
+  const { detail, pending: busy } = writes
   const dirty = computed(
     () =>
+      !!detail.value &&
       !!document.value &&
       (fingerprint(document.value) !== savedFingerprint.value ||
-        layout.value !== detail.value?.page.themeLayout),
+        layout.value !== detail.value.page.themeLayout),
   )
   const locked = computed(() => busy.value || agentRunning.value || preparing.value)
   const valid = computed(() => validationState.value === 'valid')
@@ -80,9 +83,8 @@ export function useWorkingDocument() {
       }
     }, 400)
   }
-  function adopt(result: PageDetail, reset = false) {
+  function applyDocument(result: PageDetail, reset = false) {
     cancelValidation()
-    detail.value = result
     layout.value = result.page.themeLayout
     if (!history || reset) history = createDocumentHistory(result.document)
     else history.push(result.document)
@@ -91,6 +93,16 @@ export function useWorkingDocument() {
     validationState.value = 'valid'
     validationError.value = ''
     historyVersion.value++
+  }
+  function adopt(result: PageDetail, reset = false) {
+    if (reset || !writes.target.value) {
+      writes.reset(result)
+      applyDocument(result, true)
+    } else writes.receive(result)
+  }
+  function resetSession() {
+    cancelValidation()
+    writes.reset()
   }
   function change(next: PageDocument) {
     if (locked.value || !document.value || fingerprint(next) === fingerprint(document.value)) return
@@ -134,47 +146,31 @@ export function useWorkingDocument() {
       return undefined
     if (!valid.value) throw new Error('请先修正源码并等待校验通过。')
     if (!dirty.value) return detail.value
-    busy.value = true
     saving.value = true
     error.value = ''
     try {
-      const result = (
-        await aiPageBuilderApi.savePage({
-          name: detail.value.page.name,
-          savePageRequest: {
-            version: detail.value.page.version,
-            document: document.value,
-            source: 'manual',
-            themeLayout: layout.value,
-          },
-        })
-      ).data
-      adopt(result)
-      queryClient.setQueryData(pageKeys.detail(result.page.name), result)
-      return result
+      return await writes.save({ document: document.value, themeLayout: layout.value })
     } finally {
       saving.value = false
-      busy.value = false
     }
   }
   async function updateSlug(slug: string) {
     if (locked.value || !detail.value) return undefined
-    if (slug === detail.value.page.slug) return detail.value
-    busy.value = true
-    try {
-      const result = (
-        await aiPageBuilderApi.updatePageSlug({
-          name: detail.value.page.name,
-          updatePageSlugRequest: { version: detail.value.page.version, slug },
-        })
-      ).data
-      detail.value = { ...detail.value, page: result.page }
-      queryClient.setQueryData(pageKeys.detail(result.page.name), result)
-      void queryClient.invalidateQueries({ queryKey: [...pageKeys.all, 'list'] })
-      return result
-    } finally {
-      busy.value = false
-    }
+    return writes.updateSlug(slug)
+  }
+  async function restore(revision: string, confirm: () => Promise<boolean>) {
+    if (locked.value || !detail.value || !valid.value) return undefined
+    return writes.restore(
+      revision,
+      () => {
+        if (agentRunning.value || preparing.value) throw new Error('页面尚未就绪。')
+        if (!valid.value) throw new Error('请先修正源码并等待校验通过。')
+        return dirty.value && document.value
+          ? { document: document.value, themeLayout: layout.value }
+          : undefined
+      },
+      confirm,
+    )
   }
   async function prepareAgent<T = number>(
     snapshot?: (page: PageDetail) => Promise<T>,
@@ -214,5 +210,8 @@ export function useWorkingDocument() {
     save,
     updateSlug,
     prepareAgent,
+    restore,
+    resetSession,
+    writes,
   }
 }

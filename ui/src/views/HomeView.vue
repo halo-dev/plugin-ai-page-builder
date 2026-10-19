@@ -20,8 +20,9 @@ import IconAddCircle from '~icons/mingcute/add-circle-line'
 import IconMore from '~icons/mingcute/more-2-line'
 import { aiPageBuilderApi, getPublicSiteUrl, pagePreviewUrl } from '../api/clients'
 import { errorMessage } from '../utils/error'
+import { usePageWrites } from '../composables/usePageWrites'
 import { pageKeys, queryClient } from '../lib/query-client'
-import type { PageDetail, PageDocument, PageSummary } from '../api/generated'
+import type { PageDocument, PageSummary } from '../api/generated'
 import ClonePageModal from '../components/ClonePageModal.vue'
 import PagePreviewCard from '../components/PagePreviewCard.vue'
 import PageSettings from '../components/PageSettings.vue'
@@ -136,20 +137,7 @@ const removeMutation = useMutation({
   onError: (e) => Toast.error(errorMessage(e)),
   queryClient,
 })
-const publishMutation = useMutation({
-  mutationFn: async (item: PageSummary) => {
-    await aiPageBuilderApi.publishPage({
-      name: item.name,
-      mutationRequest: { version: item.version },
-    })
-  },
-  onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: pageKeys.all })
-    Toast.success('页面已发布')
-  },
-  onError: (e) => Toast.error(errorMessage(e)),
-  queryClient,
-})
+const pageWrites = usePageWrites()
 function confirm(title: string, description: string): Promise<boolean> {
   return new Promise((resolve) =>
     Dialog.warning({
@@ -163,46 +151,27 @@ function confirm(title: string, description: string): Promise<boolean> {
   )
 }
 async function publishUpdate(item: PageSummary) {
+  pageWrites.reset(item)
   try {
-    const detail = (await aiPageBuilderApi.getPage({ name: item.name })).data
-    if (
-      (detail.document.js ?? '').trim() &&
-      !(await confirm(
-        '发布包含脚本的页面？',
-        '页面脚本会在访客浏览器中执行。请确认你信任这些内容。',
-      ))
+    const detail = await pageWrites.refresh()
+    if (!detail) return
+    const result = await pageWrites.publishUpdate(
+      async () =>
+        !(detail.document.js ?? '').trim() ||
+        (await confirm(
+          '发布包含脚本的页面？',
+          '页面脚本会在访客浏览器中执行。请确认你信任这些内容。',
+        )),
     )
-      return
-    // Publish the version we just read so an updated list entry does not cause a 409.
-    publishMutation.mutate({ ...item, version: detail.page.version })
+    if (result) Toast.success('页面已发布')
   } catch (e) {
     Toast.error(errorMessage(e))
   }
 }
-const unpublishMutation = useMutation({
-  mutationFn: async (item: PageSummary) => {
-    await aiPageBuilderApi.unpublishPage({
-      name: item.name,
-      mutationRequest: { version: item.version },
-    })
-  },
-  onSuccess: () => {
-    void queryClient.invalidateQueries({ queryKey: pageKeys.all })
-    Toast.success('已取消发布')
-  },
-  onError: (e) => Toast.error(errorMessage(e)),
-  queryClient,
-})
 const mutating = computed(
   () =>
-    exportMutation.isPending.value ||
-    removeMutation.isPending.value ||
-    publishMutation.isPending.value ||
-    unpublishMutation.isPending.value,
+    exportMutation.isPending.value || removeMutation.isPending.value || pageWrites.pending.value,
 )
-function published() {
-  void queryClient.invalidateQueries({ queryKey: pageKeys.all })
-}
 function remove(item: PageSummary) {
   Dialog.warning({
     title: `删除「${item.title}」？`,
@@ -213,94 +182,50 @@ function remove(item: PageSummary) {
     onConfirm: () => removeMutation.mutate(item),
   })
 }
-function confirmUnpublish(item: PageSummary) {
-  Dialog.warning({
-    title: '取消发布此页面？',
-    description: '访客将无法访问此页面。',
-    confirmText: '确认',
-    cancelText: '取消',
-    onConfirm: () => unpublishMutation.mutate(item),
-  })
+async function confirmUnpublish(item: PageSummary) {
+  pageWrites.reset(item)
+  try {
+    if (await pageWrites.unpublish(() => confirm('取消发布此页面？', '访客将无法访问此页面。'))) {
+      Toast.success('已取消发布')
+    }
+  } catch (e) {
+    Toast.error(errorMessage(e))
+  }
 }
 // Settings modal edits the saved page directly: the slug applies immediately,
 // title/description/layout are persisted as a saved draft on 应用.
-const settingsDetail = ref<PageDetail>()
-const settingsSaving = ref(false)
-// Rapid clicks on different cards race their detail fetches; only the latest
-// request may open or replace the modal.
+const settingsWrites = usePageWrites()
+const settingsDetail = settingsWrites.detail
+const settingsSaving = settingsWrites.pending
 let settingsGeneration = 0
-// Each modal session gets an id: a mutation started in one session must never
-// write its result into a later session, not even for the same page.
-let settingsSession = 0
+function closeSettings() {
+  settingsGeneration++
+  settingsWrites.reset()
+}
 async function openSettings(item: PageSummary) {
   const generation = ++settingsGeneration
+  settingsWrites.reset()
   try {
-    // Always refetch: another writer may have bumped the optimistic-lock version.
     const detail = await queryClient.fetchQuery({
       queryKey: pageKeys.detail(item.name),
       queryFn: async () => (await aiPageBuilderApi.getPage({ name: item.name })).data,
       staleTime: 0,
     })
-    if (generation === settingsGeneration) {
-      settingsSession = generation
-      settingsDetail.value = detail
-    }
+    if (generation === settingsGeneration) settingsWrites.reset(detail)
   } catch (e) {
     if (generation === settingsGeneration) Toast.error(errorMessage(e))
   }
 }
-function cacheSettingsDetail(result: PageDetail) {
-  const key = pageKeys.detail(result.page.name)
-  const cached = queryClient.getQueryData<PageDetail>(key)
-  // A late response must not roll the cache back to an older version.
-  if (cached && cached.page.version > result.page.version) return
-  queryClient.setQueryData(key, result)
-  void queryClient.invalidateQueries({ queryKey: pageKeys.all })
-}
-// Late results still update the cache, but only their own session's modal.
-function applySettingsResult(result: PageDetail, session: number) {
-  cacheSettingsDetail(result)
-  if (session === settingsSession) showSettingsResult(result)
-}
-// Within a session the modal's version stays monotonic: a late save response
-// must not overwrite a newer refresh (or vice versa).
-function showSettingsResult(result: PageDetail) {
-  if (
-    settingsDetail.value?.page.name === result.page.name &&
-    settingsDetail.value.page.version <= result.page.version
-  )
-    settingsDetail.value = result
-}
 const isConflict = (e: unknown) =>
   (e as { response?: { status?: number } })?.response?.status === 409
-// After a version conflict the snapshot is stale; refetch so an in-modal retry
-// uses the current version. The keyed modal is not remounted, so the form
-// buffer survives.
-async function refreshSettingsDetail(name: string, session: number) {
-  try {
-    const fresh = (await aiPageBuilderApi.getPage({ name })).data
-    cacheSettingsDetail(fresh)
-    if (session === settingsSession) showSettingsResult(fresh)
-  } catch {
-    // Keep the stale snapshot; reopening the modal always refetches.
-  }
+function refreshAfterConflict(e: unknown) {
+  if (isConflict(e)) void settingsWrites.refresh().catch(() => {})
 }
 async function saveSettingsSlug(slug: string) {
-  const current = settingsDetail.value
-  if (!current) return undefined
-  if (slug === current.page.slug) return current
-  const session = settingsSession
   try {
-    const result = (
-      await aiPageBuilderApi.updatePageSlug({
-        name: current.page.name,
-        updatePageSlugRequest: { version: current.page.version, slug },
-      })
-    ).data
-    applySettingsResult(result, session)
-    return result
+    return await settingsWrites.updateSlug(slug)
   } catch (e) {
-    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
+    refreshAfterConflict(e)
     throw e
   }
 }
@@ -311,67 +236,35 @@ async function applySettings(patch: SettingsPatch) {
   const current = settingsDetail.value
   if (!current) return
   if (!Object.keys(patch).length) {
-    settingsDetail.value = undefined
+    closeSettings()
     return
   }
   const { themeLayout, ...documentPatch } = patch
-  const session = settingsSession
-  settingsSaving.value = true
   try {
-    const result = (
-      await aiPageBuilderApi.savePage({
-        name: current.page.name,
-        savePageRequest: {
-          version: current.page.version,
-          document: { ...current.document, ...documentPatch },
-          source: 'manual',
-          ...(themeLayout === undefined ? {} : { themeLayout }),
-        },
-      })
-    ).data
-    cacheSettingsDetail(result)
-    if (session === settingsSession && settingsDetail.value?.page.name === current.page.name)
-      settingsDetail.value = undefined
-    Toast.success('设置已保存')
+    const result = await settingsWrites.save({
+      document: { ...current.document, ...documentPatch },
+      ...(themeLayout === undefined ? {} : { themeLayout }),
+    })
+    if (result) {
+      closeSettings()
+      Toast.success('设置已保存')
+    }
   } catch (e) {
     Toast.error(errorMessage(e))
-    if (isConflict(e)) void refreshSettingsDetail(current.page.name, session)
-  } finally {
-    settingsSaving.value = false
+    refreshAfterConflict(e)
   }
 }
-function unpublishFromSettings() {
-  const name = settingsDetail.value?.page.name
-  if (!name) return
-  const session = settingsSession
-  Dialog.warning({
-    title: '取消发布此页面？',
-    description: '访客将无法访问此页面。',
-    confirmText: '确认',
-    cancelText: '取消',
-    onConfirm: async () => {
-      // Re-read: slug/layout saves may have bumped the version while the
-      // confirmation dialog was open.
-      const current = settingsDetail.value
-      if (session !== settingsSession || current?.page.name !== name) return
-      settingsSaving.value = true
-      try {
-        const result = (
-          await aiPageBuilderApi.unpublishPage({
-            name,
-            mutationRequest: { version: current.page.version },
-          })
-        ).data
-        applySettingsResult(result, session)
-        Toast.success('已取消发布')
-      } catch (e) {
-        Toast.error(errorMessage(e))
-        if (isConflict(e)) void refreshSettingsDetail(name, session)
-      } finally {
-        settingsSaving.value = false
-      }
-    },
-  })
+async function unpublishFromSettings() {
+  try {
+    const result = await settingsWrites.unpublish(
+      () => confirm('取消发布此页面？', '访客将无法访问此页面。'),
+      true,
+    )
+    if (result) Toast.success('已取消发布')
+  } catch (e) {
+    Toast.error(errorMessage(e))
+    refreshAfterConflict(e)
+  }
 }
 </script>
 <template>
@@ -469,8 +362,6 @@ function unpublishFromSettings() {
                   :version="item.version"
                   :disabled="mutating"
                   placement="left-start"
-                  @published="published"
-                  @updated="published"
                 >
                   <VDropdownItem :disabled="mutating">发布</VDropdownItem>
                 </PublishPagePopper>
@@ -540,7 +431,7 @@ function unpublishFromSettings() {
     :save-slug="saveSettingsSlug"
     :disabled="settingsSaving"
     :published="!!settingsDetail.page.publishedRevision"
-    @close="settingsDetail = undefined"
+    @close="closeSettings"
     @apply="applySettings"
     @unpublish="unpublishFromSettings"
   />

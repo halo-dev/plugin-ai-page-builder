@@ -13,11 +13,20 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn<(...args: unknown[]) => unknown>(),
   updateSlug: vi.fn<(...args: unknown[]) => unknown>(),
   themeContext: vi.fn<(...args: unknown[]) => unknown>(),
-  warning: vi.fn<(options: { onCancel: () => void }) => void>(),
+  warning: vi.fn<(options: { onCancel: () => void; onConfirm: () => void }) => void>(),
+  publish: vi.fn(),
+  restore: vi.fn(),
+  route: { params: { name: 'one' } },
   toastError: vi.fn<(message: string) => void>(),
 }))
 vi.mock('../../api/clients', () => ({
-  aiPageBuilderApi: { getPage: mocks.get, savePage: mocks.save, updatePageSlug: mocks.updateSlug },
+  aiPageBuilderApi: {
+    getPage: mocks.get,
+    savePage: mocks.save,
+    updatePageSlug: mocks.updateSlug,
+    publishPage: mocks.publish,
+    restorePageRevision: mocks.restore,
+  },
   aiPageBuilderChatApi: {
     getThemeContext: mocks.themeContext,
     validatePageContent: vi.fn<(...args: unknown[]) => unknown>(),
@@ -30,7 +39,7 @@ vi.mock('../../utils/error', () => ({
   errorMessage: (e: Error) => e.message,
 }))
 vi.mock('vue-router', () => ({
-  useRoute: () => reactive({ params: { name: 'one' } }),
+  useRoute: () => mocks.route,
   useRouter: () => ({ push: vi.fn<(...args: unknown[]) => unknown>() }),
   onBeforeRouteLeave: vi.fn<(...args: unknown[]) => unknown>(),
   onBeforeRouteUpdate: vi.fn<(...args: unknown[]) => unknown>(),
@@ -78,13 +87,26 @@ vi.mock('../../components/AiPanel.vue', () => ({
   default: defineComponent({ setup: () => () => h('textarea', { class: 'chat-input' }) }),
 }))
 vi.mock('../../components/HistoryPanel.vue', () => ({
-  default: defineComponent({ setup: () => () => h('div') }),
+  __esModule: true,
+  default: defineComponent({
+    name: 'HistoryPanel',
+    emits: ['restore'],
+    setup: () => () => h('div'),
+  }),
 }))
 const page = {
-  page: { name: 'one', slug: 'one', version: 1, themeLayout: true, draftRevision: 'r1' },
+  page: {
+    name: 'one',
+    title: 'Original',
+    slug: 'one',
+    version: 1,
+    themeLayout: true,
+    draftRevision: 'r1',
+  },
   document: { mode: 'visual', title: 'Original', html: '<p>Hello</p>', css: '', schemaVersion: 1 },
 } as PageDetail
 const globals = {
+  directives: { tooltip: {} },
   stubs: {
     VisualEditor: defineComponent({
       name: 'VisualEditor',
@@ -107,7 +129,8 @@ beforeEach(() => {
     'fetch',
     vi.fn(() => Promise.resolve({ ok: true, type: 'basic', status: 200 })),
   )
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  mocks.route = reactive({ params: { name: 'one' } })
   queryClient.clear()
   mocks.get.mockResolvedValue({ data: page })
   mocks.themeContext.mockResolvedValue({
@@ -127,27 +150,47 @@ async function editor() {
   return wrapper
 }
 describe('workspace integration', () => {
+  it('does not warn about unsaved changes while loading another page from a clean editor', async () => {
+    const wrapper = await editor()
+    try {
+      const initial = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(initial)
+      expect(initial.defaultPrevented).toBe(false)
+      mocks.get.mockReturnValue(new Promise(() => {}))
+      mocks.route.params.name = 'two'
+      await flushPromises()
+      const loading = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(loading)
+      expect(loading.defaultPrevented).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
   it('adopts a title saved during first publication and locks working edits until completion', async () => {
     const wrapper = await editor()
     const popper = wrapper.getComponent(PublishPagePopper)
     const canvas = wrapper.findComponent({ name: 'VisualEditor' })
-    popper.vm.$emit('pending', true)
-    await flushPromises()
-    expect(canvas.props('disabled')).toBe(true)
-    canvas.vm.$emit('update:document', { ...page.document, title: 'Concurrent edit' })
     const updated = {
       page: { ...page.page, title: 'Published title', version: 2, draftRevision: 'r2' },
       document: { ...page.document, title: 'Published title' },
     }
-    popper.vm.$emit('updated', updated)
+    mocks.save.mockResolvedValue({ data: updated })
+    let finish!: (result: { data: PageDetail }) => void
+    mocks.publish.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+    )
+    const operation = popper
+      .props('writes')!
+      .publish({ title: 'Published title', slug: 'one' }, async () => true)
     await flushPromises()
+    expect(canvas.props('disabled')).toBe(true)
+    canvas.vm.$emit('update:document', { ...page.document, title: 'Concurrent edit' })
     expect(wrapper.find('h1').text()).toBe('Published title')
     expect(canvas.props('document')).toEqual(updated.document)
-    popper.vm.$emit('published', {
-      ...updated,
-      page: { ...updated.page, version: 3, publishedRevision: 'r2' },
-    })
-    popper.vm.$emit('pending', false)
+    finish({ data: { ...updated, page: { ...updated.page, version: 3, publishedRevision: 'r2' } } })
+    await operation
     await flushPromises()
     expect(canvas.props('disabled')).toBe(false)
     expect(
@@ -156,6 +199,63 @@ describe('workspace integration', () => {
         .find((button) => button.text() === '保存')!
         .attributes('disabled'),
     ).toBeDefined()
+    wrapper.unmount()
+  })
+  it('does not restore an old page after switching routes during confirmation', async () => {
+    const wrapper = await editor()
+    await wrapper.get('[aria-label="历史版本"]').trigger('click')
+    await flushPromises()
+    wrapper.getComponent({ name: 'HistoryPanel' }).vm.$emit('restore', 'old-one')
+    await flushPromises()
+    const confirmation = mocks.warning.mock.calls[mocks.warning.mock.calls.length - 1]![0]
+    mocks.get.mockResolvedValue({
+      data: {
+        ...page,
+        page: { ...page.page, name: 'two' },
+        document: { ...page.document, title: 'Second' },
+      },
+    })
+    mocks.route.params.name = 'two'
+    await flushPromises()
+    confirmation.onConfirm()
+    await flushPromises()
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(mocks.restore).not.toHaveBeenCalled()
+    expect(wrapper.get('h1').text()).toBe('Second')
+    wrapper.unmount()
+  })
+  it('saves edits before restoring history and adopts the restored draft', async () => {
+    const wrapper = await editor()
+    wrapper.getComponent({ name: 'VisualEditor' }).vm.$emit('update:document', {
+      ...page.document,
+      title: 'Unsaved title',
+    })
+    await flushPromises()
+    await wrapper.get('[aria-label="历史版本"]').trigger('click')
+    await flushPromises()
+    mocks.save.mockResolvedValue({
+      data: {
+        ...page,
+        page: { ...page.page, version: 2 },
+        document: { ...page.document, title: 'Unsaved title' },
+      },
+    })
+    mocks.restore.mockResolvedValue({
+      data: {
+        ...page,
+        page: { ...page.page, version: 3 },
+        document: { ...page.document, title: 'Restored' },
+      },
+    })
+    mocks.warning.mockImplementation(({ onConfirm }) => onConfirm())
+    wrapper.getComponent({ name: 'HistoryPanel' }).vm.$emit('restore', 'old-one')
+    await flushPromises()
+    expect(mocks.restore).toHaveBeenCalledWith({
+      name: 'one',
+      restoreRequest: { version: 2, revision: 'old-one' },
+    })
+    expect(wrapper.get('h1').text()).toBe('Restored')
+    expect(wrapper.findComponent({ name: 'HistoryPanel' }).exists()).toBe(false)
     wrapper.unmount()
   })
   it('defaults to canvas and does not save merely opening or switching views', async () => {

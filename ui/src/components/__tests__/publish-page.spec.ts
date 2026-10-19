@@ -262,7 +262,6 @@ describe('first publish confirmation', () => {
       updatePageSlugRequest: { version: 2, slug: 'company/about' },
     })
     expect(mocks.publish).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 3 } })
-    expect(wrapper.emitted('updated')).toHaveLength(2)
   })
 
   it('retries publication with the saved version without resaving either field', async () => {
@@ -332,7 +331,8 @@ describe('first publish confirmation', () => {
     expect(mocks.publish).toHaveBeenCalledTimes(1)
     resolve({ data: detail(4) })
     await flushPromises()
-    expect(wrapper.emitted('pending')).toEqual([[true], [false]])
+    expect(wrapper.get('[name=title]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[name=slug]').attributes('disabled')).toBeUndefined()
   })
 
   it('blocks an already-open form when the editor becomes dirty or busy', async () => {

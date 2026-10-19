@@ -3,12 +3,14 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import { Toast, VButton, VDropdown, type VDropdownPlacement } from '@halo-dev/components'
 import { aiPageBuilderApi, getPublicSiteUrl } from '../api/clients'
 import type { PageDetail } from '../api/generated'
+import { usePageWrites, type PageWrites } from '../composables/usePageWrites'
 import { errorMessage } from '../utils/error'
 import { slugValidation } from '../utils/slug'
 
 const props = withDefaults(
   defineProps<{
     name: string
+    writes?: PageWrites
     title: string
     slug?: string | null
     version: number
@@ -21,8 +23,6 @@ const props = withDefaults(
 )
 const emit = defineEmits<{
   published: [detail: PageDetail]
-  updated: [detail: PageDetail]
-  pending: [pending: boolean]
 }>()
 
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/
@@ -30,9 +30,16 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/
 const shown = ref(false)
 const form = ref({ title: props.title, slug: props.slug ?? '' })
 const formNode = ref<{ submit: () => void }>()
-// Keep successful intermediate saves so retries use the latest version.
-const synced = ref<PageDetail['page'] | null>(null)
-const pending = ref(false)
+const localWrites = usePageWrites()
+const writes = props.writes ?? localWrites
+const pending = writes.pending
+watch(
+  () => [props.name, props.title, props.slug, props.version] as const,
+  () => {
+    writes.sync({ name: props.name, title: props.title, slug: props.slug, version: props.version })
+  },
+  { immediate: true },
+)
 const siteBaseUrl = shallowRef('')
 const scriptedState = shallowRef(props.scripted ?? false)
 // Version the detection result belongs to; a newer list entry must be re-checked.
@@ -92,12 +99,8 @@ async function verifyScriptState(base: { version: number }): Promise<boolean> {
   return scripted
 }
 
-// Authoritative slug/version: whichever of props or this popper's own synced
-// state is newer, so display and publish always agree on the same base.
 function currentBase() {
-  return synced.value && synced.value.version > props.version
-    ? synced.value
-    : { title: props.title, slug: props.slug ?? null, version: props.version }
+  return writes.target.value!
 }
 
 watch(shown, (open) => {
@@ -120,11 +123,6 @@ watch(
   },
 )
 
-function sync(detail: PageDetail) {
-  synced.value = detail.page
-  emit('updated', detail)
-}
-
 async function publish(value: { title: string; slug: string }) {
   const title = value.title.trim()
   const requested = value.slug.trim()
@@ -138,58 +136,26 @@ async function publish(value: { title: string; slug: string }) {
     requested.length > 200
   )
     return
-  pending.value = true
-  emit('pending', true)
   try {
-    const base = currentBase()
-    // The warning must match the version being published; if detection only discovers
-    // scripts now, make the user see the warning and click again.
-    const warned = scriptedState.value
-    const scripted = await verifyScriptState(base)
-    if (scripted && !warned) {
-      Toast.error('此页面包含脚本，请确认上方提示后再次点击发布。')
-      return
-    }
-    let version = base.version
-    if (title !== base.title) {
-      const current = (await aiPageBuilderApi.getPage({ name: props.name })).data
-      const updated = (
-        await aiPageBuilderApi.savePage({
-          name: props.name,
-          savePageRequest: {
-            version,
-            document: { ...current.document, title },
-            source: 'manual',
-          },
-        })
-      ).data
-      version = updated.page.version
-      sync(updated)
-    }
-    if (requested !== base.slug) {
-      const updated = (
-        await aiPageBuilderApi.updatePageSlug({
-          name: props.name,
-          updatePageSlugRequest: { version, slug: requested },
-        })
-      ).data
-      version = updated.page.version
-      sync(updated)
-    }
-    const published = (
-      await aiPageBuilderApi.publishPage({ name: props.name, mutationRequest: { version } })
-    ).data
+    const published = await writes.publish({ title, slug: requested }, async (base) => {
+      // The warning must describe the exact version being published.
+      const warned = scriptedState.value
+      const scripted = await verifyScriptState(base)
+      if (scripted && !warned) {
+        Toast.error('此页面包含脚本，请确认上方提示后再次点击发布。')
+        return false
+      }
+      return true
+    })
+    if (!published) return
     Toast.success('页面已发布')
     shown.value = false
     emit('published', published)
   } catch (e) {
-    // Slug conflicts land here; keep the popper open so the user can edit and retry.
     Toast.error(errorMessage(e))
-  } finally {
-    pending.value = false
-    emit('pending', false)
   }
 }
+
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault()

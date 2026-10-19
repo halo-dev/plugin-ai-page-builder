@@ -93,6 +93,9 @@ const {
   updateSlug,
   prepareAgent,
   layout,
+  restore: restoreDraft,
+  resetSession,
+  writes,
 } = useWorkingDocument()
 const {
   annotations,
@@ -154,12 +157,6 @@ queryClient
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
-// First publish also saves title/path; lock editing until all writes finish.
-const publishPending = shallowRef(false)
-function onPublishPending(pending: boolean) {
-  publishPending.value = pending
-  busy.value = pending
-}
 const view = shallowRef<'visual' | 'source' | 'runtime'>('visual')
 const runtimePreview = useTemplateRef<{ refresh: () => void }>('runtimePreview')
 const viewOptions = [
@@ -201,6 +198,7 @@ let loadId = 0
 async function load() {
   const name = String(route.params.name)
   const id = ++loadId
+  resetSession()
   loading.value = true
   error.value = ''
   try {
@@ -300,86 +298,35 @@ function preview() {
 }
 async function publish(unpublish = false) {
   if (!detail.value || locked.value || (!unpublish && (dirty.value || !valid.value))) return
-  // First publish goes through the popper for the slug; this path is 更新发布/取消发布.
   if (!unpublish && !detail.value.page.publishedRevision) return
-  // Capture the session and target before awaiting: the route can switch to another
-  // page (and start loading it) while the confirmation dialog is open.
-  const session = loadId
-  const target = {
-    name: detail.value.page.name,
-    version: detail.value.page.version,
-    scripted: !!detail.value.document.js,
-  }
-  if (
-    !unpublish &&
-    target.scripted &&
-    !(await confirm('发布包含脚本的页面？', '页面脚本会在访客浏览器中执行。请确认你信任这些内容。'))
-  )
-    return
-  if (unpublish && !(await confirm('取消发布？', '访客将无法访问此页面。'))) return
-  if (
-    session !== loadId ||
-    String(route.params.name) !== target.name ||
-    detail.value?.page.name !== target.name ||
-    detail.value?.page.version !== target.version
-  ) {
-    Toast.info('页面已更新，已取消本次操作，请重试。')
-    return
-  }
-  busy.value = true
+  const scripted = !!detail.value.document.js
   try {
-    const request = {
-      name: target.name,
-      mutationRequest: { version: target.version },
-    }
-    const result = (
-      await (unpublish
-        ? aiPageBuilderApi.unpublishPage(request)
-        : aiPageBuilderApi.publishPage(request))
-    ).data
-    // Never let a late response for another page replace the current session.
-    if (session === loadId && String(route.params.name) === target.name) {
-      detail.value = result
-      queryClient.setQueryData(pageKeys.detail(result.page.name), result)
-      Toast.success(unpublish ? '已取消发布' : '页面已发布')
-    }
+    const result = unpublish
+      ? await writes.unpublish(() => confirm('取消发布？', '访客将无法访问此页面。'))
+      : await writes.publishUpdate(
+          async () =>
+            !scripted ||
+            (await confirm(
+              '发布包含脚本的页面？',
+              '页面脚本会在访客浏览器中执行。请确认你信任这些内容。',
+            )),
+        )
+    if (result) Toast.success(unpublish ? '已取消发布' : '页面已发布')
   } catch (e) {
     Toast.error(errorMessage(e))
-  } finally {
-    busy.value = false
   }
-}
-function published(result: NonNullable<typeof detail.value>) {
-  adopt(result)
-  queryClient.setQueryData(pageKeys.detail(result.page.name), result)
 }
 async function restore(revision: string) {
-  if (!detail.value || locked.value || !valid.value) return
-  if (
-    !(await confirm(
-      '恢复选中版本？',
-      '当前修改会先保存，选中版本将复制为新草稿。线上发布版本不会改变。',
-    ))
-  )
-    return
   try {
-    const preserved = await save()
-    if (!preserved) return
-    busy.value = true
-    const result = (
-      await aiPageBuilderApi.restorePageRevision({
-        name: preserved.page.name,
-        restoreRequest: { version: preserved.page.version, revision },
-      })
-    ).data
-    adopt(result)
-    queryClient.setQueryData(pageKeys.detail(result.page.name), result)
-    historyOpen.value = false
-    Toast.success('已恢复为新草稿')
+    const result = await restoreDraft(revision, () =>
+      confirm('恢复选中版本？', '当前修改会先保存，选中版本将复制为新草稿。线上发布版本不会改变。'),
+    )
+    if (result) {
+      historyOpen.value = false
+      Toast.success('已恢复为新草稿')
+    }
   } catch (e) {
     Toast.error(errorMessage(e))
-  } finally {
-    busy.value = false
   }
 }
 function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
@@ -518,9 +465,7 @@ function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
           :version="detail.page.version"
           :disabled="locked || dirty || !valid"
           :scripted="!!working?.js"
-          @published="published"
-          @updated="published"
-          @pending="onPublishPending"
+          :writes="writes"
         >
           <button type="button" class="apb-btn-primary" :disabled="locked || dirty || !valid">
             <IconRocket class="text-sm" />
@@ -573,7 +518,7 @@ function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
           class="border-r border-gray-200"
           :class="mobilePanel === 'chat' ? 'flex' : 'hidden md:flex'"
           :page-name="detail.page.name"
-          :disabled="busy || publishPending || preparing || !valid || settingsOpen || historyOpen"
+          :disabled="busy || preparing || !valid || settingsOpen || historyOpen"
           :dirty="dirty"
           :page-version="detail.page.version"
           :prepare="prepareChat"

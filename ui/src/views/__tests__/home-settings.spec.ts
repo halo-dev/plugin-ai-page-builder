@@ -3,6 +3,7 @@ import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import HomeView from '../../views/HomeView.vue'
 import PageSettings from '../../components/PageSettings.vue'
+import PublishPagePopper from '../../components/PublishPagePopper.vue'
 import { pageKeys, queryClient } from '../../lib/query-client'
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn<(...args: unknown[]) => unknown>(),
   updateSlug: vi.fn<(...args: unknown[]) => unknown>(),
   save: vi.fn<(...args: unknown[]) => unknown>(),
+  publish: vi.fn<(...args: unknown[]) => unknown>(),
   unpublish: vi.fn<(...args: unknown[]) => unknown>(),
   warning: vi.fn<(options: { onConfirm: () => void }) => void>(),
   routeQuery: {} as Record<string, unknown>,
@@ -21,7 +23,7 @@ vi.mock('../../api/clients', () => ({
     updatePageSlug: mocks.updateSlug,
     savePage: mocks.save,
     unpublishPage: mocks.unpublish,
-    publishPage: vi.fn<(...args: unknown[]) => unknown>(),
+    publishPage: mocks.publish,
     deletePage: vi.fn<(...args: unknown[]) => unknown>(),
     exportPage: vi.fn<(...args: unknown[]) => unknown>(),
     clonePage: vi.fn<(...args: unknown[]) => unknown>(),
@@ -96,7 +98,7 @@ const FormKit = defineComponent({
   setup:
     (_, { slots }) =>
     () =>
-      h('div', slots.default?.()),
+      h('div', slots.default?.({ state: { valid: true } })),
 })
 const SearchInput = defineComponent({
   setup: () => () => h(FormKit, { type: 'text', name: 'keyword' }),
@@ -121,8 +123,12 @@ function detail(name: string, extra: Record<string, unknown> = {}) {
 }
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => (resolve = res))
-  return { promise, resolve }
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 async function openSettingsFor(wrapper: ReturnType<typeof mount>, index: number) {
   const items = wrapper.findAll('div').filter((node) => node.text() === '设置')
@@ -149,7 +155,7 @@ beforeEach(() => {
     return Promise.resolve({ data: detail(name) })
   })
 })
-function mountHome() {
+function mountHome(withPublish = false) {
   return mount(HomeView, {
     global: {
       stubs: {
@@ -157,12 +163,14 @@ function mountHome() {
         SearchInput,
         FilterDropdown: true,
         PagePreviewCard: true,
-        PublishPagePopper: defineComponent({
-          setup:
-            (_, { slots }) =>
-            () =>
-              h('div', slots.default?.()),
-        }),
+        PublishPagePopper: withPublish
+          ? false
+          : defineComponent({
+              setup:
+                (_, { slots }) =>
+                () =>
+                  h('div', slots.default?.()),
+            }),
         ClonePageModal: true,
         CreatePagePanel: true,
         RouterLink: true,
@@ -171,6 +179,58 @@ function mountHome() {
     },
   })
 }
+describe('first publication from a filtered list', () => {
+  it.each(['success', 'failure'] as const)(
+    'keeps the card mounted until publication ends in %s, then refreshes the list',
+    async (outcome) => {
+      mocks.routeQuery = { keyword: 'Page a' }
+      mocks.list
+        .mockResolvedValueOnce({ data: { items: [summary('a')], total: 1 } })
+        .mockResolvedValue({ data: { items: [], total: 0 } })
+      const renamed = detail('a', { title: 'New title', version: 2 })
+      renamed.document.title = 'New title'
+      mocks.save.mockResolvedValue({ data: renamed })
+      const slug = deferred<unknown>()
+      mocks.updateSlug.mockReturnValue(slug.promise)
+      mocks.publish.mockResolvedValue({
+        data: detail('a', { title: 'New title', version: 4, publishedRevision: 'r4' }),
+      })
+      const wrapper = mountHome(true)
+      try {
+        await flushPromises()
+        wrapper
+          .getComponent(PublishPagePopper)
+          .findComponent({ name: 'FormKit' })
+          .vm.$emit('submit', { title: 'New title', slug: 'new-path' })
+        await vi.waitFor(() => expect(mocks.updateSlug).toHaveBeenCalled())
+        await flushPromises()
+        expect(wrapper.findComponent(PublishPagePopper).exists()).toBe(true)
+        expect(mocks.list).toHaveBeenCalledTimes(1)
+        expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+          page: { title: 'New title', version: 2 },
+        })
+        if (outcome === 'failure') slug.reject(new Error('Path taken'))
+        else
+          slug.resolve({ data: detail('a', { title: 'New title', slug: 'new-path', version: 3 }) })
+        await flushPromises()
+        if (outcome === 'success') {
+          expect(mocks.publish).toHaveBeenCalledWith({ name: 'a', mutationRequest: { version: 3 } })
+        } else {
+          expect(mocks.publish).not.toHaveBeenCalled()
+          expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
+            page: { title: 'New title', version: 2 },
+          })
+        }
+        await vi.waitFor(() =>
+          expect(wrapper.findComponent(PublishPagePopper).exists()).toBe(false),
+        )
+        expect(mocks.list).toHaveBeenCalledTimes(2)
+      } finally {
+        wrapper.unmount()
+      }
+    },
+  )
+})
 describe('page settings from the list', () => {
   it('passes status and sort filters from the route to the list request', async () => {
     mocks.routeQuery = { status: 'published', sort: 'created' }
@@ -422,13 +482,14 @@ describe('page settings from the list', () => {
     await openSettingsFor(wrapper, 0)
     await flushPromises()
     const settings = wrapper.findComponent(PageSettings)
+    // Begin a conflict refresh, then retry a save while that read is still pending.
+    settingsField(settings, 'slug').vm.$emit('update:modelValue', 'taken-path')
+    await flushPromises()
+    await submitSettings(settings)
+    settingsField(settings, 'slug').vm.$emit('update:modelValue', 'a-path')
     settingsField(settings, 'title').vm.$emit('update:modelValue', 'New title')
     await flushPromises()
     await submitSettings(settings)
-    // A slug conflict starts a refresh while the save is still in flight.
-    await settings
-      .props('saveSlug')('taken-path')
-      .catch(() => undefined)
     refresh.resolve({ data: detail('a', { version: 3 }) })
     await flushPromises()
     expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({

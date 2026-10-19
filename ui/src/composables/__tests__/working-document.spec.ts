@@ -221,15 +221,12 @@ describe('working document', () => {
     expect(state.dirty.value).toBe(true)
     expect(api.updateSlug).toHaveBeenCalledTimes(1)
   })
-  it.each(['agentRunning', 'preparing', 'busy'] as const)(
-    'blocks slug updates while %s',
-    async (lock) => {
-      const state = setup()
-      state[lock].value = true
-      expect(await state.updateSlug('company/about')).toBeUndefined()
-      expect(api.updateSlug).not.toHaveBeenCalled()
-    },
-  )
+  it.each(['agentRunning', 'preparing'] as const)('blocks slug updates while %s', async (lock) => {
+    const state = setup()
+    state[lock].value = true
+    expect(await state.updateSlug('company/about')).toBeUndefined()
+    expect(api.updateSlug).not.toHaveBeenCalled()
+  })
   it('freezes manual changes and undo while an agent is running', () => {
     const state = setup()
     state.patch({ title: 'Changed' })
