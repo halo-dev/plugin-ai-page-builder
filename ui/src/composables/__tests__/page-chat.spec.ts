@@ -132,6 +132,14 @@ function waitingConversation() {
   })
   api.chat.getPageChatRun.mockResolvedValue({ data: waitingRun })
 }
+const renamedPart = (toolCallId: string) => ({
+  type: 'tool-rename_session',
+  toolCallId,
+  toolName: 'rename_session',
+  state: 'output-available',
+  input: {},
+  output: { valid: true, renamed: true },
+})
 
 describe('persistent page chat', () => {
   it('restores first-run questions when the server has no archived turns', async () => {
@@ -256,23 +264,38 @@ describe('persistent page chat', () => {
     const state = setup()
     await state.recover()
     api.chat.listPageChatSessions.mockClear()
-    const rename = (toolCallId: string) => ({
-      type: 'tool-rename_session',
-      toolCallId,
-      toolName: 'rename_session',
-      state: 'output-available',
-      input: {},
-      output: { valid: true, renamed: true },
-    })
-    sdk.setMessages([{ id: 'm1', role: 'assistant', parts: [rename('r1')] }])
+    sdk.setMessages([{ id: 'm1', role: 'assistant', parts: [renamedPart('r1')] }])
     await nextTick()
     expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(1)
     sdk.setMessages([
-      { id: 'm1', role: 'assistant', parts: [rename('r1')] },
-      { id: 'm2', role: 'assistant', parts: [rename('r2')] },
+      { id: 'm1', role: 'assistant', parts: [renamedPart('r1')] },
+      { id: 'm2', role: 'assistant', parts: [renamedPart('r2')] },
     ])
     await nextTick()
     expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(2)
+  })
+  it('keeps an older successful refresh when a newer refresh fails', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    let resolveFirst!: (value: unknown) => void
+    const first = new Promise((resolve) => {
+      resolveFirst = resolve
+    })
+    api.chat.listPageChatSessions
+      .mockReturnValueOnce(first)
+      .mockRejectedValueOnce(new Error('Offline'))
+    sdk.setMessages([{ id: 'm1', role: 'assistant', parts: [renamedPart('r1')] }])
+    await nextTick()
+    sdk.setMessages([
+      { id: 'm1', role: 'assistant', parts: [renamedPart('r1')] },
+      { id: 'm2', role: 'assistant', parts: [renamedPart('r2')] },
+    ])
+    await nextTick()
+    resolveFirst({ data: { items: [{ sessionId: 'renamed', version: 4 }] } })
+    await first
+    await nextTick()
+    expect(state.sessions.value.map((session) => session.sessionId)).toEqual(['renamed'])
   })
   it('submits once through the generated endpoint and polls the resumed run to commit', async () => {
     waitingConversation()

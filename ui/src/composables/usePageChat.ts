@@ -161,6 +161,7 @@ export function usePageChat(options: {
   let request: PageChatRequest | undefined
   let historicalAnnotations = false
   let sessionRefresh = 0
+  let sessionsApplied = 0
   const applied = new Set<string>()
   function apply(page: PageDetail) {
     const revision = page.page.draftRevision
@@ -320,8 +321,12 @@ export function usePageChat(options: {
     const seq = ++sessionRefresh
     const items =
       (await aiPageBuilderChatApi.listPageChatSessions({ name: options.name })).data.items || []
-    // A refresh started earlier can resolve later; only the newest response may win.
-    if (seq === sessionRefresh) sessions.value = items
+    // A refresh started earlier can resolve later. Apply the newest successful response;
+    // a newer refresh that fails must not discard an older one that succeeded.
+    if (seq > sessionsApplied) {
+      sessionsApplied = seq
+      sessions.value = items
+    }
   }
   async function selectSession(id: string) {
     if (sessionBusy.value || id === sessionId.value) return

@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -181,6 +182,50 @@ class PageChatServiceTest {
         service.start("page", new ChatApi.Request(runId, 1L, "model", "修改", null, List.of(),
             created.sessionId()), "admin").block().blockLast();
         assertThat(stored.get(created.sessionId()).getSpec().getTitle()).isEqualTo("自动名称");
+    }
+
+    @Test
+    void consecutiveRenamesInOneStepAreAppliedInOrder() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.renameSession(Map.of("title", "第一次"))
+                .then(copy.renameSession(Map.of("title", "第二次")))
+                .thenMany(Flux.empty());
+        });
+        service.start("page", request(), "admin").block().blockLast();
+        assertThat(stored.get("page").getSpec().getTitle()).isEqualTo("第二次");
+    }
+
+    @Test
+    void cancelledRenameKeepsLaterRenamesBehindItsWrite() {
+        var gate = Sinks.<Void>empty();
+        var applied = new CopyOnWriteArrayList<String>();
+        when(client.update(any(PageChatSession.class))).thenAnswer(i -> {
+            PageChatSession session = i.getArgument(0);
+            Mono<PageChatSession> apply = Mono.fromSupplier(() -> {
+                var previous = stored.get(session.getMetadata().getName());
+                if (!previous.getMetadata().getVersion().equals(session.getMetadata().getVersion())) {
+                    throw new OptimisticLockingFailureException("CAS");
+                }
+                session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+                stored.put(session.getMetadata().getName(), JsonUtils.deepCopy(session));
+                applied.add(session.getSpec().getTitle());
+                return session;
+            });
+            // Only the first rename's write is held open; the coordinator update must finish.
+            return "第一次".equals(session.getSpec().getTitle()) ? gate.asMono().then(apply) : apply;
+        });
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            copy.renameSession(Map.of("title", "第一次")).subscribe().dispose();
+            return copy.renameSession(Map.of("title", "第二次")).thenMany(Flux.empty());
+        });
+        var events = service.start("page", request(), "admin").block();
+        // Cancelling the first subscriber must keep the barrier until its write terminates.
+        assertThat(applied).doesNotContain("第一次", "第二次");
+        gate.tryEmitEmpty();
+        events.blockLast();
+        assertThat(applied).containsSubsequence("第一次", "第二次");
     }
 
     @Test

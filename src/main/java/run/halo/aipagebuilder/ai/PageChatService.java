@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -320,22 +321,28 @@ public class PageChatService {
     }
 
     private Mono<Map<String, Object>> renameSessionFromTool(Active run, String title) {
+        Mono<Map<String, Object>> update;
         synchronized (run) {
             // The default session shares the coordinator record with run state updates,
             // so a rename must not interleave with steer/cancel optimistic writes.
-            if (run.transition != null) {
-                return run.transition.onErrorComplete()
-                    .then(Mono.defer(() -> renameSessionFromTool(run, title)));
-            }
-            var update = updateSessionTitle(run, title).cache();
-            var barrier = update.then();
+            var previous = run.transition;
+            var barrierRef = new AtomicReference<Mono<Void>>();
+            update = (previous == null ? Mono.<Void>empty() : previous.onErrorComplete())
+                .then(Mono.defer(() -> updateSessionTitle(run, title)))
+                // Clear the barrier inside the shared write: a cancelled subscriber must not
+                // release steer/cancel while the cached update is still running.
+                .doFinally(signal -> {
+                    synchronized (run) {
+                        if (run.transition == barrierRef.get()) run.transition = null;
+                    }
+                })
+                .cache();
+            // A failed rename must not surface as a failure of stop/steer waiting on it.
+            var barrier = update.then().onErrorComplete();
+            barrierRef.set(barrier);
             run.transition = barrier;
-            return update.doFinally(signal -> {
-                synchronized (run) {
-                    if (run.transition == barrier) run.transition = null;
-                }
-            });
         }
+        return update;
     }
 
     private Mono<Map<String, Object>> updateSessionTitle(Active run, String title) {
