@@ -43,7 +43,6 @@ import type { ThemeStyleContext } from '../api/generated'
 import { errorMessage } from '../utils/error'
 import { pageKeys, queryClient } from '../lib/query-client'
 import AiPanel from '../components/AiPanel.vue'
-import HistoryPanel from '../components/HistoryPanel.vue'
 import PageSettings from '../components/PageSettings.vue'
 import PublishPagePopper from '../components/PublishPagePopper.vue'
 import SourceEditor from '../components/SourceEditor.vue'
@@ -55,6 +54,7 @@ import type { StreamingPreview } from '../composables/useStreamingPreview'
 import RuntimePreview from '../components/RuntimePreview.vue'
 import StreamingCanvas from '../components/chat/StreamingCanvas.vue'
 
+const HistoryPanel = defineAsyncComponent(() => import('../components/HistoryPanel.vue'))
 const VisualEditor = defineAsyncComponent(() => import('../components/VisualEditor.vue'))
 const route = useRoute()
 const router = useRouter()
