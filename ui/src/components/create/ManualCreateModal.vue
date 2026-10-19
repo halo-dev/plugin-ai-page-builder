@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMutation } from '@tanstack/vue-query'
 import { Toast, VButton, VModal, VSpace } from '@halo-dev/components'
@@ -11,6 +11,7 @@ const emit = defineEmits<{ close: [] }>()
 const router = useRouter()
 const form = ref({ title: '', themeLayout: true })
 const formNode = ref<{ submit: () => void }>()
+const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
 const createMutation = useMutation({
   mutationFn: async (value: { title: string; themeLayout: boolean }) =>
     (await aiPageBuilderApi.createPage({ createPageRequest: value })).data,
@@ -31,6 +32,7 @@ function create() {
     title="手动创建页面"
     :width="500"
     @close="!createMutation.isPending.value && emit('close')"
+    ref="modal"
   >
     <FormKit
       v-model="form"
@@ -64,7 +66,7 @@ function create() {
         >
           创建页面
         </VButton>
-        <VButton :disabled="createMutation.isPending.value" @click="emit('close')"> 取消 </VButton>
+        <VButton :disabled="createMutation.isPending.value" @click="modal?.close()"> 取消 </VButton>
       </VSpace>
     </template>
   </VModal>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch } from 'vue'
+import { computed, shallowRef, useTemplateRef, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { Toast, VAlert, VButton, VEmpty, VLoading, VModal } from '@halo-dev/components'
 import { utils } from '@halo-dev/ui-shared'
@@ -30,6 +30,7 @@ const props = defineProps<{
   publishedRevision?: string | null
 }>()
 const emit = defineEmits<{ close: []; restore: [revision: string] }>()
+const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
 const selected = shallowRef<RevisionSummary>()
 const revisionsQuery = useQuery({
   queryKey: computed(() => pageKeys.revisions(props.name)),
@@ -138,6 +139,7 @@ function refetchDetails() {
     centered
     :body-class="['!p-0']"
     @close="emit('close')"
+    ref="modal"
   >
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
     <div class="h-full">
@@ -247,7 +249,10 @@ function refetchDetails() {
               >
             </div>
           </header>
-          <div v-if="view === 'preview'" class="relative flex min-h-0 flex-1 flex-col bg-gray-100 p-4">
+          <div
+            v-if="view === 'preview'"
+            class="relative flex min-h-0 flex-1 flex-col bg-gray-100 p-4"
+          >
             <VAlert
               v-if="previewError"
               type="error"
@@ -299,6 +304,6 @@ function refetchDetails() {
         </section>
       </div>
     </div>
-    <template #footer><VButton @click="emit('close')">关闭</VButton></template>
+    <template #footer><VButton @click="modal?.close()">关闭</VButton></template>
   </VModal>
 </template>

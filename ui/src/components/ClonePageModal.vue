@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef } from 'vue'
+import { ref, shallowRef, useTemplateRef } from 'vue'
 import { Toast, VButton, VModal, VSpace } from '@halo-dev/components'
 import { useMutation } from '@tanstack/vue-query'
 import { aiPageBuilderApi } from '../api/clients'
@@ -11,6 +11,7 @@ const props = defineProps<{ page: PageSummary }>()
 const emit = defineEmits<{ close: []; created: [name: string] }>()
 const form = ref({ title: `${props.page.title} 副本`.slice(0, 200), slug: '' })
 const formNode = shallowRef<{ submit: () => void }>()
+const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
 const mutation = useMutation({
   mutationFn: async (value: { title: string; slug: string }) =>
     (
@@ -33,7 +34,12 @@ function clone() {
 </script>
 
 <template>
-  <VModal title="克隆页面" :width="500" @close="!mutation.isPending.value && emit('close')">
+  <VModal
+    title="克隆页面"
+    :width="500"
+    @close="!mutation.isPending.value && emit('close')"
+    ref="modal"
+  >
     <p class="mb-4 text-[13px] leading-6 text-gray-500">
       复制「{{ page.title }}」已保存的草稿，新页面不会自动发布。
     </p>
@@ -64,7 +70,9 @@ function clone() {
           :disabled="mutation.isPending.value"
           @click="formNode?.submit()"
           >克隆页面</VButton
-        ><VButton :disabled="mutation.isPending.value" @click="emit('close')">取消</VButton></VSpace
+        ><VButton :disabled="mutation.isPending.value" @click="modal?.close()"
+          >取消</VButton
+        ></VSpace
       ></template
     >
   </VModal>

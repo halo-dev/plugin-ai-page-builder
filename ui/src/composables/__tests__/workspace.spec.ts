@@ -45,10 +45,11 @@ vi.mock('@halo-dev/components', () => ({
   }),
   VModal: defineComponent({
     name: 'VModal',
-    setup:
-      (_, { slots }) =>
-      () =>
-        h('div', [slots.default?.(), slots.footer?.()]),
+    emits: ['close'],
+    setup(_, { slots, emit, expose }) {
+      expose({ close: () => emit('close') })
+      return () => h('div', [slots.default?.(), slots.footer?.()])
+    },
   }),
   VDropdown: defineComponent({
     setup:

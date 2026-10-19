@@ -24,6 +24,7 @@ const buffer = reactive({
   slug: props.slug ?? '',
 })
 const form = useTemplateRef<{ node: { submit: () => void } }>('form')
+const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
 const saving = ref(false)
 const layoutOn = ref(props.themeLayout)
 const layoutSaving = ref(false)
@@ -96,7 +97,7 @@ onBeforeUnmount(() => {
 })
 </script>
 <template>
-  <VModal title="页面设置" :width="560" @close="emit('close')">
+  <VModal title="页面设置" :width="560" @close="emit('close')" ref="modal">
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
     <div>
       <FormKit
@@ -157,7 +158,7 @@ onBeforeUnmount(() => {
             @click="form?.node.submit()"
             >应用</VButton
           >
-          <VButton @click="emit('close')">取消</VButton>
+          <VButton @click="modal?.close()">取消</VButton>
         </VSpace>
         <VButton v-if="published" ghost :disabled="busy" @click="emit('unpublish')"
           >取消发布</VButton
