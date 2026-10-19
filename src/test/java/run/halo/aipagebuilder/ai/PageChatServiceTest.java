@@ -374,8 +374,7 @@ class PageChatServiceTest {
                 }
             }
         }).collectList().toFuture();
-        var coordinator = (PageRunCoordinator) org.springframework.test.util.ReflectionTestUtils
-            .getField(service, "runs");
+        var coordinator = service.runs();
         var run = coordinator.get("page");
         var completing = java.util.concurrent.CompletableFuture.runAsync(chunks::tryEmitComplete);
         try {
@@ -399,7 +398,7 @@ class PageChatServiceTest {
         try {
             waitingGateway(Flux.empty());
             service.start("page", request(), "admin").block();
-            clock.advanceTimeBy(PageRunCoordinator.WAIT_TIMEOUT.minusSeconds(1));
+            clock.advanceTimeBy(PageRun.WAIT_TIMEOUT.minusSeconds(1));
             assertThat(service.result("page", runId).block().status()).isEqualTo("waiting_for_user");
             clock.advanceTimeBy(java.time.Duration.ofSeconds(1));
             assertThat(service.result("page", runId).block().status()).isEqualTo("interrupted");
@@ -1160,7 +1159,7 @@ class PageChatServiceTest {
             .hasMessageContaining("403");
         assertThatThrownBy(() -> service.steer("page", "old-run", new ChatApi.SteerRequest("补充"), "admin").block())
             .hasMessageContaining("409");
-        for (var i = 0; i < PageChatService.MAX_STEERS; i++) {
+        for (var i = 0; i < PageRun.MAX_STEERS; i++) {
             service.steer("page", runId, new ChatApi.SteerRequest("补充 " + i), "admin").block();
         }
         assertThatThrownBy(() -> service.steer("page", runId, new ChatApi.SteerRequest("过多"), "admin").block())
