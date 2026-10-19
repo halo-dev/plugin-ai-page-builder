@@ -170,6 +170,47 @@ class FoundationBridgeTest {
     }
 
     @Test
+    void givesResumedTextAndReasoningSegmentsNewIds() {
+        setup(Flux.just(
+            TextStreamPart.textStart("t"), TextStreamPart.textDelta("t", "先看页面"),
+            TextStreamPart.textEnd("t"),
+            TextStreamPart.toolInputStart("in-1", "call-1", "read_current_page"),
+            TextStreamPart.textStart("t"), TextStreamPart.textDelta("t", "再改标题"),
+            TextStreamPart.textEnd("t"),
+            TextStreamPart.reasoningStart("r"),
+            TextStreamPart.reasoningDelta("r", "第一段", java.util.Map.of()),
+            TextStreamPart.reasoningEnd("r"),
+            TextStreamPart.textStart("t2"), TextStreamPart.textDelta("t2", "回答"),
+            TextStreamPart.textEnd("t2"),
+            TextStreamPart.reasoningStart("r"),
+            TextStreamPart.reasoningDelta("r", "第二段", java.util.Map.of()),
+            TextStreamPart.reasoningEnd("r"),
+            TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
+            null, null, "<p>old</p>", "", "Title", ""), new ContentPolicy());
+        var chunks = bridge.chat("model", java.util.List.of(), "change", copy).collectList().block();
+        var textStarts = ids(chunks, "text-start");
+        assertThat(textStarts).hasSize(3).doesNotHaveDuplicates();
+        assertThat(textStarts.get(1)).isNotEqualTo(textStarts.get(0))
+            .startsWith(textStarts.get(0));
+        assertThat(ids(chunks, "text-delta")).containsExactlyElementsOf(textStarts);
+        var reasoningStarts = ids(chunks, "reasoning-start");
+        assertThat(reasoningStarts).hasSize(2).doesNotHaveDuplicates();
+        assertThat(reasoningStarts.get(1)).isNotEqualTo(reasoningStarts.get(0))
+            .startsWith(reasoningStarts.get(0));
+        assertThat(ids(chunks, "reasoning-delta")).containsExactlyElementsOf(reasoningStarts);
+        assertThat((String) chunks.stream()
+            .filter(value -> "tool-input-start".equals(value.get("type"))).findFirst().orElseThrow()
+            .get("toolCallId")).startsWith("attempt-");
+    }
+
+    private static java.util.List<String> ids(java.util.List<java.util.Map<String, Object>> chunks,
+        String type) {
+        return chunks.stream().filter(value -> type.equals(value.get("type")))
+            .map(value -> (String) value.get("id")).toList();
+    }
+
+    @Test
     void executesSemanticPathToolAgainstTheCurrentWorkingCopy() {
         var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
         var copy = copy();

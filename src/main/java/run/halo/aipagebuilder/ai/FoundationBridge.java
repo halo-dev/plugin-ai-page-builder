@@ -173,6 +173,7 @@ public final class FoundationBridge implements AiGateway {
         java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
         return Flux.defer(() -> {
             var prefix = "attempt-" + copy.budget.nextAttempt() + "-";
+            var segments = new SegmentIds();
             var cancellation = new CancellationSource();
             var finished = new AtomicBoolean();
             var stepStarted = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
@@ -336,8 +337,12 @@ public final class FoundationBridge implements AiGateway {
                 .map(run.halo.aifoundation.ui.UIMessageTransportCodec::chunkToMap)
                 .map(chunk -> {
                     var namespaced = new java.util.LinkedHashMap<String, Object>(chunk);
-                    for (var key : java.util.List.of("id", "toolCallId")) {
-                        if (chunk.get(key) instanceof String value) namespaced.put(key, prefix + value);
+                    var type = chunk.get("type") instanceof String value ? value : "";
+                    if (chunk.get("id") instanceof String value) {
+                        namespaced.put("id", prefix + segments.id(type, value));
+                    }
+                    if (chunk.get("toolCallId") instanceof String value) {
+                        namespaced.put("toolCallId", prefix + value);
                     }
                     // Recovery and steer continuations belong to the same assistant reply.
                     if (chunk.containsKey("messageId")) namespaced.put("messageId", copy.assistantMessageId);
@@ -347,6 +352,27 @@ public final class FoundationBridge implements AiGateway {
                     : Flux.error(new AiGenerationException(Reason.STREAM_INCOMPLETE))))
                 .doFinally(signal -> cancellation.cancel());
         });
+    }
+
+    /**
+     * AI Foundation reuses one text/reasoning id per model step and re-emits "*-start" with
+     * that id when the segment resumes after reasoning or tool input. The UI reducer updates
+     * the matching part in place, so the resumed text would grow at its old position, above
+     * parts rendered in between. Rewrite each resumed segment to a fresh id so it appends
+     * where the model emitted it; deltas and ends follow the current segment.
+     */
+    static final class SegmentIds {
+        private final java.util.Map<String, String> current = new java.util.HashMap<>();
+        private final java.util.Map<String, Integer> starts = new java.util.HashMap<>();
+
+        String id(String type, String id) {
+            if (!type.startsWith("text-") && !type.startsWith("reasoning-")) return id;
+            if (!type.endsWith("-start")) return current.getOrDefault(id, id);
+            var count = starts.merge(id, 1, Integer::sum);
+            var effective = count == 1 ? id : id + "-segment-" + count;
+            current.put(id, effective);
+            return effective;
+        }
     }
 
     static String steerMessage(java.util.List<String> steers) {
