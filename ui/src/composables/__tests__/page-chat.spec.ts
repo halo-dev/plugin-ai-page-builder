@@ -11,7 +11,6 @@ const api = vi.hoisted(() => ({
   chat: {
     listPageChatSessions: vi.fn<(...args: unknown[]) => unknown>(),
     createPageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
-    renamePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     deletePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     getPageChatCheckpoint: vi.fn<(...args: unknown[]) => unknown>(),
     validatePageContent: vi.fn<(...args: unknown[]) => unknown>(),
@@ -546,15 +545,9 @@ describe('persistent page chat', () => {
       size: 20,
     })
   })
-  it('uses session versions for rename/delete and loads a newly created session', async () => {
+  it('uses session versions for deletion and loads a newly created session', async () => {
     const state = setup()
     await state.recover()
-    await state.renameSession(' Renamed ')
-    expect(api.chat.renamePageChatSession).toHaveBeenCalledWith({
-      name: 'one',
-      sessionId: 'one',
-      renamePageChatSessionRequest: { title: 'Renamed', version: 3 },
-    })
     await state.deleteSession()
     expect(api.chat.deletePageChatSession).toHaveBeenCalledWith({
       name: 'one',

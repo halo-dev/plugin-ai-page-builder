@@ -21,6 +21,7 @@ describe('streaming conversation rendering', () => {
     ['get_public_api', '读取接口文档'],
     ['set_page_slug', '设置访问路径'],
     ['update_page_title', '设置页面标题'],
+    ['rename_session', '命名会话'],
   ])('renders %s while running, completed and restored from history', async (toolName, label) => {
     let state = createUIMessageReducer()
     state = applyUIMessageChunk(state, {

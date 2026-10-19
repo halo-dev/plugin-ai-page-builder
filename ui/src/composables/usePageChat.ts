@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, shallowRef, type DeepReadonly } from 'vue'
+import { computed, onScopeDispose, shallowRef, watch, type DeepReadonly } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import {
   DefaultChatTransport,
@@ -211,6 +211,22 @@ export function usePageChat(options: {
       error.value = errorMessage(e)
     },
   })
+  // The agent names the conversation on its first step; refresh the session list
+  // as soon as that lands so the sidebar stops showing the default title.
+  watch(
+    () =>
+      chat.messages.value?.some((message) =>
+        message.parts.some(
+          (part) =>
+            'toolName' in part &&
+            part.toolName === 'rename_session' &&
+            part.state === 'output-available',
+        ),
+      ),
+    (renamed) => {
+      if (renamed && activeRun.value) void refreshSessions()
+    },
+  )
   const streamPreview = useStreamingPreview({
     messages: chat.messages,
     runId: computed(() => activeRun.value?.runId),
@@ -334,25 +350,6 @@ export function usePageChat(options: {
       notice.value = ''
     } catch (e) {
       error.value = errorMessage(e)
-    } finally {
-      loading.value = false
-    }
-  }
-  async function renameSession(title: string) {
-    const current = sessions.value.find((item) => item.sessionId === sessionId.value)
-    if (sessionBusy.value || !current || !title.trim()) return false
-    loading.value = true
-    try {
-      await aiPageBuilderChatApi.renamePageChatSession({
-        name: options.name,
-        sessionId: current.sessionId,
-        renamePageChatSessionRequest: { title: title.trim(), version: current.version },
-      })
-      await refreshSessions()
-      return true
-    } catch (e) {
-      error.value = errorMessage(e)
-      return false
     } finally {
       loading.value = false
     }
@@ -733,7 +730,6 @@ export function usePageChat(options: {
     loadingEarlier,
     selectSession,
     createSession,
-    renameSession,
     deleteSession,
     loadEarlier,
     messages,

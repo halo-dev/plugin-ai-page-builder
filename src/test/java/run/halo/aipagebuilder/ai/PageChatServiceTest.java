@@ -162,6 +162,28 @@ class PageChatServiceTest {
     }
 
     @Test
+    void agentNamesADefaultSessionThroughTheRenameTool() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.renameSession(Map.of("title", "首页设计")).thenMany(Flux.empty());
+        });
+        service.start("page", request(), "admin").block().blockLast();
+        assertThat(stored.get("page").getSpec().getTitle()).isEqualTo("首页设计");
+    }
+
+    @Test
+    void agentOverwritesAnExistingSessionNameThroughTheRenameTool() {
+        var created = service.createSession("page", new ChatApi.CreateSession("我的会话")).block();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.renameSession(Map.of("title", "自动名称")).thenMany(Flux.empty());
+        });
+        service.start("page", new ChatApi.Request(runId, 1L, "model", "修改", null, List.of(),
+            created.sessionId()), "admin").block().blockLast();
+        assertThat(stored.get(created.sessionId()).getSpec().getTitle()).isEqualTo("自动名称");
+    }
+
+    @Test
     void pathOnlyRunIsNotMistakenForAnUnchangedDocument() {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {

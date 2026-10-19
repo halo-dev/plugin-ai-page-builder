@@ -193,6 +193,46 @@ public final class PageWorkingCopy {
             });
         });
     }
+
+    private java.util.function.Function<String, Mono<Map<String, Object>>> sessionRename =
+        title -> Mono.just(renameResult(false, "会话重命名不可用", null));
+
+    void sessionRename(java.util.function.Function<String, Mono<Map<String, Object>>> handler) {
+        this.sessionRename = handler;
+    }
+
+    public Mono<Map<String, Object>> renameSession(Map<String, Object> input) {
+        return Mono.defer(() -> {
+            synchronized (this) { call(); consume(JsonUtils.objectToJson(input)); }
+            if (input == null || !(input.get("title") instanceof String raw)) {
+                return Mono.just(renameResult(false, "title 必须是字符串", null));
+            }
+            var title = raw.strip();
+            if (title.isEmpty() || title.length() > 100) {
+                return Mono.just(renameResult(false, "会话名称需要 1–100 字符", null));
+            }
+            return Mono.defer(() -> sessionRename.apply(title)).doOnNext(result -> {
+                synchronized (this) {
+                    consume(JsonUtils.objectToJson(result));
+                    var error = result.get("error");
+                    var renamed = Boolean.TRUE.equals(result.get("renamed"));
+                    var summary = error != null ? String.valueOf(error)
+                        : renamed ? "已重命名会话" : "会话名称未更新";
+                    summaries.add(new ChatApi.Tool("rename_session",
+                        error == null ? "completed" : "error", summary));
+                }
+            });
+        });
+    }
+
+    private static Map<String, Object> renameResult(boolean renamed, String error, String title) {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("valid", error == null);
+        result.put("renamed", renamed);
+        if (error != null) result.put("error", error);
+        if (title != null) result.put("title", title);
+        return result;
+    }
     private final List<ChatApi.Tool> summaries = new ArrayList<>();
 
     public PageWorkingCopy(PageDocument document, ContentPolicy policy) {
