@@ -288,7 +288,7 @@ async function saveDraft() {
   try {
     if (await save()) Toast.success('草稿已保存')
   } catch (e) {
-    error.value = errorMessage(e)
+    Toast.error(errorMessage(e))
   }
 }
 function preview() {
@@ -325,7 +325,6 @@ async function publish(unpublish = false) {
     return
   }
   busy.value = true
-  error.value = ''
   try {
     const request = {
       name: target.name,
@@ -343,7 +342,7 @@ async function publish(unpublish = false) {
       Toast.success(unpublish ? '已取消发布' : '页面已发布')
     }
   } catch (e) {
-    error.value = errorMessage(e)
+    Toast.error(errorMessage(e))
   } finally {
     busy.value = false
   }
@@ -376,7 +375,7 @@ async function restore(revision: string) {
     historyOpen.value = false
     Toast.success('已恢复为新草稿')
   } catch (e) {
-    error.value = errorMessage(e)
+    Toast.error(errorMessage(e))
   } finally {
     busy.value = false
   }

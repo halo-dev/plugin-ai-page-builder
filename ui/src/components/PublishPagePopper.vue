@@ -33,7 +33,6 @@ const formNode = ref<{ submit: () => void }>()
 // Keep successful intermediate saves so retries use the latest version.
 const synced = ref<PageDetail['page'] | null>(null)
 const pending = ref(false)
-const error = ref('')
 const siteBaseUrl = shallowRef('')
 const scriptedState = shallowRef(props.scripted ?? false)
 // Version the detection result belongs to; a newer list entry must be re-checked.
@@ -109,7 +108,6 @@ watch(shown, (open) => {
   // closed; re-sync from the freshest known state on every open.
   const base = currentBase()
   form.value = { title: base.title, slug: base.slug ?? '' }
-  error.value = ''
   loadSiteBaseUrl()
   void loadScriptState()
 })
@@ -142,7 +140,6 @@ async function publish(value: { title: string; slug: string }) {
     return
   pending.value = true
   emit('pending', true)
-  error.value = ''
   try {
     const base = currentBase()
     // The warning must match the version being published; if detection only discovers
@@ -150,7 +147,7 @@ async function publish(value: { title: string; slug: string }) {
     const warned = scriptedState.value
     const scripted = await verifyScriptState(base)
     if (scripted && !warned) {
-      error.value = '此页面包含脚本，请确认上方提示后再次点击发布。'
+      Toast.error('此页面包含脚本，请确认上方提示后再次点击发布。')
       return
     }
     let version = base.version
@@ -187,7 +184,7 @@ async function publish(value: { title: string; slug: string }) {
     emit('published', published)
   } catch (e) {
     // Slug conflicts land here; keep the popper open so the user can edit and retry.
-    error.value = errorMessage(e)
+    Toast.error(errorMessage(e))
   } finally {
     pending.value = false
     emit('pending', false)
@@ -243,9 +240,6 @@ function keydown(event: KeyboardEvent) {
             <p class="rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-700">
               此页面包含脚本，发布后会在访客浏览器中自动执行。
             </p>
-          </div>
-          <div v-if="error" class="py-4">
-            <p class="text-xs text-red-600">{{ error }}</p>
           </div>
           <div class="pt-4 flex justify-end">
             <VButton

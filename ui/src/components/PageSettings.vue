@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, useTemplateRef, watch } from 'vue'
-import { Toast, VAlert, VButton, VModal, VSpace } from '@halo-dev/components'
+import { Toast, VButton, VModal, VSpace } from '@halo-dev/components'
 import type { PageDetail, PageDocument } from '../api/generated'
 import { errorMessage } from '../utils/error'
 import { slugOptionalValidation, slugValidation } from '../utils/slug'
@@ -25,7 +25,6 @@ const buffer = reactive({
 })
 const form = useTemplateRef<{ node: { submit: () => void } }>('form')
 const saving = ref(false)
-const slugError = ref('')
 const layoutOn = ref(props.themeLayout)
 const layoutSaving = ref(false)
 // Serialize the modal's writes: every operation (slug, layout, apply,
@@ -37,10 +36,6 @@ const busy = computed(() => saving.value || layoutSaving.value || props.disabled
 watch(
   () => props.themeLayout,
   (value) => (layoutOn.value = value),
-)
-watch(
-  () => buffer.slug,
-  () => (slugError.value = ''),
 )
 // A parent refresh (e.g. after a version conflict) swaps the document under
 // the form: fields the user never touched follow the fresh values, while
@@ -80,12 +75,11 @@ async function submit() {
   // title/description which the parent applies to the working document.
   if (buffer.slug !== (props.slug ?? '')) {
     saving.value = true
-    slugError.value = ''
     try {
       if (!(await props.saveSlug(buffer.slug))) return
       Toast.success('访问路径已保存')
     } catch (e) {
-      slugError.value = errorMessage(e)
+      Toast.error(errorMessage(e))
       return
     } finally {
       saving.value = false
@@ -105,7 +99,6 @@ onBeforeUnmount(() => {
   <VModal title="页面设置" :width="560" @close="emit('close')">
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
     <div>
-      <VAlert v-if="slugError" type="error" :title="slugError" class="mb-4" />
       <FormKit
         ref="form"
         type="form"

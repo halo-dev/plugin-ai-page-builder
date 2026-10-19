@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   updateSlug: vi.fn<(...args: unknown[]) => unknown>(),
   themeContext: vi.fn<(...args: unknown[]) => unknown>(),
   warning: vi.fn<(options: { onCancel: () => void }) => void>(),
+  toastError: vi.fn<(message: string) => void>(),
 }))
 vi.mock('../../api/clients', () => ({
   aiPageBuilderApi: { getPage: mocks.get, savePage: mocks.save, updatePageSlug: mocks.updateSlug },
@@ -69,7 +70,7 @@ vi.mock('@halo-dev/components', () => ({
   Toast: {
     success: vi.fn<(...args: unknown[]) => unknown>(),
     info: vi.fn<(...args: unknown[]) => unknown>(),
-    error: vi.fn<(...args: unknown[]) => unknown>(),
+    error: mocks.toastError,
   },
 }))
 vi.mock('../../components/AiPanel.vue', () => ({
@@ -287,7 +288,7 @@ describe('workspace integration', () => {
     expect(wrapper.findComponent(SourceEditor).props('document').html).toBe('<p>Hello</p>')
     wrapper.unmount()
   })
-  it('preserves dirty draft when latest-version reload is cancelled', async () => {
+  it('reports save failures with a toast and keeps the dirty draft', async () => {
     const wrapper = await editor()
     await wrapper
       .findAll('button')
@@ -301,13 +302,8 @@ describe('workspace integration', () => {
       .find((b) => b.text() === '保存')!
       .trigger('click')
     await flushPromises()
-    mocks.warning.mockImplementation(({ onCancel }) => onCancel())
-    await wrapper
-      .findAll('button')
-      .find((b) => b.text() === '载入最新版本')!
-      .trigger('click')
-    await flushPromises()
-    expect(mocks.get).toHaveBeenCalledTimes(1)
+    expect(mocks.toastError).toHaveBeenCalledWith('Conflict')
+    expect(wrapper.findAll('button').some((b) => b.text() === '载入最新版本')).toBe(false)
     expect(wrapper.find('h1').text()).toBe('Unsaved')
     wrapper.unmount()
   })
@@ -393,7 +389,7 @@ describe('workspace integration', () => {
     expect(saveLayout).toHaveBeenNthCalledWith(2, false)
     wrapper.unmount()
   })
-  it('keeps the path input and shows the error on failure, then allows retry', async () => {
+  it('keeps the path input and reports the failure with a toast, then allows retry', async () => {
     const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
     saveSlug.mockRejectedValueOnce(new Error('路径已存在')).mockResolvedValueOnce(page)
     const wrapper = mount(PageSettings, {
@@ -415,16 +411,15 @@ describe('workspace integration', () => {
     await flushPromises()
     wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
-    expect(wrapper.text()).toContain('路径已存在')
+    expect(mocks.toastError).toHaveBeenCalledWith('路径已存在')
     expect(wrapper.emitted('apply')).toBeUndefined()
     expect(wrapper.emitted('close')).toBeUndefined()
-    // Editing the slug clears the error before the next submit.
+    // The input keeps the edited value so the user can correct and retry.
     const slug = wrapper
       .findAllComponents({ name: 'FormKit' })
       .find((field) => field.attributes('name') === 'slug')!
     slug.vm.$emit('update:modelValue', 'company/new')
     await flushPromises()
-    expect(wrapper.text()).not.toContain('路径已存在')
     slug.vm.$emit('update:modelValue', 'company/about')
     await flushPromises()
     wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')

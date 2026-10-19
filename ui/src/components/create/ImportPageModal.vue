@@ -2,7 +2,7 @@
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMutation } from '@tanstack/vue-query'
-import { VAlert, VButton, VModal, VSpace } from '@halo-dev/components'
+import { Toast, VAlert, VButton, VModal, VSpace } from '@halo-dev/components'
 import IconFileZip from '~icons/mingcute/file-zip-line'
 import IconUpload from '~icons/mingcute/upload-2-line'
 import { aiPageBuilderApi, type ImportReview } from '../../api/clients'
@@ -21,7 +21,6 @@ const file = ref<File>()
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput')
 const dragging = ref(false)
 const model = ref('')
-const error = ref('')
 const review = ref<ImportReview>()
 const confirmed = ref(false)
 const pending = ref(false)
@@ -86,14 +85,13 @@ const reviewMutation = useMutation({
     if (input.attempt !== reviewAttempt) return
     review.value = data
     confirmed.value = false
-    error.value = ''
     phase.value = 'report'
   },
   onError: (e, input) => {
     if (input.attempt !== reviewAttempt) return
     review.value = undefined
     phase.value = 'select'
-    error.value = errorMessage(e)
+    Toast.error(errorMessage(e))
   },
   onSettled: (_data, _error, input) => {
     if (input.attempt === reviewAttempt) pending.value = false
@@ -114,7 +112,7 @@ const importMutation = useMutation({
     void queryClient.invalidateQueries({ queryKey: pageKeys.all })
     void router.push({ name: 'AiPageBuilderEditor', params: { name: detail.page.name } })
   },
-  onError: (e) => (error.value = errorMessage(e)),
+  onError: (e) => Toast.error(errorMessage(e)),
   onSettled: () => (pending.value = false),
   queryClient,
 })
@@ -135,7 +133,8 @@ function applyFile(selected: File | undefined) {
   review.value = undefined
   confirmed.value = false
   phase.value = 'select'
-  error.value = validateFile(selected)
+  const invalid = validateFile(selected)
+  if (invalid) Toast.error(invalid)
 }
 
 function chooseFile() {
@@ -159,19 +158,18 @@ function dropFile(event: DragEvent) {
 function startReview() {
   if (pending.value) return
   if (!props.aiAvailable) {
-    error.value = 'AI 审查不可用，请检查 AI Foundation。'
+    Toast.error('AI 审查不可用，请检查 AI Foundation。')
     return
   }
   if (!file.value) {
-    error.value = '请选择 ZIP 文件。'
+    Toast.error('请选择 ZIP 文件。')
     return
   }
   const invalid = validateFile(file.value)
   if (invalid) {
-    error.value = invalid
+    Toast.error(invalid)
     return
   }
-  error.value = ''
   review.value = undefined
   confirmed.value = false
   phase.value = 'select'
@@ -196,12 +194,11 @@ function cancelReview() {
   review.value = undefined
   confirmed.value = false
   phase.value = 'select'
-  error.value = '已取消审查。'
+  Toast.info('已取消审查。')
 }
 
 function startImport() {
   if (pending.value || !file.value || !review.value || !canImport.value) return
-  error.value = ''
   pending.value = true
   importMutation.mutate({
     file: file.value,
@@ -257,7 +254,6 @@ watch(model, () => {
   review.value = undefined
   confirmed.value = false
   phase.value = 'select'
-  error.value = ''
 })
 </script>
 
@@ -411,15 +407,6 @@ watch(model, () => {
           <span class="ml-auto">{{ reviewFooter }}</span>
         </div>
       </div>
-
-      <VAlert
-        v-if="error"
-        type="error"
-        role="alert"
-        :closable="false"
-        :description="error"
-        class="mt-3"
-      />
     </div>
     <template #footer>
       <VSpace>

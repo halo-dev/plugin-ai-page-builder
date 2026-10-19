@@ -40,6 +40,8 @@ const mocks = vi.hoisted(() => ({
     >(),
   push: vi.fn<(location: unknown) => unknown>(),
   status: vi.fn<() => Promise<unknown>>(),
+  toastError: vi.fn<(message: string) => void>(),
+  toastInfo: vi.fn<(message: string) => void>(),
 }))
 vi.mock('../../../api/clients', () => ({
   aiPageBuilderApi: {
@@ -54,6 +56,7 @@ vi.mock('@halo-dev/components', async (importOriginal) => {
   const { defineComponent, h } = await import('vue')
   return {
     ...original,
+    Toast: { error: mocks.toastError, info: mocks.toastInfo },
     VButton: defineComponent({
       props: ['disabled', 'loading'],
       setup:
@@ -248,7 +251,7 @@ describe('page archive import', () => {
     expect(wrapper.get('[data-test=model-selector]').attributes('disabled')).toBeDefined()
   })
 
-  it('shows review failures inline, keeps the file and allows retry', async () => {
+  it('reports review failures with a toast, keeps the file and allows retry', async () => {
     mocks.reviewPageImport.mockRejectedValueOnce({
       response: { data: { detail: 'AI 审查不可用，请检查 AI Foundation。' } },
     })
@@ -256,21 +259,20 @@ describe('page archive import', () => {
     const file = new File(['zip'], 'page.zip')
     await reviewed(wrapper, file)
 
-    expect(wrapper.get('[role=alert]').text()).toBe('AI 审查不可用，请检查 AI Foundation。')
+    expect(mocks.toastError).toHaveBeenCalledWith('AI 审查不可用，请检查 AI Foundation。')
     expect(mocks.importPage).not.toHaveBeenCalled()
     expect(button(wrapper, '开始 AI 审查').attributes('disabled')).toBeUndefined()
 
     await startReview(wrapper)
     expect(mocks.reviewPageImport).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('AI 审查通过')
-    expect(wrapper.find('[role=alert]').exists()).toBe(false)
   })
 
   it('does not submit without a file', async () => {
     const wrapper = modal()
     await startReview(wrapper)
     expect(mocks.reviewPageImport).not.toHaveBeenCalled()
-    expect(wrapper.get('[role=alert]').text()).toBe('请选择 ZIP 文件。')
+    expect(mocks.toastError).toHaveBeenCalledWith('请选择 ZIP 文件。')
   })
 
   it.each(['page.txt', 'page.zip.txt', 'page'])('rejects the invalid filename %s', async (name) => {
@@ -278,7 +280,7 @@ describe('page archive import', () => {
     await select(wrapper, new File(['zip'], name, { type: 'application/zip' }))
     await startReview(wrapper)
     expect(mocks.reviewPageImport).not.toHaveBeenCalled()
-    expect(wrapper.get('[role=alert]').text()).toBe('请选择 .zip 格式的文件。')
+    expect(mocks.toastError).toHaveBeenCalledWith('请选择 .zip 格式的文件。')
   })
 
   it('rejects files over 4 MiB and accepts the exact size limit after correcting the file', async () => {
@@ -286,9 +288,10 @@ describe('page archive import', () => {
     await select(wrapper, new File([new Uint8Array(4 * 1024 * 1024 + 1)], 'large.zip'))
     await startReview(wrapper)
     expect(mocks.reviewPageImport).not.toHaveBeenCalled()
-    expect(wrapper.get('[role=alert]').text()).toBe('ZIP 文件大小不能超过 4 MiB。')
+    expect(mocks.toastError).toHaveBeenCalledWith('ZIP 文件大小不能超过 4 MiB。')
+    mocks.toastError.mockClear()
     await select(wrapper, new File([new Uint8Array(4 * 1024 * 1024)], 'page.zip'))
-    expect(wrapper.find('[role=alert]').exists()).toBe(false)
+    expect(mocks.toastError).not.toHaveBeenCalled()
     await startReview(wrapper)
     expect(mocks.reviewPageImport).toHaveBeenCalledTimes(1)
   })
@@ -370,7 +373,7 @@ describe('page archive import', () => {
     await flushPromises()
 
     expect(options?.signal?.aborted).toBe(true)
-    expect(wrapper.get('[role=alert]').text()).toBe('已取消审查。')
+    expect(mocks.toastInfo).toHaveBeenCalledWith('已取消审查。')
     expect(button(wrapper, '取消').attributes('disabled')).toBeUndefined()
     await button(wrapper, '取消').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)

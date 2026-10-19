@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   slug: vi.fn(),
   publish: vi.fn(),
+  toastError: vi.fn<(message: string) => void>(),
 }))
 vi.mock('../../api/clients', () => ({
   aiPageBuilderApi: {
@@ -23,7 +24,7 @@ vi.mock('../../utils/error', () => ({ errorMessage: (error: Error) => error.mess
 vi.mock('@halo-dev/components', async () => {
   const { defineComponent, h } = await import('vue')
   return {
-    Toast: { success: vi.fn() },
+    Toast: { success: vi.fn(), error: mocks.toastError },
     VButton: defineComponent({
       props: ['disabled'],
       setup:
@@ -194,7 +195,7 @@ describe('first publish confirmation', () => {
     expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.slug).not.toHaveBeenCalled()
     expect(mocks.publish).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('页面已在别处更新')
+    expect(mocks.toastError).toHaveBeenCalledWith('页面已在别处更新，请关闭后重新打开发布面板')
   })
 
   it('rechecks the script warning when the list entry moves to a newer version', async () => {
@@ -221,7 +222,7 @@ describe('first publish confirmation', () => {
     mocks.get.mockResolvedValue({ data: scripted })
     await publish(wrapper)
     expect(mocks.publish).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('请确认上方提示后再次点击发布')
+    expect(mocks.toastError).toHaveBeenCalledWith('此页面包含脚本，请确认上方提示后再次点击发布。')
     expect(wrapper.text()).toContain('此页面包含脚本')
     await publish(wrapper)
     expect(mocks.publish).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 1 } })
@@ -270,7 +271,7 @@ describe('first publish confirmation', () => {
     await wrapper.get('[name=title]').setValue('公司介绍')
     await wrapper.get('[name=slug]').setValue('company/about')
     await publish(wrapper)
-    expect(wrapper.text()).toContain('暂时无法发布')
+    expect(mocks.toastError).toHaveBeenCalledWith('暂时无法发布')
     mocks.get.mockResolvedValue({ data: detail(3, '公司介绍', 'company/about') })
     await publish(wrapper)
     expect(mocks.save).toHaveBeenCalledTimes(1)
@@ -287,7 +288,7 @@ describe('first publish confirmation', () => {
     await wrapper.get('[name=title]').setValue('公司介绍')
     await wrapper.get('[name=slug]').setValue('taken')
     await publish(wrapper)
-    expect(wrapper.text()).toContain('访问路径已被占用')
+    expect(mocks.toastError).toHaveBeenCalledWith('访问路径已被占用')
     expect(mocks.publish).not.toHaveBeenCalled()
     await wrapper.get('[name=slug]').setValue('company/about')
     mocks.get.mockResolvedValue({ data: detail(2, '公司介绍', 'taken') })
@@ -307,7 +308,7 @@ describe('first publish confirmation', () => {
     expect(mocks.save.mock.calls[0]![0].savePageRequest.version).toBe(1)
     expect(mocks.slug).not.toHaveBeenCalled()
     expect(mocks.publish).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Page changed')
+    expect(mocks.toastError).toHaveBeenCalledWith('Page changed; reload before saving')
   })
 
   it('resyncs on reopening and freezes both fields during publication', async () => {
