@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import ChatQuestions from '../../components/chat/ChatQuestions.vue'
 import type { PageChatQuestion } from '../../api/generated'
 
@@ -24,7 +25,122 @@ function card() {
   return mount(ChatQuestions, { props: { question, pending: true } })
 }
 
+afterEach(() => {
+  vi.restoreAllMocks()
+  delete (Element.prototype as Partial<Element>).scrollIntoView
+})
+
 describe('chat questions', () => {
+  it('focuses the first question and scrolls it into view when pending', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const wrapper = mount(ChatQuestions, {
+      props: { question, pending: true },
+      attachTo: document.body,
+    })
+    await nextTick()
+    const first = wrapper.find('input[value="calm"]')
+    expect(document.activeElement).toBe(first.element)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
+    expect(scrollIntoView.mock.instances[0]).toBe(wrapper.find('fieldset').element)
+    wrapper.unmount()
+  })
+
+  it('focuses the textarea when the first question has no options', async () => {
+    const wrapper = mount(ChatQuestions, {
+      props: {
+        pending: true,
+        question: {
+          ...question,
+          questions: [
+            { id: 'audience', title: '目标读者？', options: [], allowCustomAnswer: true },
+          ],
+        },
+      },
+      attachTo: document.body,
+    })
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('textarea').element)
+    wrapper.unmount()
+  })
+
+  it('only focuses once the batch becomes pending', async () => {
+    const wrapper = mount(ChatQuestions, {
+      props: { question, pending: false },
+      attachTo: document.body,
+    })
+    await nextTick()
+    expect(document.activeElement).toBe(document.body)
+    await wrapper.setProps({ pending: true })
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('input[value="calm"]').element)
+    wrapper.unmount()
+  })
+
+  it('retries focusing a new batch that arrives while the previous one is submitting', async () => {
+    const wrapper = mount(ChatQuestions, {
+      props: { question, pending: true, submitting: true },
+      attachTo: document.body,
+    })
+    await nextTick()
+    expect(document.activeElement).toBe(document.body)
+    await wrapper.setProps({ submitting: false })
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('input[value="calm"]').element)
+    wrapper.unmount()
+  })
+
+  it('does not steal focus from an input the user is typing in, but still positions it', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    const comment = document.createElement('textarea')
+    comment.value = '补充说明'
+    document.body.appendChild(comment)
+    comment.focus()
+    const wrapper = mount(ChatQuestions, {
+      props: { question, pending: true },
+      attachTo: document.body,
+    })
+    await nextTick()
+    expect(document.activeElement).toBe(comment)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
+    wrapper.unmount()
+    comment.remove()
+  })
+
+  it('focuses the question when the empty composer keeps focus after sending', async () => {
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    composer.focus()
+    const wrapper = mount(ChatQuestions, {
+      props: { question, pending: true },
+      attachTo: document.body,
+    })
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('input[value="calm"]').element)
+    wrapper.unmount()
+    composer.remove()
+  })
+
+  it('does not focus a batch that is already answered', async () => {
+    const wrapper = mount(ChatQuestions, {
+      props: {
+        pending: true,
+        question: {
+          ...question,
+          answers: [
+            { questionId: 'style', optionId: 'calm' },
+            { questionId: 'audience', text: '设计师' },
+          ],
+        },
+      },
+      attachTo: document.body,
+    })
+    await nextTick()
+    expect(document.activeElement).toBe(document.body)
+    wrapper.unmount()
+  })
+
   it('shows structured questions and requires every answer before submitting', async () => {
     const wrapper = card()
     expect(wrapper.findAll('legend').map((item) => item.text())).toEqual([
