@@ -121,58 +121,27 @@ describe('page creation', () => {
       wrapper.unmount()
     }
   })
-  it.each(['delayed response', 'clear search'])(
-    'preserves search focus when the empty creation panel mounts after %s',
-    async (scenario) => {
-      let resolveList!: (value: unknown) => void
-      if (scenario === 'delayed response') {
-        mocks.list.mockReturnValue(
-          new Promise((resolve) => {
-            resolveList = resolve
-          }),
-        )
-      }
-      const Search = defineComponent({
-        props: ['modelValue'],
-        emits: ['update:modelValue'],
-        setup:
-          (props, { emit }) =>
-          () =>
-            h('input', {
-              value: props.modelValue,
-              onInput: (event: Event) =>
-                emit('update:modelValue', (event.target as HTMLInputElement).value),
-            }),
-      })
-      const wrapper = mount(HomeView, {
-        attachTo: document.body,
-        global: {
-          stubs: { FormKit, SearchInput: Search, RouterLink: true },
-          directives: { tooltip: {}, 'close-popper': {} },
-        },
-      })
-      try {
-        await flushPromises()
-        const search = wrapper.get('input')
-        search.element.focus()
-        expect(document.activeElement).toBe(search.element)
-        if (scenario === 'delayed response') {
-          expect(wrapper.find('textarea').exists()).toBe(false)
-          resolveList({ data: { items: [], total: 0 } })
-        } else {
-          await search.setValue('missing')
-          await flushPromises()
-          expect(wrapper.find('textarea').exists()).toBe(false)
-          await search.setValue('')
-        }
-        await flushPromises()
-        expect(wrapper.find('textarea').exists()).toBe(true)
-        expect(document.activeElement).toBe(search.element)
-      } finally {
-        wrapper.unmount()
-      }
-    },
-  )
+  it('hides the toolbar once an empty workspace loads', async () => {
+    let resolveList!: (value: unknown) => void
+    mocks.list.mockReturnValue(
+      new Promise((resolve) => {
+        resolveList = resolve
+      }),
+    )
+    const wrapper = mount(HomeView, {
+      global: { stubs: { FormKit, SearchInput, RouterLink: true } },
+    })
+    try {
+      await flushPromises()
+      expect(wrapper.findComponent(SearchInput).exists()).toBe(true)
+      resolveList({ data: { items: [], total: 0 } })
+      await flushPromises()
+      expect(wrapper.findComponent(SearchInput).exists()).toBe(false)
+      expect(wrapper.find('textarea').exists()).toBe(true)
+    } finally {
+      wrapper.unmount()
+    }
+  })
   it('opens hierarchical public paths while drafts still preview by name', async () => {
     mocks.list.mockResolvedValue({
       data: {
@@ -376,7 +345,7 @@ describe('page creation', () => {
     const fields = wrapper.findAllComponents(FormKit)
     expect(
       fields.filter((field) => field.props('name')).map((field) => field.props('name')),
-    ).toEqual(['keyword', 'title', 'themeLayout'])
+    ).toEqual(['title', 'themeLayout'])
     expect(fields.find((field) => field.props('name') === 'title')!.props('validation')).toContain(
       'required',
     )
