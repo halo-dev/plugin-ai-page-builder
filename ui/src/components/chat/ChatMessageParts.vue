@@ -85,6 +85,7 @@ const parts = computed(() => {
       update_current_page: '更新页面内容',
       update_page_title: '设置页面标题',
       set_page_slug: '设置访问路径',
+      rename_session: '命名会话',
       patch_current_page: '局部修改页面',
       list_theme_files: '查找主题文件',
       read_theme_file: '读取主题文件',

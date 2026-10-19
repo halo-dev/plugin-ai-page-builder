@@ -1,4 +1,4 @@
-import { computed, onScopeDispose, shallowRef, type DeepReadonly } from 'vue'
+import { computed, onScopeDispose, shallowRef, watch, type DeepReadonly } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import {
   DefaultChatTransport,
@@ -160,6 +160,8 @@ export function usePageChat(options: {
   let polling: ReturnType<typeof setTimeout> | undefined
   let request: PageChatRequest | undefined
   let historicalAnnotations = false
+  let sessionRefresh = 0
+  let sessionsApplied = 0
   const applied = new Set<string>()
   function apply(page: PageDetail) {
     const revision = page.page.draftRevision
@@ -211,6 +213,25 @@ export function usePageChat(options: {
       error.value = errorMessage(e)
     },
   })
+  // The agent names the conversation on every turn; refresh the session list as soon
+  // as each rename lands so the sidebar stops showing the previous title.
+  watch(
+    () =>
+      chat.messages.value?.reduce(
+        (count, message) =>
+          count +
+          message.parts.filter(
+            (part) =>
+              'toolName' in part &&
+              part.toolName === 'rename_session' &&
+              part.state === 'output-available',
+          ).length,
+        0,
+      ) ?? 0,
+    (count, previous) => {
+      if (count > (previous ?? 0) && activeRun.value) void refreshSessions().catch(() => {})
+    },
+  )
   const streamPreview = useStreamingPreview({
     messages: chat.messages,
     runId: computed(() => activeRun.value?.runId),
@@ -297,8 +318,15 @@ export function usePageChat(options: {
     () => running.value || preparing.value || loading.value || loadingEarlier.value,
   )
   async function refreshSessions() {
-    sessions.value =
+    const seq = ++sessionRefresh
+    const items =
       (await aiPageBuilderChatApi.listPageChatSessions({ name: options.name })).data.items || []
+    // A refresh started earlier can resolve later. Apply the newest successful response;
+    // a newer refresh that fails must not discard an older one that succeeded.
+    if (seq > sessionsApplied) {
+      sessionsApplied = seq
+      sessions.value = items
+    }
   }
   async function selectSession(id: string) {
     if (sessionBusy.value || id === sessionId.value) return
@@ -334,25 +362,6 @@ export function usePageChat(options: {
       notice.value = ''
     } catch (e) {
       error.value = errorMessage(e)
-    } finally {
-      loading.value = false
-    }
-  }
-  async function renameSession(title: string) {
-    const current = sessions.value.find((item) => item.sessionId === sessionId.value)
-    if (sessionBusy.value || !current || !title.trim()) return false
-    loading.value = true
-    try {
-      await aiPageBuilderChatApi.renamePageChatSession({
-        name: options.name,
-        sessionId: current.sessionId,
-        renamePageChatSessionRequest: { title: title.trim(), version: current.version },
-      })
-      await refreshSessions()
-      return true
-    } catch (e) {
-      error.value = errorMessage(e)
-      return false
     } finally {
       loading.value = false
     }
@@ -733,7 +742,6 @@ export function usePageChat(options: {
     loadingEarlier,
     selectSession,
     createSession,
-    renameSession,
     deleteSession,
     loadEarlier,
     messages,

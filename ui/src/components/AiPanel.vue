@@ -46,8 +46,6 @@ watch(
     if (count > previous) annotationsOpen.value = true
   },
 )
-const renaming = shallowRef(false)
-const sessionTitle = shallowRef('')
 const feed = useTemplateRef<HTMLElement>('feed')
 const {
   sessions,
@@ -57,7 +55,6 @@ const {
   loadingEarlier,
   selectSession,
   createSession,
-  renameSession,
   deleteSession,
   loadEarlier,
   messages,
@@ -183,18 +180,10 @@ watch(
 )
 watch(sessionId, () => {
   prompt.value = ''
-  renaming.value = false
 })
 const currentSession = computed(() =>
   sessions.value.find((item) => item.sessionId === sessionId.value),
 )
-function startRename() {
-  sessionTitle.value = currentSession.value?.title || ''
-  renaming.value = true
-}
-async function saveTitle() {
-  if (await renameSession(sessionTitle.value)) renaming.value = false
-}
 const defaultSession = computed(() => sessionId.value === props.pageName)
 function confirmDelete() {
   Dialog.warning({
@@ -279,12 +268,11 @@ watch(blankPage, () => (activePresetGroup.value = 0))
             v-close-popper
             @click="selectSession(session.sessionId)"
           >
-            <span class="flex items-center gap-1.5">
+            <template #prefix-icon>
               <IconCheck v-if="session.sessionId === sessionId" class="text-xs text-emerald-600" />
-              <span :class="{ 'ml-[18px]': session.sessionId !== sessionId }">
-                {{ session.title || '新会话' }}
-              </span>
-            </span>
+              <span v-else class="w-3.5 shrink-0" aria-hidden="true" />
+            </template>
+            {{ session.title || '新会话' }}
           </VDropdownItem>
         </template>
       </VDropdown>
@@ -299,7 +287,7 @@ watch(blankPage, () => (activePresetGroup.value = 0))
         >
           <IconAdd class="text-base" />
         </button>
-        <VDropdown>
+        <VDropdown class="flex">
           <button
             type="button"
             class="apb-icon-btn h-7 w-7"
@@ -310,7 +298,6 @@ watch(blankPage, () => (activePresetGroup.value = 0))
             <IconMore class="text-base" />
           </button>
           <template #popper>
-            <VDropdownItem v-close-popper @click="startRename">重命名会话</VDropdownItem>
             <VDropdownItem v-close-popper type="danger" @click="confirmDelete">
               {{ defaultSession ? '清空会话' : '删除会话' }}
             </VDropdownItem>
@@ -318,36 +305,6 @@ watch(blankPage, () => (activePresetGroup.value = 0))
         </VDropdown>
       </div>
     </header>
-    <form
-      v-if="renaming"
-      class="flex shrink-0 items-center gap-1.5 border-b border-gray-100 px-3 py-2"
-      @submit.prevent="saveTitle"
-    >
-      <input
-        v-model="sessionTitle"
-        class="apb-input h-7 text-xs"
-        aria-label="会话名称"
-        maxlength="120"
-        :disabled="sessionBusy"
-        required
-      />
-      <button
-        type="submit"
-        class="apb-btn-outline h-7 px-2 text-xs"
-        :disabled="sessionBusy || !sessionTitle.trim()"
-      >
-        保存
-      </button>
-      <button
-        type="button"
-        class="apb-icon-btn h-7 w-7"
-        aria-label="取消重命名"
-        :disabled="sessionBusy"
-        @click="renaming = false"
-      >
-        <IconClose class="text-sm" />
-      </button>
-    </form>
     <div ref="feed" class="min-h-0 flex-1 overflow-auto px-4 py-4" role="log" aria-label="页面对话">
       <div v-if="hasMore" class="mb-4 text-center">
         <button

@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -222,7 +223,8 @@ public class PageChatService {
                             .switchIfEmpty(Mono.defer(() -> {
                                 var id = session.getMetadata().getName();
                                 if (request.resumeFromRunId() == null) {
-                                    return reserve(name, request, actor, page, coordinator, id, null);
+                                    return reserve(name, request, actor, page, coordinator, id,
+                                        null);
                                 }
                                 return checkpoints.load(id)
                                     .switchIfEmpty(Mono.error(conflict("可恢复的进度已不存在")))
@@ -240,7 +242,8 @@ public class PageChatService {
                                             || !Objects.equals(request.baseHash(), spec.getRequest().baseHash())) {
                                             return Mono.error(conflict("恢复进度已变化或页面版本不匹配，请重新载入"));
                                         }
-                                        return reserve(name, request, actor, page, coordinator, id, checkpoint);
+                                        return reserve(name, request, actor, page, coordinator, id,
+                                            checkpoint);
                                     });
                             }));
                     }));
@@ -250,7 +253,8 @@ public class PageChatService {
     }
 
     private Mono<Flux<Map<String, Object>>> reserve(String name, ChatApi.Request request, String actor,
-        PageDetail page, PageChatSession session, String sessionId, PageChatCheckpoint checkpoint) {
+        PageDetail page, PageChatSession session, String sessionId,
+        PageChatCheckpoint checkpoint) {
         // Standalone pages render without the theme layout, so the model gets a context
         // that says no theme styles or variables exist instead of the theme's.
         var themeContext = page.page().themeLayout()
@@ -259,6 +263,7 @@ public class PageChatService {
         var run = new Active(request, actor, page, policy, themeContext, sessionId);
         if (referenceTools != null) run.copy.references(referenceTools.session(null, true));
         run.copy.questions(question -> ask(name, run, question));
+        run.copy.sessionRename(title -> renameSessionFromTool(run, title));
         if (checkpoint != null) {
             var spec = checkpoint.getSpec();
             run.copy.restore(spec.getDocument(), spec.isInvalidUpdate(), spec.getSlug(),
@@ -313,6 +318,51 @@ public class PageChatService {
             // The run survives a browser refresh; stopping is an explicit Console action.
             return Mono.just(run.events.asFlux());
         }))).doOnError(error -> active.remove(name, run));
+    }
+
+    private Mono<Map<String, Object>> renameSessionFromTool(Active run, String title) {
+        Mono<Map<String, Object>> update;
+        synchronized (run) {
+            // The default session shares the coordinator record with run state updates,
+            // so a rename must not interleave with steer/cancel optimistic writes.
+            var previous = run.transition;
+            var barrierRef = new AtomicReference<Mono<Void>>();
+            update = (previous == null ? Mono.<Void>empty() : previous.onErrorComplete())
+                .then(Mono.defer(() -> updateSessionTitle(run, title)))
+                // Clear the barrier inside the shared write: a cancelled subscriber must not
+                // release steer/cancel while the cached update is still running.
+                .doFinally(signal -> {
+                    synchronized (run) {
+                        if (run.transition == barrierRef.get()) run.transition = null;
+                    }
+                })
+                .cache();
+            // A failed rename must not surface as a failure of stop/steer waiting on it.
+            var barrier = update.then().onErrorComplete();
+            barrierRef.set(barrier);
+            run.transition = barrier;
+        }
+        return update;
+    }
+
+    private Mono<Map<String, Object>> updateSessionTitle(Active run, String title) {
+        return client.fetch(PageChatSession.class, run.sessionId)
+            .filter(session -> session.getMetadata().getDeletionTimestamp() == null)
+            .switchIfEmpty(Mono.error(conflict("会话不存在")))
+            .flatMap(session -> {
+                session.getSpec().setTitle(title);
+                session.getSpec().setUpdatedAt(Instant.now());
+                return client.update(session).map(saved -> {
+                    Map<String, Object> result = new java.util.LinkedHashMap<>();
+                    result.put("valid", true);
+                    result.put("renamed", true);
+                    result.put("title", saved.getSpec().getTitle());
+                    return result;
+                });
+            })
+            .onErrorResume(OptimisticLockingFailureException.class,
+                error -> Mono.just(Map.of("valid", false, "renamed", false,
+                    "error", "会话名称更新冲突，请稍后重试")));
     }
 
     private Mono<ChatApi.Question> ask(String name, Active run, ChatApi.Question question) {

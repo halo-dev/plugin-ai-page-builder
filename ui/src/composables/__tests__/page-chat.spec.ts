@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, shallowRef } from 'vue'
+import { effectScope, nextTick, shallowRef } from 'vue'
 import { conversationMessages, upsertQuestion, usePageChat } from '../usePageChat'
 import type { UIMessage } from '@halo-dev/ai-foundation-sdk'
 import type { ChatTurn } from '../../api/clients'
@@ -11,7 +11,6 @@ const api = vi.hoisted(() => ({
   chat: {
     listPageChatSessions: vi.fn<(...args: unknown[]) => unknown>(),
     createPageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
-    renamePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     deletePageChatSession: vi.fn<(...args: unknown[]) => unknown>(),
     getPageChatCheckpoint: vi.fn<(...args: unknown[]) => unknown>(),
     validatePageContent: vi.fn<(...args: unknown[]) => unknown>(),
@@ -133,6 +132,14 @@ function waitingConversation() {
   })
   api.chat.getPageChatRun.mockResolvedValue({ data: waitingRun })
 }
+const renamedPart = (toolCallId: string) => ({
+  type: 'tool-rename_session',
+  toolCallId,
+  toolName: 'rename_session',
+  state: 'output-available',
+  input: {},
+  output: { valid: true, renamed: true },
+})
 
 describe('persistent page chat', () => {
   it('restores first-run questions when the server has no archived turns', async () => {
@@ -251,6 +258,44 @@ describe('persistent page chat', () => {
     await poll
     expect(state.waitingForUser.value).toBe(false)
     expect(state.activeRun.value?.status).toBe('running')
+  })
+  it('refreshes the session list after every completed rename, not only the first', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    api.chat.listPageChatSessions.mockClear()
+    sdk.setMessages([{ id: 'm1', role: 'assistant', parts: [renamedPart('r1')] }])
+    await nextTick()
+    expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(1)
+    sdk.setMessages([
+      { id: 'm1', role: 'assistant', parts: [renamedPart('r1')] },
+      { id: 'm2', role: 'assistant', parts: [renamedPart('r2')] },
+    ])
+    await nextTick()
+    expect(api.chat.listPageChatSessions).toHaveBeenCalledTimes(2)
+  })
+  it('keeps an older successful refresh when a newer refresh fails', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    let resolveFirst!: (value: unknown) => void
+    const first = new Promise((resolve) => {
+      resolveFirst = resolve
+    })
+    api.chat.listPageChatSessions
+      .mockReturnValueOnce(first)
+      .mockRejectedValueOnce(new Error('Offline'))
+    sdk.setMessages([{ id: 'm1', role: 'assistant', parts: [renamedPart('r1')] }])
+    await nextTick()
+    sdk.setMessages([
+      { id: 'm1', role: 'assistant', parts: [renamedPart('r1')] },
+      { id: 'm2', role: 'assistant', parts: [renamedPart('r2')] },
+    ])
+    await nextTick()
+    resolveFirst({ data: { items: [{ sessionId: 'renamed', version: 4 }] } })
+    await first
+    await nextTick()
+    expect(state.sessions.value.map((session) => session.sessionId)).toEqual(['renamed'])
   })
   it('submits once through the generated endpoint and polls the resumed run to commit', async () => {
     waitingConversation()
@@ -546,15 +591,9 @@ describe('persistent page chat', () => {
       size: 20,
     })
   })
-  it('uses session versions for rename/delete and loads a newly created session', async () => {
+  it('uses session versions for deletion and loads a newly created session', async () => {
     const state = setup()
     await state.recover()
-    await state.renameSession(' Renamed ')
-    expect(api.chat.renamePageChatSession).toHaveBeenCalledWith({
-      name: 'one',
-      sessionId: 'one',
-      renamePageChatSessionRequest: { title: 'Renamed', version: 3 },
-    })
     await state.deleteSession()
     expect(api.chat.deletePageChatSession).toHaveBeenCalledWith({
       name: 'one',

@@ -55,6 +55,7 @@ final class ChatDisplay {
                 summary = (memory || apiDetails)
                     && output.get("summary") instanceof String message ? message
                     : invalid ? String.valueOf(output.getOrDefault("error", null))
+                    : "rename_session".equals(name) ? "已更新会话名称"
                     : Boolean.TRUE.equals(output.get("staged")) ? "修改已通过校验并暂存"
                     : Boolean.TRUE.equals(output.get("valid")) ? "内容未发生变化" : "读取完成";
             } else if (type.endsWith("-error") || type.endsWith("-denied")) {
