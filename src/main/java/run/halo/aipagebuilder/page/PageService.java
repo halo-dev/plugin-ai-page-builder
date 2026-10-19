@@ -93,6 +93,7 @@ public class PageService {
             request.themeLayout(), actor);
     }
 
+    /** Low-level import. Callers must complete the AI review and authorization first. */
     public Mono<PageDetail> importPage(byte[] archive, String actor) {
         return Mono.fromCallable(() -> PageArchive.read(archive))
             .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())

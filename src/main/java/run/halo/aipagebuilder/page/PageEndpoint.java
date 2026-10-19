@@ -26,6 +26,7 @@ import run.halo.app.core.extension.endpoint.CustomEndpoint;
 import run.halo.app.extension.GroupVersion;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PageApi.CreatePageRequest;
+import run.halo.aipagebuilder.page.PageApi.ImportReview;
 import run.halo.aipagebuilder.page.PageApi.MutationRequest;
 import run.halo.aipagebuilder.page.PageApi.PageDetail;
 import run.halo.aipagebuilder.page.PageApi.PageList;
@@ -39,10 +40,13 @@ import run.halo.aipagebuilder.page.PageApi.SiteUrlResponse;
 public class PageEndpoint implements CustomEndpoint {
     private final PageService service;
     private final PageRenderer renderer;
+    private final PageImportReviewService reviewService;
 
-    public PageEndpoint(PageService service, PageRenderer renderer) {
+    public PageEndpoint(PageService service, PageRenderer renderer,
+        PageImportReviewService reviewService) {
         this.service = service;
         this.renderer = renderer;
+        this.reviewService = reviewService;
     }
 
     @Override
@@ -79,9 +83,36 @@ public class PageEndpoint implements CustomEndpoint {
                 builder -> operation(builder, "createPage", PageDetail.class)
                     .requestBody(requestBodyBuilder().required(true)
                         .implementation(CreatePageRequest.class)))
-            .POST("/pages/import", request -> archiveBody(request)
-                    .flatMap(bytes -> actor().flatMap(actor -> json(service.importPage(bytes, actor)))),
+            .POST("/pages/import/review", request -> {
+                    var model = request.queryParam("model").map(String::trim)
+                        .filter(value -> !value.isEmpty()).orElse(null);
+                    return archiveBody(request)
+                        .flatMap(bytes -> actor().flatMap(actor ->
+                            json(reviewService.review(bytes, actor, model))));
+                },
+                builder -> operation(builder, "reviewPageImport", ImportReview.class)
+                    .parameter(parameterBuilder().name("model").in(ParameterIn.QUERY)
+                        .implementation(String.class)
+                        .description("AI Foundation language model name; defaults to the "
+                            + "configured default model"))
+                    .requestBody(requestBodyBuilder().required(true).content(contentBuilder()
+                        .mediaType("application/zip")
+                        .schema(schemaBuilder().type("string").format("binary")))))
+            .POST("/pages/import", request -> {
+                    var reviewId = requiredQuery(request, "reviewId");
+                    var confirmed = Boolean.parseBoolean(
+                        request.queryParam("confirmed").orElse("false"));
+                    return archiveBody(request).flatMap(bytes -> actor().flatMap(actor ->
+                        reviewService.authorize(reviewId, bytes, actor, confirmed)
+                            .then(Mono.defer(() -> json(service.importPage(bytes, actor))))));
+                },
                 builder -> operation(builder, "importPage", PageDetail.class)
+                    .parameter(parameterBuilder().name("reviewId").in(ParameterIn.QUERY)
+                        .required(true).implementation(String.class)
+                        .description("Review identifier returned by the import review endpoint"))
+                    .parameter(parameterBuilder().name("confirmed").in(ParameterIn.QUERY)
+                        .implementation(Boolean.class)
+                        .description("Confirms import despite suspicious findings"))
                     .requestBody(requestBodyBuilder().required(true).content(contentBuilder()
                         .mediaType("application/zip")
                         .schema(schemaBuilder().type("string").format("binary")))))
@@ -265,5 +296,11 @@ public class PageEndpoint implements CustomEndpoint {
         } catch (NumberFormatException | java.util.NoSuchElementException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "version is required");
         }
+    }
+
+    private static String requiredQuery(ServerRequest request, String name) {
+        return request.queryParam(name).filter(value -> !value.isBlank())
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                name + " is required"));
     }
 }

@@ -30,6 +30,8 @@ export type SilentRequestConfig = AxiosRequestConfig & { mute?: boolean }
 const chatParameters = AiPageBuilderChatApiAxiosParamCreator()
 
 export type {
+  ImportFinding,
+  ImportReview,
   PageChatRun as ChatRun,
   PageChatTurn as ChatTurn,
   PageChatSession as ChatConversation,

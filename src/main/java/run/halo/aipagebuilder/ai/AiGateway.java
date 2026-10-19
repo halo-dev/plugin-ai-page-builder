@@ -17,4 +17,14 @@ public interface AiGateway {
         java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
         return Flux.error(new AiGenerationException(AiGenerationException.Reason.MODEL_UNAVAILABLE));
     }
+
+    /** Runs one structured security review using AI Foundation's default language model. */
+    default Mono<AiReview> review(String system, String prompt) {
+        return Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE));
+    }
+
+    /** Runs one structured security review; a blank model name uses the default model. */
+    default Mono<AiReview> review(String modelName, String system, String prompt) {
+        return review(system, prompt);
+    }
 }
