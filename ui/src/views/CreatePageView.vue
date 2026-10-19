@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { VButton, VPageHeader } from '@halo-dev/components'
-import IconAddCircle from '~icons/mingcute/add-circle-line'
 import IconArrowLeft from '~icons/mingcute/arrow-left-line'
 import CreatePagePanel from '../components/create/CreatePagePanel.vue'
+import IconFileAi from '~icons/tabler/file-ai'
 
 const router = useRouter()
 </script>
 
 <template>
   <VPageHeader title="新建页面">
-    <template #icon><IconAddCircle /></template>
+    <template #icon><IconFileAi /></template>
     <template #actions>
       <VButton ghost @click="router.push({ name: 'AiPageBuilderPages' })">
         <template #icon><IconArrowLeft /></template>

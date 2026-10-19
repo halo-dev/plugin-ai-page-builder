@@ -17,7 +17,6 @@ import {
   VStatusDot,
 } from '@halo-dev/components'
 import IconAddCircle from '~icons/mingcute/add-circle-line'
-import IconGrid from '~icons/mingcute/layout-grid-line'
 import IconMore from '~icons/mingcute/more-2-line'
 import { aiPageBuilderApi, getPublicSiteUrl, pagePreviewUrl } from '../api/clients'
 import { errorMessage } from '../utils/error'
@@ -28,6 +27,7 @@ import PagePreviewCard from '../components/PagePreviewCard.vue'
 import PageSettings from '../components/PageSettings.vue'
 import PublishPagePopper from '../components/PublishPagePopper.vue'
 import CreatePagePanel from '../components/create/CreatePagePanel.vue'
+import IconFileAi from '~icons/tabler/file-ai'
 
 const router = useRouter()
 const page = useRouteQuery<number>('page', 1, {
@@ -389,8 +389,8 @@ function unpublishFromSettings() {
 }
 </script>
 <template>
-  <VPageHeader title="AI 页面构建">
-    <template #icon><IconGrid /></template>
+  <VPageHeader title="页面工坊">
+    <template #icon><IconFileAi /></template>
     <template #actions>
       <VButton type="secondary" @click="router.push({ name: 'AiPageBuilderNew' })">
         <template #icon><IconAddCircle /></template>

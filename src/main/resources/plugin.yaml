@@ -14,7 +14,7 @@ spec:
   homepage: https://github.com/halo-dev/plugin-ai-page-builder#readme
   repo: https://github.com/halo-dev/plugin-ai-page-builder
   issues: https://github.com/halo-dev/plugin-ai-page-builder/issues
-  displayName: "AI Page Builder"
+  displayName: "AI 页面工坊"
   description: "AI 驱动的主题扩展页面，支持可视化编辑、源码编辑和版本历史。"
   license:
     - name: "GPL-3.0"
