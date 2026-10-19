@@ -6,17 +6,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiFunction;
-import java.util.function.Supplier;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-/** Single-process admission and lifecycle. Durable transitions belong to PageChatService. */
+/** Single-process admission and lifecycle. Durable transitions belong to PageRun. */
 final class PageRunCoordinator {
     static final int MAX_ACTIVE_RUNS = 4;
-    static final Duration WAIT_TIMEOUT = Duration.ofHours(24);
     static final Duration STOP_TIMEOUT = Duration.ofSeconds(20);
     private final Map<String, PageRun> active = new LinkedHashMap<>();
     private final String owner = UUID.randomUUID().toString();
@@ -48,18 +46,13 @@ final class PageRunCoordinator {
         synchronized (this) {
             active.remove(name, run);
         }
-        run.waiting.dispose();
+        run.disposeWaiting();
         // Cancellation does not reach doOnError. Also settle HTTP/SSE on forced shutdown;
         // already accepted requests and normally completed streams keep their original result.
         run.accepted.tryEmitError(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
             "运行已停止，结果待确认，请查询运行状态"));
         run.completeEvents(List.of(Map.of("type", "error", "errorText", "运行结果待确认，请查询运行状态")));
         run.finished.tryEmitEmpty();
-    }
-
-    void awaitAnswer(PageRun run, Supplier<Mono<Void>> interrupt) {
-        run.waiting.update(Mono.delay(WAIT_TIMEOUT).then(Mono.defer(interrupt))
-            .subscribe(ignored -> { }, error -> run.failure.tryEmitValue(error)));
     }
 
     void stop(BiFunction<String, PageRun, Mono<Void>> interrupt) {
