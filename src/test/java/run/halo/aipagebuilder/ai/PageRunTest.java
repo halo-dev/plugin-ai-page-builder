@@ -187,7 +187,7 @@ class PageRunTest {
     void waitingCommandRetriesAfterPendingTransitionCompletes() {
         var run = run();
         var gate = Sinks.<Void>empty();
-        persistence.activeGate = gate;
+        persistence.activeGates.add(gate);
 
         run.steer("first", "admin").subscribe();
         var error = new AtomicReference<Throwable>();
@@ -205,7 +205,7 @@ class PageRunTest {
     void checkpointStartsOnlyAfterActiveWriteCompletes() {
         var run = run();
         var gate = Sinks.<Void>empty();
-        persistence.activeGate = gate;
+        persistence.activeGates.add(gate);
 
         run.steer("steer", "admin").subscribe();
 
@@ -237,7 +237,7 @@ class PageRunTest {
     void cancelRetriesAfterWaitingOnAFailedCheckpointWrite() {
         var run = run();
         var gate = Sinks.<Void>empty();
-        persistence.activeGate = gate;
+        persistence.activeGates.add(gate);
 
         var steerError = new AtomicReference<Throwable>();
         run.steer("first", "admin").subscribe(ignored -> { }, steerError::set);
@@ -250,6 +250,80 @@ class PageRunTest {
         assertThat(steerError.get()).hasMessageContaining("checkpoint failed");
         assertThat(cancelError.get()).isNull();
         assertThat(run.state()).isEqualTo(PageRun.State.CANCELLED);
+    }
+
+    @Test
+    void settleTransitionWaitsForABarrierInstalledWhileSettling() {
+        var run = run();
+        var first = Sinks.<Void>empty();
+        var second = Sinks.<Void>empty();
+        persistence.activeGates.add(first);
+        persistence.activeGates.add(second);
+
+        var cancelled = new AtomicReference<Throwable>();
+        run.steer("first", "admin").subscribe(ignored -> { }, ignored -> { });
+        run.cancel().subscribe(ignored -> { }, cancelled::set);
+        var settled = new AtomicReference<Boolean>();
+        run.settleTransitions().subscribe(null, ignored -> { }, () -> settled.set(true));
+
+        persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
+        first.tryEmitEmpty();
+
+        // cancel installed its own barrier while the first one failed; settling must wait for it.
+        assertThat(settled.get()).isNull();
+        assertThat(run.state()).isEqualTo(PageRun.State.CANCELLED);
+
+        second.tryEmitEmpty();
+
+        assertThat(cancelled.get()).isNull();
+        assertThat(settled.get()).isTrue();
+        assertThat(run.state()).isEqualTo(PageRun.State.CANCELLED);
+    }
+
+    @Test
+    void failedInterruptRearmsTheWaitTimer() {
+        var run = run();
+        var asking = run.ask(question()).subscribe(ignored -> { }, ignored -> { });
+
+        persistence.activeFailure = new IllegalStateException("persist failed");
+        scheduler.advanceTimeBy(PageRun.WAIT_TIMEOUT.plusSeconds(1));
+
+        assertThat(run.state()).isEqualTo(PageRun.State.WAITING_FOR_USER);
+        assertThat(run.error()).isNull();
+
+        persistence.activeFailure = null;
+        scheduler.advanceTimeBy(PageRun.WAIT_TIMEOUT.plusSeconds(1));
+
+        assertThat(run.state()).isEqualTo(PageRun.State.INTERRUPTED);
+        assertThat(run.error()).contains("24 小时");
+        asking.dispose();
+    }
+
+    @Test
+    void steerRejectsAnotherActorBeforeWaitingForAPendingWrite() {
+        var run = run();
+        var gate = Sinks.<Void>empty();
+        persistence.activeGates.add(gate);
+        run.steer("first", "admin").subscribe();
+
+        assertThatThrownBy(() -> run.steer("second", "other").block(Duration.ofSeconds(1)))
+            .isInstanceOfSatisfying(RunTransitionException.class, error ->
+                assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.FORBIDDEN));
+
+        gate.tryEmitEmpty();
+    }
+
+    @Test
+    void failedAskPersistenceRestoresRunning() {
+        var run = run();
+        persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
+
+        assertThatThrownBy(() -> run.ask(question()).block())
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("checkpoint failed");
+
+        assertThat(run.state()).isEqualTo(PageRun.State.RUNNING);
+        assertThat(run.turn().questions()).isEmpty();
     }
 
     @Test
@@ -317,15 +391,16 @@ class PageRunTest {
 
     private static final class RecordingPersistence implements RunPersistence {
         final List<String> calls = new CopyOnWriteArrayList<>();
+        final java.util.Deque<Sinks.Empty<Void>> activeGates =
+            new java.util.concurrent.ConcurrentLinkedDeque<>();
         volatile RuntimeException activeFailure;
         volatile RuntimeException checkpointFailure;
-        volatile Sinks.Empty<Void> activeGate;
 
         @Override
         public Mono<Void> active(PageRun run) {
             calls.add("active");
             if (activeFailure != null) return Mono.error(activeFailure);
-            var gate = activeGate;
+            var gate = activeGates.poll();
             return gate == null ? Mono.empty() : gate.asMono();
         }
 

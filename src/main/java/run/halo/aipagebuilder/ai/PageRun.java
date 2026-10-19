@@ -138,8 +138,21 @@ final class PageRun {
         saveStarted = true;
     }
 
+    /** Snapshot of the pending transition, for writes that install their own barrier. */
     synchronized Mono<Void> settleTransition() {
         return transition == null ? Mono.empty() : transition.onErrorComplete();
+    }
+
+    /** Wait until no transition remains, including one installed while waiting. */
+    Mono<Void> settleTransitions() {
+        return Mono.defer(() -> {
+            Mono<Void> pending;
+            synchronized (this) {
+                pending = transition;
+            }
+            if (pending == null) return Mono.empty();
+            return pending.onErrorComplete().then(Mono.defer(this::settleTransitions));
+        });
     }
 
     synchronized Mono<Void> settleCheckpoints() {
@@ -218,7 +231,12 @@ final class PageRun {
                     emitEvent(Map.of("type", "data-user-question", "name", "user-question",
                         "id", question.id(), "data",
                         Map.of("runId", request.runId(), "question", question)));
-                }, ignored -> { });
+                }, ignored -> {
+                    state = State.RUNNING;
+                    questions.removeLast();
+                    answer = null;
+                    copy.timeBudget.resume();
+                });
                 return barrier.then(answer.asMono())
                     .doOnError(error -> failure.tryEmitValue(error));
             }
@@ -269,12 +287,12 @@ final class PageRun {
     Mono<ChatApi.Turn> steer(String text, String actor) {
         return Mono.defer(() -> {
             synchronized (this) {
+                if (!this.actor.equals(actor)) {
+                    return Mono.error(RunTransitionException.forbidden("只能补充自己的运行"));
+                }
                 if (transition != null) {
                     return transition.onErrorComplete()
                         .then(Mono.defer(() -> steer(text, actor)));
-                }
-                if (!this.actor.equals(actor)) {
-                    return Mono.error(RunTransitionException.forbidden("只能补充自己的运行"));
                 }
                 if (state != State.RUNNING && state != State.WAITING_FOR_USER) {
                     return Mono.error(RunTransitionException.conflict("运行已结束，请作为新消息发送"));
@@ -322,6 +340,10 @@ final class PageRun {
                 }, ignored -> {
                     state = previous;
                     error = null;
+                    // The timer already fired, so restore it or the run waits forever.
+                    if (previous == State.WAITING_FOR_USER && !questions.isEmpty()) {
+                        armWaitTimer(questions.getLast().id());
+                    }
                 });
             }
         });
@@ -349,7 +371,7 @@ final class PageRun {
 
     Mono<Void> finish(PageDetail page) {
         return copy.closeMemory().then(copy.closeEdits())
-            .then(Mono.defer(this::settleTransition))
+            .then(Mono.defer(this::settleTransitions))
             .then(Mono.defer(this::settleCheckpoints))
             .then(Mono.defer(() -> persistence.active(this)))
             .doOnSuccess(ignored -> terminalPersisted = true)

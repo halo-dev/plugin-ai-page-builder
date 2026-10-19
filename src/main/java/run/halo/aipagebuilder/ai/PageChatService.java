@@ -421,7 +421,7 @@ public class PageChatService {
                 }
                 // Cancellation can still fail to persist and roll back its provisional status.
                 // Classify model failures only after that transition has settled.
-                return run.settleTransition().then(Mono.defer(() -> {
+                return run.settleTransitions().then(Mono.defer(() -> {
                     synchronized (run) {
                         if (!run.is(PageRun.State.CANCELLED)
                             && !run.is(PageRun.State.INTERRUPTED)) {
@@ -480,7 +480,7 @@ public class PageChatService {
                         }
                     }
                 }
-            }).then(Mono.defer(run::settleTransition)).then(Mono.defer(() -> {
+            }).then(Mono.defer(run::settleTransitions)).then(Mono.defer(() -> {
                 List<String> steers;
                 synchronized (run) {
                     if (run.is(PageRun.State.CANCELLED)
