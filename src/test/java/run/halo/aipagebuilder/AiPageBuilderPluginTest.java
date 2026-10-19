@@ -35,6 +35,9 @@ class AiPageBuilderPluginTest {
     @Mock
     SchemeManager schemeManager;
 
+    @Mock
+    run.halo.aipagebuilder.ai.PageChatService chats;
+
     @InjectMocks
     AiPageBuilderPlugin plugin;
 
@@ -58,7 +61,9 @@ class AiPageBuilderPluginTest {
 
         plugin.stop();
 
-        verify(schemeManager).unregister(scheme);
+        var order = inOrder(chats, schemeManager);
+        order.verify(chats).stop();
+        order.verify(schemeManager).unregister(scheme);
     }
 
     @Test

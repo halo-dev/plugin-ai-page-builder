@@ -3,6 +3,7 @@ package run.halo.aipagebuilder.ai;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -98,23 +99,40 @@ class PageReferenceToolsTest {
     }
 
     @Test
-    void aiPageBuilderListingUsesPublishedRevisionTitleAndFiltersKeywordBeforePagination() {
-        var first = page("a", "Draft secret", "published-a");
-        var second = page("b", "Another draft", "published-b");
+    void aiPageBuilderListingUsesCurrentMetadataWithoutFetchingRevisions() {
+        var first = page("a", "Current title A", "published-a");
+        var second = page("b", "Current title B", "published-b");
         second.getSpec().setSlug("company/about");
-        var unpublished = page("c", "Secret", null);
-        when(client.listBy(eq(ThemePage.class), any(), any())).thenReturn(Mono.just(
-            new ListResult<>(1, 100, 3, List.of(first, second, unpublished))));
-        when(client.fetch(ThemePageRevision.class, "published-a")).thenReturn(Mono.just(revision("published-a", "a", "Public title A", "")));
-        when(client.fetch(ThemePageRevision.class, "published-b")).thenReturn(Mono.just(revision("published-b", "b", "Public title B", "")));
+        second.getSpec().setDescription("Current description");
+        var unpublished = page("c", "Current title C", null);
+        when(client.listBy(eq(ThemePage.class), any(), any())).thenAnswer(invocation -> {
+            ListOptions options = invocation.getArgument(1);
+            run.halo.app.extension.PageRequest request = invocation.getArgument(2);
+            var matching = List.of(first, second, unpublished).stream().filter(page ->
+                run.halo.aipagebuilder.QueryTestSupport.matches(options, field -> switch (field) {
+                    case "spec.publishedRevision" -> page.getSpec().getPublishedRevision();
+                    case "spec.title" -> page.getSpec().getTitle();
+                    case "spec.slug" -> page.getSpec().getSlug();
+                    case "metadata.name" -> page.getMetadata().getName();
+                    default -> null;
+                })).toList();
+            int offset = (request.getPageNumber() - 1) * request.getPageSize();
+            return Mono.just(new ListResult<>(request.getPageNumber(), request.getPageSize(),
+                matching.size(), matching.stream().skip(offset).limit(request.getPageSize()).toList()));
+        });
         var session = tools.session(null, true);
-        var result = session.listAiPageBuilderPages(Map.of("page", 2, "size", 1, "keyword", "Public title")).block();
+        var result = session.listAiPageBuilderPages(Map.of("page", 2, "size", 1, "keyword", "Current title")).block();
         assertThat(items(result)).hasSize(1);
-        assertThat(items(result).getFirst()).containsEntry("title", "Public title B")
+        assertThat(items(result).getFirst()).containsEntry("title", "Current title B")
+            .containsEntry("excerpt", "Current description")
             .containsEntry("name", "b").containsEntry("permalink", "/company/about");
+        assertThat(result).containsEntry("hasNext", false)
+            .containsEntry("summary", "关键词 “Current title” · 第 2 页 · 找到 1 个 AI 页面");
         assertThat(items(session.listAiPageBuilderPages(Map.of("keyword", "company/about")).block()))
             .hasSize(1);
-        assertThat(items(session.listAiPageBuilderPages(Map.of("keyword", "Draft secret")).block())).isEmpty();
+        assertThat(items(session.listAiPageBuilderPages(Map.of("keyword", "Current title A")).block()))
+            .singleElement().satisfies(item -> assertThat(item).containsEntry("name", "a"));
+        verify(client, never()).fetch(eq(ThemePageRevision.class), anyString());
     }
 
     @Test

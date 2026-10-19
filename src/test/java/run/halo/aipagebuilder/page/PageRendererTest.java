@@ -46,6 +46,12 @@ class PageRendererTest {
     private final PageDocument document = new PageDocument(1, "code", "", Map.of(),
         "<p>About</p>", "p { color: red }", "About", "Description");
 
+    @org.junit.jupiter.api.BeforeEach
+    void defaultCompiledContent() {
+        when(policy.renderCss(any(), any())).thenReturn("");
+        when(policy.sanitizeHtml(any())).thenReturn("");
+    }
+
     @Test
     void usesThemeResolverAndPassesOnlyPublicViewWithScopedCss() {
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))

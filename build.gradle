@@ -15,7 +15,10 @@ dependencies {
     compileOnly 'run.halo.app:api'
     compileOnly 'run.halo.aifoundation:api:1.1.1'
     implementation 'org.jsoup:jsoup:1.22.1'
-    implementation 'com.helger:ph-css:8.2.2'
+    implementation('com.helger:ph-css:8.2.2') {
+        // Halo provides SLF4J. A second API breaks provider binding across plugin class loaders.
+        exclude group: 'org.slf4j', module: 'slf4j-api'
+    }
 
     testImplementation 'run.halo.aifoundation:api:1.1.1'
 

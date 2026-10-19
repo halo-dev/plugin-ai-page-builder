@@ -18,6 +18,7 @@ import run.halo.aipagebuilder.page.PagePaths;
 public final class PageWorkingCopy {
     static final int MAX_CALLS = 40;
     static final int MAX_BYTES = 2 * 1024 * 1024;
+    static final int MAX_PREVIEW_BYTES = 16 * 1024 * 1024;
     final RunBudget budget = new RunBudget();
     final String assistantMessageId = java.util.UUID.randomUUID().toString();
     private boolean restored;
@@ -26,6 +27,33 @@ public final class PageWorkingCopy {
     private Mono<Void> edits = Mono.empty();
     private boolean closed;
     private boolean checkpointFailed;
+    private long previewBytes;
+    private int contextBytes;
+    private final long startedNanos = System.nanoTime();
+    private String modelName;
+    private String trace;
+
+    void identify(String page, String session, String run, String model) {
+        modelName = model;
+        trace = "page=" + page + ", session=" + session + ", run=" + run;
+    }
+
+    String trace() { return trace; }
+
+    synchronized void contextBytes(int value) { contextBytes = Math.max(contextBytes, value); }
+
+    synchronized ChatApi.Usage usage() {
+        return budget.snapshot(modelName, (System.nanoTime() - startedNanos) / 1_000_000,
+            bytes, previewBytes, contextBytes);
+    }
+
+    /** Preview is disposable presentation data: throttling it must not fail a valid edit. */
+    synchronized boolean preview(String value) {
+        var size = value.getBytes(StandardCharsets.UTF_8).length;
+        if (size > MAX_BYTES || previewBytes + size > MAX_PREVIEW_BYTES) return false;
+        previewBytes += size;
+        return true;
+    }
 
     void checkpoint(java.util.function.Supplier<Mono<Void>> checkpoint) {
         this.checkpoint = checkpoint;
@@ -510,8 +538,10 @@ public final class PageWorkingCopy {
         }
     }
 
-    public synchronized boolean exhausted() { return exhausted; }
-    synchronized AiGenerationException.Reason budgetReason() { return budgetReason; }
+    public synchronized boolean exhausted() { return exhausted || budget.tokenLimitReached(); }
+    synchronized AiGenerationException.Reason budgetReason() {
+        return budget.tokenLimitReached() ? AiGenerationException.Reason.TOKEN_LIMIT : budgetReason;
+    }
     synchronized boolean hasInvalidContentUpdate() { return invalidUpdate; }
     synchronized boolean hasInvalidSlugUpdate() { return invalidSlugUpdate; }
     public synchronized boolean hasInvalidUpdate() { return invalidUpdate || invalidSlugUpdate; }

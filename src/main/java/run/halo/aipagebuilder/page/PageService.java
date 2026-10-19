@@ -50,6 +50,7 @@ public class PageService {
     private final ReactiveExtensionClient client;
     private final ContentPolicy contentPolicy;
     private final Set<String> slugWrites = ConcurrentHashMap.newKeySet();
+    private final Map<String, Object> pageWrites = new ConcurrentHashMap<>();
 
     public PageService(ReactiveExtensionClient client, ContentPolicy contentPolicy) {
         this.client = client;
@@ -125,14 +126,26 @@ public class PageService {
                     var page = new ThemePage();
                     var metadata = new Metadata();
                     metadata.setName(name);
+                    metadata.setFinalizers(Set.of(PageReconciler.FINALIZER));
                     page.setMetadata(metadata);
                     page.setSpec(new ThemePage.Spec());
                     page.getSpec().setSlug(normalizedSlug);
                     page.getSpec().setThemeLayout(themeLayout);
                     applyDraft(page, created);
                     return client.create(page).flux().single()
-                        .onErrorResume(error -> client.delete(created)
-                            .onErrorResume(cleanupError -> Mono.empty()).then(Mono.error(error)))
+                        .onErrorResume(error -> {
+                            if (error instanceof OptimisticLockingFailureException
+                                || error instanceof DuplicateKeyException) {
+                                return client.delete(created).onErrorResume(cleanupError -> Mono.empty())
+                                    .then(Mono.error(error));
+                            }
+                            // A lost create response can leave a live page referencing this revision.
+                            // Never destroy its source merely because the caller observed an error.
+                            return client.fetch(ThemePage.class, name)
+                                .filter(saved -> created.getMetadata().getName()
+                                    .equals(saved.getSpec().getDraftRevision()))
+                                .switchIfEmpty(Mono.error(error));
+                        })
                         .map(saved -> detail(saved, created));
                 });
             };
@@ -207,9 +220,16 @@ public class PageService {
 
     /** An orphan revision alone is not proof that the page CAS succeeded. */
     public Mono<String> committedAiRevision(String name, String runId) {
-        return page(name).flatMapMany(page -> revision(name, page.getSpec().getDraftRevision())
+        var candidates = revisionOptions(name);
+        candidates.setFieldSelector(candidates.getFieldSelector().andQuery(equal("spec.runId", runId)));
+        return page(name).flatMapMany(page -> client.listBy(ThemePageRevision.class, candidates,
+                PageRequestImpl.of(1, 1, Sort.unsorted()))
+            // Most start requests have a new runId. Avoid walking the entire history for them.
+            // A candidate is not proof: only a revision reachable from the draft counts.
+            .filter(result -> !result.getItems().isEmpty())
+            .flatMapMany(ignored -> revision(name, page.getSpec().getDraftRevision())
                 .expand(value -> value.getSpec().getParentRevision() == null ? Mono.empty()
-                    : revision(name, value.getSpec().getParentRevision())))
+                    : revision(name, value.getSpec().getParentRevision()))))
             .filter(value -> runId.equals(value.getSpec().getRunId()))
             .map(value -> value.getMetadata().getName()).next();
     }
@@ -267,13 +287,22 @@ public class PageService {
     }
 
     public Mono<Void> delete(String name, Long version) {
-        return mutate(name, version, page -> client.fetch(run.halo.aipagebuilder.model.PageChatSession.class, name)
-            .flatMap(session -> session.getSpec().getActive() != null || session.getSpec().getDeletingSessionId() != null
-                ? Mono.<Void>error(conflict("请先结束当前聊天操作再删除页面")) : Mono.empty())
-            .then(client.delete(page))
-            .thenMany(client.listAll(ThemePageRevision.class, revisionOptions(name), Sort.unsorted()))
-            .concatMap(client::delete)
-            .then(run.halo.aipagebuilder.ai.PageChatService.deletePageHistory(client, name)).then());
+        return client.fetch(ThemePage.class, name).flatMap(existing -> {
+            // A retry of an accepted deletion must not require the old resource version.
+            if (existing.getMetadata().getDeletionTimestamp() != null) {
+                return PageReconciler.cleanup(client, existing);
+            }
+            return mutate(name, version, page -> client.fetch(
+                    run.halo.aipagebuilder.model.PageChatSession.class, name)
+                .flatMap(session -> session.getSpec().getActive() != null
+                    || session.getSpec().getDeletingSessionId() != null
+                    ? Mono.<Void>error(conflict("请先结束当前聊天操作再删除页面")) : Mono.empty())
+                .then(Mono.defer(() -> run.halo.app.extension.ExtensionUtil.addFinalizers(
+                    page.getMetadata(), Set.of(PageReconciler.FINALIZER))
+                    ? client.update(page) : Mono.just(page)))
+                .flatMap(client::delete)
+                .flatMap(deleted -> PageReconciler.cleanup(client, deleted)));
+        });
     }
 
     public Mono<List<RevisionSummary>> revisions(String name) {
@@ -353,7 +382,7 @@ public class PageService {
     }
 
     private <T> Mono<T> mutate(String name, Long version, Function<ThemePage, Mono<T>> action) {
-        return Mono.defer(() -> {
+        return coordinate(name, () -> {
             if (version == null) {
                 return Mono.error(badRequest("version is required"));
             }
@@ -366,6 +395,27 @@ public class PageService {
         }).onErrorMap(DuplicateKeyException.class, error -> conflict("Slug already exists"))
             .onErrorMap(OptimisticLockingFailureException.class,
                 error -> conflict("Page changed; reload before saving"));
+    }
+
+    /** Prevent a chat reservation/creation from racing the page's deletion in this process. */
+    public <T> Mono<T> withLivePage(String name, Supplier<Mono<T>> action) {
+        return coordinate(name, () -> page(name).then(Mono.defer(action)));
+    }
+
+    public Mono<Void> reserveRun(String name, Long version, Supplier<Mono<Void>> reservation) {
+        return mutate(name, version, page -> reservation.get());
+    }
+
+    private <T> Mono<T> coordinate(String name, Supplier<Mono<T>> action) {
+        return Mono.defer(() -> {
+            var token = new Object();
+            if (pageWrites.putIfAbsent(name, token) != null) {
+                return Mono.error(conflict("页面正在修改，请稍后重试"));
+            }
+            return Mono.defer(action).doOnSuccess(value -> pageWrites.remove(name, token))
+                .doOnError(error -> pageWrites.remove(name, token))
+                .doFinally(signal -> pageWrites.remove(name, token));
+        });
     }
 
     private Mono<ThemePage> page(String name) {

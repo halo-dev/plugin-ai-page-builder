@@ -24,14 +24,14 @@ public class PageRenderer {
     private static final Set<String> WEB_SCHEMES = Set.of("http", "https");
     private static final Pattern AUTHORITY = Pattern.compile("[A-Za-z0-9._\\-:\\[\\]]+");
     private final TemplateNameResolver templateNameResolver;
-    private final ContentPolicy contentPolicy;
+    private final PageRenderCache content;
     private final PublicApiCatalog publicApiCatalog;
     private final ExternalUrlSupplier externalUrlSupplier;
 
     public PageRenderer(TemplateNameResolver templateNameResolver, ContentPolicy contentPolicy,
         PublicApiCatalog publicApiCatalog, ExternalUrlSupplier externalUrlSupplier) {
         this.templateNameResolver = templateNameResolver;
-        this.contentPolicy = contentPolicy;
+        this.content = new PageRenderCache(contentPolicy);
         this.publicApiCatalog = publicApiCatalog;
         this.externalUrlSupplier = externalUrlSupplier;
     }
@@ -54,13 +54,12 @@ public class PageRenderer {
     private Mono<ServerResponse> render(ServerRequest request, String name, String slug,
         boolean themeLayout, PageDocument document, boolean preview, boolean disableScripts) {
         return Mono.defer(() -> {
-            contentPolicy.validate(document);
             var rootId = "ai-page-builder-" + name;
+            var compiled = content.compile(rootId, document);
             var scriptBlocked = disableScripts && !document.js().isEmpty();
-            var safeHtml = contentPolicy.sanitizeHtml(document.html());
             var pageView = new PageView(slug, document.title(), document.description(), rootId,
-                renderHtml(safeHtml, document.js(), disableScripts),
-                contentPolicy.renderCss(document.css(), rootId), scriptBlocked);
+                renderHtml(compiled.html(), document.js(), disableScripts),
+                compiled.css(), scriptBlocked);
             var templateName = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";
             return templateNameResolver.resolveTemplateNameOrDefault(request.exchange(), templateName)
                 .flatMap(template -> {
@@ -78,6 +77,9 @@ public class PageRenderer {
                 });
         });
     }
+
+    @jakarta.annotation.PreDestroy
+    public void clearCache() { content.clear(); }
 
     private String previewPolicy(ServerRequest request) {
         // Resources and root-relative API calls resolve against the origin that actually

@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
@@ -54,8 +53,8 @@ public class PageChatService {
     private final run.halo.aipagebuilder.theme.ThemeContextService themes;
     private final PageReferenceTools referenceTools;
     private final run.halo.aipagebuilder.memory.SiteMemoryService memories;
-    private final String owner = UUID.randomUUID().toString();
-    private final Map<String, Active> active = new ConcurrentHashMap<>();
+    private final PageRunCoordinator runs = new PageRunCoordinator();
+    private final Map<String, Mono<PageChatSession>> sessionLoads = new java.util.concurrent.ConcurrentHashMap<>();
 
     public PageChatService(ReactiveExtensionClient client, PageService pages, AiGateway gateway,
         ContentPolicy policy, run.halo.aipagebuilder.theme.ThemeContextService themes) {
@@ -101,7 +100,7 @@ public class PageChatService {
                     var current = coordinator.getSpec().getActive();
                     if (before == null && current != null
                         && summary.sessionId().equals(activeSessionId(coordinator))) {
-                        var local = active.get(name);
+                        var local = runs.get(name);
                         if (local != null && local.request.runId().equals(current.runId())
                             && local.sessionId.equals(summary.sessionId())) {
                             var snapshot = contextWindow(List.of(local.turn()));
@@ -112,7 +111,7 @@ public class PageChatService {
                         turns.add(activeTurn);
                     }
                     return new ChatApi.Session(name, summary.version(), turns, summary.activeRun(),
-                        new ChatApi.Retention(MAX_TURNS, MAX_BYTES), summary.sessionId(), summary.title(),
+                        new ChatApi.ModelContextWindow(MAX_TURNS, MAX_BYTES), summary.sessionId(), summary.title(),
                         summary.createdAt(), summary.updatedAt(), hasMore,
                         hasMore ? visible.getLast().getSpec().getSortKey() : null);
                 }))).flatMap(value -> pages.get(name).flatMap(page ->
@@ -135,7 +134,7 @@ public class PageChatService {
         return Mono.defer(() -> {
             validateTitle(title);
             return pages.get(name).then(load(name)).flatMap(coordinator ->
-                client.create(newSession(name, UUID.randomUUID().toString(), title.strip()))
+                pages.withLivePage(name, () -> client.create(newSession(name, UUID.randomUUID().toString(), title.strip())))
                     .map(session -> summary(session, coordinator)));
         });
     }
@@ -162,7 +161,7 @@ public class PageChatService {
 
     public Mono<Void> deleteSession(String name, String sessionId, Long version) {
         return pages.get(name).then(load(name)).flatMap(this::recover).flatMap(coordinator ->
-            selected(name, sessionId, coordinator).flatMap(session -> {
+            pages.withLivePage(name, () -> selected(name, sessionId, coordinator).flatMap(session -> {
                 requireVersion(session, version);
                 if (coordinator.getSpec().getActive() != null) {
                     return Mono.error(conflict("请先结束当前会话运行"));
@@ -173,23 +172,8 @@ public class PageChatService {
                 }
                 coordinator.getSpec().setDeletingSessionId(sessionId);
                 // Reserve against start's CAS before deleting any history.
-                return client.update(coordinator).flatMap(reserved -> {
-                    if (!sessionId.equals(name)) session.getSpec().setDeleting(true);
-                    return (sessionId.equals(name) ? Mono.just(reserved) : client.update(session))
-                        .flatMap(deleting -> client.listAll(PageChatTurnRecord.class,
-                                turnOptions(sessionId), Sort.unsorted())
-                            .concatMap(client::delete).then(checkpoints.delete(sessionId)).then(sessionId.equals(name) ? Mono.empty()
-                                : client.delete(deleting).then()))
-                        .then(client.fetch(PageChatSession.class, name)).flatMap(latest -> {
-                            latest.getSpec().setDeletingSessionId(null);
-                            if (sessionId.equals(name)) {
-                                latest.getSpec().setTitle("默认会话");
-                                latest.getSpec().setUpdatedAt(Instant.now());
-                            }
-                            return client.update(latest);
-                        }).then();
-                });
-            })).onErrorMap(OptimisticLockingFailureException.class,
+                return client.update(coordinator).flatMap(this::completeSessionDeletion).then();
+            }))).onErrorMap(OptimisticLockingFailureException.class,
                 error -> conflict("会话已变化，请重新载入"));
     }
 
@@ -205,7 +189,7 @@ public class PageChatService {
                     : Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
                         "请安装并启用 AI Foundation 并配置支持工具调用的模型")));
             }).flatMap(page -> load(name).flatMap(this::recover).flatMap(coordinator -> {
-                var existing = active.get(name);
+                var existing = runs.get(name);
                 if (request.resumeFromRunId() != null && existing != null
                     && existing.actor.equals(actor) && existing.request.equals(request)) {
                     return Mono.just(existing.events.asFlux());
@@ -260,7 +244,7 @@ public class PageChatService {
         var themeContext = page.page().themeLayout()
             ? Mono.defer(themes::current)
             : Mono.just(run.halo.aipagebuilder.theme.ThemeStyleContext.standalone());
-        var run = new Active(request, actor, page, policy, themeContext, sessionId);
+        var run = new PageRun(request, actor, page, policy, themeContext, sessionId);
         if (referenceTools != null) run.copy.references(referenceTools.session(null, true));
         run.copy.questions(question -> ask(name, run, question));
         run.copy.sessionRename(title -> renameSessionFromTool(run, title));
@@ -282,12 +266,9 @@ public class PageChatService {
                     + "as evidence for new site-memory writes. Ask unanswered questions again if needed.";
             }
         });
-        if (active.putIfAbsent(name, run) != null) {
-            return Mono.error(conflict("页面已有活动运行"));
-        }
         session.getSpec().setActive(run.turn());
         session.getSpec().setActiveSessionId(sessionId);
-        session.getSpec().setOwner(owner);
+        session.getSpec().setOwner(runs.owner());
         var memory = memories == null ? Mono.<Void>empty() : memories.load()
             .timeout(java.time.Duration.ofSeconds(15))
             .doOnNext(snapshot -> {
@@ -299,28 +280,92 @@ public class PageChatService {
                 run.copy.memoryUnavailable();
                 return Mono.empty();
             });
-        var preparing = new java.util.concurrent.atomic.AtomicBoolean(true);
-        return memory.then(history(sessionId, null, MAX_TURNS))
-            .doOnSuccess(ignored -> preparing.set(false))
-            .doOnCancel(() -> {
-                if (preparing.getAndSet(false)) active.remove(name, run);
-            })
-            .map(records -> contextWindow(records.stream()
-                .map(record -> record.getSpec().getTurn()).toList().reversed()))
-            .flatMap(history -> client.update(session).flatMap(saved -> Mono.deferContextual(context -> {
-            if (run.memory != null && checkpoint == null) run.memory.prompt(request.prompt());
-            execute(name, run, history).contextWrite(context).subscribe(ignored -> { }, error -> {
-                // Keep the persisted committing record for reconciliation after an uncertain write.
-                run.events.tryEmitNext(Map.of("type", "error", "errorText", "运行结果待确认，请查询运行状态"));
-                run.events.tryEmitComplete();
-                active.remove(name, run);
+        return Mono.deferContextual(context -> {
+            runs.reserve(name, run);
+            var execution = memory.then(history(sessionId, null, MAX_TURNS))
+                .map(records -> contextWindow(records.stream()
+                    .map(record -> record.getSpec().getTurn()).toList().reversed()))
+                .flatMap(history -> Mono.defer(() -> {
+                    synchronized (run) {
+                        if (run.execution.isDisposed()) return Mono.empty();
+                        run.reserving = true;
+                    }
+                    return pages.reserveRun(name, request.version(), () -> client.update(session).then())
+                        .then(Mono.defer(() -> {
+                            run.prepared.tryEmitEmpty();
+                            if (run.memory != null && checkpoint == null) run.memory.prompt(request.prompt());
+                            run.accepted.tryEmitValue(run.events.asFlux());
+                            return (runs.stopping() ? interrupt(name, run, "插件已停止，进度已保留，可稍后继续。")
+                                : Mono.<Void>empty()).then(Mono.defer(() -> execute(name, run, history)));
+                        }));
+                }))
+                .doOnError(error -> {
+                    run.prepared.tryEmitError(error);
+                    run.accepted.tryEmitError(error);
+                    // Persisted state remains authoritative after an uncertain write.
+                    run.completeEvents(List.of(Map.of("type", "error", "errorText", "运行结果待确认，请查询运行状态")));
+                }).contextWrite(context);
+            runs.execute(name, run, execution);
+            // Receiving this request authorizes execution; disconnecting only closes the stream.
+            return run.accepted.asMono().doOnCancel(() -> {
+                synchronized (run) {
+                    // Before the durable reservation starts, disconnecting can safely abandon prep.
+                    if (!run.reserving) {
+                        run.execution.dispose();
+                        run.prepared.tryEmitError(new java.util.concurrent.CancellationException());
+                        runs.release(name, run);
+                    }
+                }
             });
-            // The run survives a browser refresh; stopping is an explicit Console action.
-            return Mono.just(run.events.asFlux());
-        }))).doOnError(error -> active.remove(name, run));
+        });
     }
 
-    private Mono<Map<String, Object>> renameSessionFromTool(Active run, String title) {
+    @jakarta.annotation.PreDestroy
+    public void stop() {
+        runs.stop((name, run) -> interrupt(name, run, "插件已停止，进度已保留，可稍后继续。"));
+    }
+
+    private Mono<Void> interrupt(String name, PageRun run, String message) {
+        return interrupt(name, run, message, null);
+    }
+
+    private Mono<Void> interrupt(String name, PageRun run, String message, String questionId) {
+        return Mono.defer(() -> {
+            synchronized (run) {
+                if (run.transition != null) {
+                    return run.transition.onErrorComplete()
+                        .then(Mono.defer(() -> interrupt(name, run, message, questionId)));
+                }
+                // An expired timer may already be executing when an answer cancels it.
+                if (questionId != null && (!"waiting_for_user".equals(run.status)
+                    || run.questions.isEmpty() || !questionId.equals(run.questions.getLast().id()))) {
+                    return Mono.empty();
+                }
+                if (!"running".equals(run.status) && !"waiting_for_user".equals(run.status)) {
+                    return Mono.empty(); // In particular, never cancel an uncertain commit.
+                }
+                var previous = run.status;
+                run.status = "interrupted";
+                run.error = message;
+                run.transition = persistActive(name, run).doOnSuccess(ignored -> {
+                    synchronized (run) {
+                        run.transition = null;
+                        run.waiting.update(null);
+                        run.cancel.tryEmitEmpty();
+                    }
+                }).doOnError(error -> {
+                    synchronized (run) {
+                        run.status = previous;
+                        run.error = null;
+                        run.transition = null;
+                    }
+                }).cache();
+                return run.transition;
+            }
+        });
+    }
+
+    private Mono<Map<String, Object>> renameSessionFromTool(PageRun run, String title) {
         Mono<Map<String, Object>> update;
         synchronized (run) {
             // The default session shares the coordinator record with run state updates,
@@ -345,7 +390,7 @@ public class PageChatService {
         return update;
     }
 
-    private Mono<Map<String, Object>> updateSessionTitle(Active run, String title) {
+    private Mono<Map<String, Object>> updateSessionTitle(PageRun run, String title) {
         return client.fetch(PageChatSession.class, run.sessionId)
             .filter(session -> session.getMetadata().getDeletionTimestamp() == null)
             .switchIfEmpty(Mono.error(conflict("会话不存在")))
@@ -365,7 +410,7 @@ public class PageChatService {
                     "error", "会话名称更新冲突，请稍后重试")));
     }
 
-    private Mono<ChatApi.Question> ask(String name, Active run, ChatApi.Question question) {
+    private Mono<ChatApi.Question> ask(String name, PageRun run, ChatApi.Question question) {
         return Mono.defer(() -> {
             synchronized (run) {
                 if (!"running".equals(run.status)) return Mono.error(conflict("运行不接受新的问题"));
@@ -376,7 +421,9 @@ public class PageChatService {
                 run.transition = persistActive(name, run).then(saveCheckpoint(name, run)).doOnSuccess(ignored -> {
                     synchronized (run) {
                         run.transition = null;
-                        run.events.tryEmitNext(Map.of("type", "data-user-question",
+                        runs.awaitAnswer(run, () -> interrupt(name, run,
+                            "等待回答已超过 24 小时，进度已保留，可继续生成。", question.id()));
+                        run.emitEvent(Map.of("type", "data-user-question",
                             "name", "user-question", "id", question.id(), "data",
                             Map.of("runId", run.request.runId(), "question", question)));
                     }
@@ -390,7 +437,7 @@ public class PageChatService {
     public Mono<ChatApi.Run> answer(String name, String runId, String questionId,
         ChatApi.AnswerRequest request, String actor) {
         return pages.get(name).then(Mono.defer(() -> {
-            var run = active.get(name);
+            var run = runs.get(name);
             if (run == null || !run.request.runId().equals(runId)) {
                 return Mono.error(conflict("运行已结束或问题已过期"));
             }
@@ -408,6 +455,7 @@ public class PageChatService {
                 }
                 var answered = UserQuestions.answer(pending, request);
                 run.answering = true;
+                run.waiting.update(null);
                 run.status = "running";
                 run.questions.set(run.questions.size() - 1, answered);
                 run.transition = persistActive(name, run).then(saveCheckpoint(name, run)).doOnSuccess(ignored -> {
@@ -415,7 +463,7 @@ public class PageChatService {
                         run.transition = null;
                         run.status = "running";
                         run.answering = false;
-                        run.events.tryEmitNext(Map.of("type", "data-user-answer",
+                        run.emitEvent(Map.of("type", "data-user-answer",
                             "name", "user-answer", "id", answered.id(), "data",
                             Map.of("runId", runId, "question", answered)));
                         run.copy.timeBudget.resume();
@@ -442,7 +490,7 @@ public class PageChatService {
             return Mono.error(badRequest("补充指令需要 1–2000 字符"));
         }
         return pages.get(name).then(Mono.defer(() -> {
-            var run = active.get(name);
+            var run = runs.get(name);
             if (run == null || !run.request.runId().equals(runId)) {
                 return Mono.error(conflict("运行已结束，请作为新消息发送"));
             }
@@ -467,7 +515,7 @@ public class PageChatService {
                         if (run.memory != null) run.memory.steer(index, text);
                         run.copy.queueSteer(text);
                         run.transition = null;
-                        run.events.tryEmitNext(Map.of("type", "data-steer", "name", "steer",
+                        run.emitEvent(Map.of("type", "data-steer", "name", "steer",
                             "id", run.request.runId() + "-steer-" + index, "data",
                             Map.of("runId", run.request.runId(), "index", index, "text", text)));
                     }
@@ -483,13 +531,15 @@ public class PageChatService {
             error -> conflict("会话已变化，请重新载入"));
     }
 
-    private Mono<Void> execute(String name, Active run, List<ChatApi.Turn> history) {
+    private Mono<Void> execute(String name, PageRun run, List<ChatApi.Turn> history) {
         var timeoutSignal = Sinks.<Void>empty();
         var timeout = run.copy.timeBudget.deadline(RUN_TIMEOUT, AiGenerationException.Reason.RUN_TIMEOUT)
             .doOnError(timeoutSignal::tryEmitError).subscribe();
-        return saveCheckpoint(name, run).then(Mono.defer(() -> converse(name, run, history,
+        return saveCheckpoint(name, run).then(Mono.defer(() ->
+                "interrupted".equals(run.status) ? finish(name, run, null) : converse(name, run, history,
                 run.request.prompt(), timeoutSignal.asMono())))
             .onErrorResume(error -> {
+                if (run.terminalPersisted) return Mono.error(error);
                 if (run.saveStarted && ("committing".equals(run.status) || "completed".equals(run.status))
                     && !(error instanceof ResponseStatusException status
                     && status.getStatusCode().value() == 409)) {
@@ -512,18 +562,18 @@ public class PageChatService {
                     }
                 }).then(Mono.defer(() -> {
                     synchronized (run) {
-                        if (!"cancelled".equals(run.status)) {
+                        if (!"cancelled".equals(run.status) && !"interrupted".equals(run.status)) {
                             var reason = failureReason(error, run.copy);
                             run.status = switch (reason) {
-                                case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, TRUNCATED, RUN_TIMEOUT -> "incomplete";
+                                case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, CONTEXT_LIMIT, TOKEN_LIMIT, TRUNCATED, RUN_TIMEOUT -> "incomplete";
                                 default -> "failed";
                             };
                             run.error = error instanceof ResponseStatusException status
                                 && status.getStatusCode().value() == 409 ? "页面已变化，请重新载入（409）"
                                 : reason.message;
                             org.slf4j.LoggerFactory.getLogger(PageChatService.class).warn(
-                                "Page chat failed: runId={}, reason={}, exception={}",
-                                run.request.runId(), reason.name(), error.getClass().getName());
+                                "Page chat failed: {}, reason={}, exception={}",
+                                run.copy.trace(), reason.name(), error.getClass().getName());
                         }
                     }
                     return finish(name, run, null);
@@ -531,7 +581,7 @@ public class PageChatService {
             }).doFinally(signal -> timeout.dispose());
     }
 
-    private Mono<Void> converse(String name, Active run, List<ChatApi.Turn> history, String prompt,
+    private Mono<Void> converse(String name, PageRun run, List<ChatApi.Turn> history, String prompt,
         Mono<Void> runTimeout) {
         return gateway.chat(run.request.modelName(), history, prompt, run.copy)
             .takeUntilOther(runTimeout)
@@ -546,7 +596,7 @@ public class PageChatService {
                     run.text.append(delta);
                 }
                 run.display.accept(chunk);
-                if (run.events.tryEmitNext(chunk).isFailure()) {
+                if (!run.emitEvent(chunk)) {
                     throw new IllegalStateException("消息流已关闭或消费过慢");
                 }
                 if ("tool-output-available".equals(chunk.get("type"))
@@ -560,9 +610,8 @@ public class PageChatService {
                         if (hash.equals(output.get("baseHash"))) {
                             var data = Map.of("runId", run.request.runId(), "toolCallId", toolCallId,
                                 "baseHash", hash, "html", document.html(), "css", document.css(), "js", document.js());
-                            run.copy.consume(Json.toJson(data));
-                            if (run.events.tryEmitNext(Map.of("type", "data-page-staged",
-                                "name", "page-staged", "id", toolCallId, "data", data)).isFailure()) {
+                            if (run.copy.preview(Json.toJson(data)) && !run.emitEvent(Map.of("type", "data-page-staged",
+                                "name", "page-staged", "id", toolCallId, "data", data))) {
                                 throw new IllegalStateException("临时预览流已关闭");
                             }
                         }
@@ -576,7 +625,7 @@ public class PageChatService {
             })).then(Mono.defer(() -> {
                 List<String> steers;
                 synchronized (run) {
-                    if ("cancelled".equals(run.status)) {
+                    if ("cancelled".equals(run.status) || "interrupted".equals(run.status)) {
                         return finish(name, run, null);
                     }
                     // A steer that missed the last model step gets a bounded continuation call.
@@ -593,7 +642,7 @@ public class PageChatService {
             }));
     }
 
-    private static List<ChatApi.Turn> continuedHistory(Active run, List<ChatApi.Turn> history,
+    private static List<ChatApi.Turn> continuedHistory(PageRun run, List<ChatApi.Turn> history,
         int newSteers) {
         String text;
         List<ChatApi.Tool> tools;
@@ -614,10 +663,10 @@ public class PageChatService {
         return List.copyOf(continued);
     }
 
-    private Mono<Void> commit(String name, Active run) {
+    private Mono<Void> commit(String name, PageRun run) {
         return Mono.defer(() -> {
             synchronized (run) {
-                if ("cancelled".equals(run.status)) {
+                if ("cancelled".equals(run.status) || "interrupted".equals(run.status)) {
                     return finish(name, run, null);
                 }
                 if (run.copy.checkpointFailed()) {
@@ -674,7 +723,7 @@ public class PageChatService {
                 })));
     }
 
-    private Mono<Void> saveCheckpoint(String name, Active run) {
+    private Mono<Void> saveCheckpoint(String name, PageRun run) {
         return Mono.defer(() -> {
             synchronized (run) {
                 var snapshot = new PageChatCheckpoint.Spec();
@@ -701,7 +750,7 @@ public class PageChatService {
         });
     }
 
-    private Mono<Void> persistActive(String name, Active run) {
+    private Mono<Void> persistActive(String name, PageRun run) {
         return client.fetch(PageChatSession.class, name).flatMap(session -> {
             requireRun(session, run.request.runId());
             session.getSpec().setActive(run.turn());
@@ -710,12 +759,14 @@ public class PageChatService {
         }).switchIfEmpty(Mono.error(conflict("会话不存在"))).then();
     }
 
-    private Mono<Void> finish(String name, Active run, PageDetail page) {
+    private Mono<Void> finish(String name, PageRun run, PageDetail page) {
         return run.copy.closeMemory().then(run.copy.closeEdits()).then(Mono.defer(() -> {
             synchronized (run) {
                 return run.transition == null ? Mono.<Void>empty() : run.transition.onErrorComplete();
             }
         })).then(Mono.defer(() -> run.checkpointWrites.onErrorComplete()))
+            .then(Mono.defer(() -> persistActive(name, run)))
+            .doOnSuccess(ignored -> run.terminalPersisted = true)
             .then(Mono.defer(() -> {
                 if ("completed".equals(run.status) || "cancelled".equals(run.status)) {
                     return checkpoints.delete(run.sessionId);
@@ -734,19 +785,21 @@ public class PageChatService {
                     return client.update(session);
                 }));
         }).switchIfEmpty(Mono.error(conflict("会话不存在"))).doOnSuccess(saved -> {
+            org.slf4j.LoggerFactory.getLogger(PageChatService.class).info(
+                "Page chat finished: {}, status={}, usage={}", run.copy.trace(), run.status, run.copy.usage());
+            var terminalEvents = new ArrayList<Map<String, Object>>();
             if ("completed".equals(run.status)) {
                 if (run.revision != null && page != null) {
-                    run.events.tryEmitNext(Map.of("type", "data-page-committed",
+                    terminalEvents.add(Map.of("type", "data-page-committed",
                         "name", "page-committed", "id", run.request.runId(), "data", page));
                 }
-                run.events.tryEmitNext(Map.of("type", "finish", "finishReason", "stop"));
+                terminalEvents.add(Map.of("type", "finish", "finishReason", "stop"));
             } else if ("cancelled".equals(run.status)) {
-                run.events.tryEmitNext(Map.of("type", "abort"));
+                terminalEvents.add(Map.of("type", "abort"));
             } else {
-                run.events.tryEmitNext(Map.of("type", "error", "errorText", run.error));
+                terminalEvents.add(Map.of("type", "error", "errorText", run.error));
             }
-            run.events.tryEmitComplete();
-            active.remove(name, run);
+            run.completeEvents(terminalEvents);
         }).then();
     }
 
@@ -776,7 +829,7 @@ public class PageChatService {
 
     public Mono<ChatApi.Run> cancel(String name, String runId) {
         return pages.get(name).then(Mono.defer(() -> {
-            var run = active.get(name);
+            var run = runs.get(name);
             if (run != null && run.request.runId().equals(runId)) {
                 synchronized (run) {
                     if (run.transition != null) {
@@ -790,6 +843,7 @@ public class PageChatService {
                         run.transition = persistActive(name, run).doOnSuccess(ignored -> {
                             synchronized (run) {
                                 run.transition = null;
+                                run.waiting.update(null);
                                 run.cancel.tryEmitEmpty();
                             }
                         }).doOnError(error -> {
@@ -812,6 +866,26 @@ public class PageChatService {
     private Mono<PageChatSession> load(String name) {
         return client.fetch(PageChatSession.class, name)
             .filter(session -> session.getMetadata().getDeletionTimestamp() == null)
+            .flatMap(session -> {
+                var spec = session.getSpec();
+                if (name.equals(spec.getPageName()) && spec.getTurns().isEmpty()
+                    && spec.getDeletingSessionId() == null) {
+                    return Mono.just(session);
+                }
+                return loadWithWrites(name);
+            }).switchIfEmpty(Mono.defer(() -> loadWithWrites(name)));
+    }
+
+    private Mono<PageChatSession> loadWithWrites(String name) {
+        // Concurrent first reads share initialization, but each caller owns its resource snapshot.
+        return Mono.defer(() -> sessionLoads.computeIfAbsent(name, key ->
+            initializeSession(key).doOnTerminate(() -> sessionLoads.remove(key)).cache()))
+            .flatMap(ignored -> client.fetch(PageChatSession.class, name));
+    }
+
+    private Mono<PageChatSession> initializeSession(String name) {
+        return pages.withLivePage(name, () -> client.fetch(PageChatSession.class, name)
+            .filter(session -> session.getMetadata().getDeletionTimestamp() == null)
             .switchIfEmpty(Mono.defer(() -> client.create(newSession(name, name, "默认会话"))
                 .onErrorResume(error -> error instanceof OptimisticLockingFailureException
                     || error instanceof DataIntegrityViolationException,
@@ -820,22 +894,30 @@ public class PageChatService {
                 if (session.getSpec().getPageName() != null && !name.equals(session.getSpec().getPageName())) {
                     return Mono.error(conflict("默认会话名称冲突"));
                 }
-                return migrate(name, session).flatMap(this::clearDeletedSessionReservation);
-            });
+                return migrate(name, session).flatMap(this::completeSessionDeletion);
+            }));
     }
 
-    private Mono<PageChatSession> clearDeletedSessionReservation(PageChatSession coordinator) {
+    private Mono<PageChatSession> completeSessionDeletion(PageChatSession coordinator) {
         var deletingId = coordinator.getSpec().getDeletingSessionId();
-        if (deletingId == null || deletingId.equals(coordinator.getMetadata().getName())) {
-            return Mono.just(coordinator);
-        }
-        return client.fetch(PageChatSession.class, deletingId)
-            .filter(session -> session.getMetadata().getDeletionTimestamp() == null)
-            .map(session -> coordinator).switchIfEmpty(Mono.defer(() -> {
-                // A restart after deleting the target must not leave the page permanently locked.
-                coordinator.getSpec().setDeletingSessionId(null);
-                return client.update(coordinator);
-            }));
+        if (deletingId == null) return Mono.just(coordinator);
+        var name = coordinator.getMetadata().getName();
+        return client.listAll(PageChatTurnRecord.class, turnOptions(deletingId), Sort.unsorted())
+            .concatMap(client::delete).then(checkpoints.delete(deletingId))
+            .then(Mono.defer(() -> deletingId.equals(name) ? Mono.empty()
+                : client.fetch(PageChatSession.class, deletingId)
+                    .filter(session -> session.getMetadata().getDeletionTimestamp() == null
+                        && name.equals(session.getSpec().getPageName()))
+                    .flatMap(client::delete).then()))
+            .then(client.fetch(PageChatSession.class, name)).flatMap(latest -> {
+                if (!deletingId.equals(latest.getSpec().getDeletingSessionId())) return Mono.just(latest);
+                latest.getSpec().setDeletingSessionId(null);
+                if (deletingId.equals(name)) {
+                    latest.getSpec().setTitle("默认会话");
+                    latest.getSpec().setUpdatedAt(Instant.now());
+                }
+                return client.update(latest);
+            });
     }
 
     private Mono<PageChatSession> selected(String name, String sessionId, PageChatSession coordinator) {
@@ -883,21 +965,35 @@ public class PageChatService {
     private Mono<PageChatSession> recover(PageChatSession session) {
         var turn = session.getSpec().getActive();
         var name = session.getMetadata().getName();
-        if (turn == null || owner.equals(session.getSpec().getOwner()) && active.containsKey(name)) {
+        if (turn == null || runs.owner().equals(session.getSpec().getOwner()) && runs.contains(name)) {
             return Mono.just(session);
         }
-        return pages.committedAiRevision(name, turn.runId()).map(revision -> new ChatApi.Turn(
+        // Recovery may delete the old run's checkpoint. Serialize with reservation and
+        // reread inside the lock so an already recovered snapshot cannot clear a newer run.
+        return pages.withLivePage(name, () -> client.fetch(PageChatSession.class, name)
+            .switchIfEmpty(Mono.error(conflict("会话不存在"))).flatMap(this::recoverLocked));
+    }
+
+    private Mono<PageChatSession> recoverLocked(PageChatSession session) {
+        var turn = session.getSpec().getActive();
+        var name = session.getMetadata().getName();
+        if (turn == null || runs.owner().equals(session.getSpec().getOwner()) && runs.contains(name)) {
+            return Mono.just(session);
+        }
+        var terminal = List.of("completed", "cancelled", "interrupted", "incomplete", "failed")
+            .contains(turn.status());
+        return (terminal ? Mono.just(turn) : pages.committedAiRevision(name, turn.runId()).map(revision -> new ChatApi.Turn(
                 turn.runId(), turn.actor(), turn.createdAt(), turn.prompt(), turn.text(), turn.tools(),
-                "completed", revision, null, turn.parts(), turn.annotations(), turn.questions(), turn.steers()))
+                "completed", revision, null, turn.parts(), turn.annotations(), turn.questions(), turn.steers()).withUsage(turn.usage()))
             .switchIfEmpty(Mono.defer(() -> {
-                if (owner.equals(session.getSpec().getOwner()) && "committing".equals(turn.status())) {
+                if (runs.owner().equals(session.getSpec().getOwner()) && "committing".equals(turn.status())) {
                     return Mono.empty(); // An uncertain local write may still be in flight.
                 }
                 return Mono.just(new ChatApi.Turn(turn.runId(), turn.actor(), turn.createdAt(),
                     turn.prompt(), turn.text(), turn.tools(),
                     "cancelled".equals(turn.status()) ? "cancelled" : "interrupted", null,
-                    "服务重启或运行中断，未自动继续调用模型", turn.parts(), turn.annotations(), turn.questions(), turn.steers()));
-            })).flatMap(recovered -> {
+                    "服务重启或运行中断，未自动继续调用模型", turn.parts(), turn.annotations(), turn.questions(), turn.steers()).withUsage(turn.usage()));
+            }))).flatMap(recovered -> {
                 var sessionId = activeSessionId(session);
                 return ("completed".equals(recovered.status()) || "cancelled".equals(turn.status())
                     ? checkpoints.delete(sessionId) : checkpoints.available(sessionId, turn.runId()))
@@ -1090,49 +1186,4 @@ public class PageChatService {
         return new ResponseStatusException(HttpStatus.CONFLICT, message);
     }
 
-    private static final class Active {
-        final ChatApi.Request request;
-        final String actor;
-        final String sessionId;
-        final Instant createdAt = Instant.now();
-        final PageDetail base;
-        final PageWorkingCopy copy;
-        PageMemoryTools memory;
-        final StringBuilder text = new StringBuilder();
-        final ChatDisplay display = new ChatDisplay();
-        final Sinks.Empty<Void> cancel = Sinks.empty();
-        final Sinks.One<Throwable> failure = Sinks.one();
-        final Sinks.Many<Map<String, Object>> events = Sinks.many().replay().limit(256);
-        final List<ChatApi.Question> questions = new ArrayList<>();
-        final List<String> steers = new ArrayList<>();
-        int continuations;
-        Sinks.One<ChatApi.Question> answer;
-        Mono<Void> transition;
-        Mono<Void> checkpointWrites = Mono.empty();
-        boolean answering;
-        volatile boolean saveStarted;
-        volatile String status = "running";
-        volatile String revision;
-        volatile String error;
-
-        Active(ChatApi.Request request, String actor, PageDetail base, ContentPolicy policy,
-            Mono<run.halo.aipagebuilder.theme.ThemeStyleContext> themeContext, String sessionId) {
-            this.sessionId = sessionId;
-            this.request = request;
-            this.actor = actor;
-            this.base = base;
-            this.copy = new PageWorkingCopy(base.document(), policy, themeContext,
-                base.page().slug(), base.page().publishedRevision() != null);
-            this.copy.annotations(request.annotations() == null ? List.of() : request.annotations());
-        }
-
-        synchronized ChatApi.Turn turn() {
-            return new ChatApi.Turn(request.runId(), actor, createdAt, request.prompt(), text.toString(),
-                copy.summaries(), status, revision, error, display.snapshot(status, copy.memoryOutcomes()),
-                request.annotations() == null ? List.of() : request.annotations().stream()
-                    .map(annotation -> new ChatApi.Annotation(annotation.id(), List.of(), annotation.tag(),
-                        annotation.summary(), "", annotation.comment())).toList(), List.copyOf(questions),
-                List.copyOf(steers));
-        }
-    }
 }

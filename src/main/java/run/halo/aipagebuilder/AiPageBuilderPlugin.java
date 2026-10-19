@@ -23,10 +23,13 @@ import run.halo.aipagebuilder.page.PagePaths;
 public class AiPageBuilderPlugin extends BasePlugin {
 
     private final SchemeManager schemeManager;
+    private final run.halo.aipagebuilder.ai.PageChatService chats;
 
-    public AiPageBuilderPlugin(PluginContext pluginContext, SchemeManager schemeManager) {
+    public AiPageBuilderPlugin(PluginContext pluginContext, SchemeManager schemeManager,
+        run.halo.aipagebuilder.ai.PageChatService chats) {
         super(pluginContext);
         this.schemeManager = schemeManager;
+        this.chats = chats;
     }
 
     @Override
@@ -61,13 +64,17 @@ public class AiPageBuilderPlugin extends BasePlugin {
             indexes.add(IndexSpecs.<ThemePage, String>single("spec.publishedRevision", String.class)
                 .nullable(true).indexFunc(page -> page.getSpec().getPublishedRevision()));
         });
-        schemeManager.register(ThemePageRevision.class, indexes ->
+        schemeManager.register(ThemePageRevision.class, indexes -> {
             indexes.add(IndexSpecs.<ThemePageRevision, String>single("spec.pageName", String.class)
-                .indexFunc(revision -> revision.getSpec().getPageName())));
+                .indexFunc(revision -> revision.getSpec().getPageName()));
+            indexes.add(IndexSpecs.<ThemePageRevision, String>single("spec.runId", String.class)
+                .nullable(true).indexFunc(revision -> revision.getSpec().getRunId()));
+        });
     }
 
     @Override
     public void stop() {
+        chats.stop();
         schemeManager.unregister(schemeManager.get(SiteMemory.class));
         schemeManager.unregister(schemeManager.get(run.halo.aipagebuilder.model.PageChatCheckpoint.class));
         schemeManager.unregister(schemeManager.get(run.halo.aipagebuilder.model.PageChatTurnRecord.class));
