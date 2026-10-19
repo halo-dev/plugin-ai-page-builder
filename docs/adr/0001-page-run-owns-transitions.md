@@ -23,8 +23,9 @@ not be re-armed, or a race that cleared someone else's barrier.
    - Legal transitions are constrained by an explicit transition table. `ask`, `answer`,
      `steer`, `interrupt`, `cancel`, and `finish` are guarded commands; callers can no
      longer mutate state directly.
-   - Rolling back a transition (after a persistence failure) is an explicit
-     `restore(previous)` rather than a use of the forward transition table.
+   - Rolling back a transition after a persistence failure restores the previous
+     state directly under the run monitor, rather than through the forward
+     transition table.
 
 2. **`PageRun` owns the serialization barrier and the wait timer.**
    - Installation, identity checking, and cleanup of the `transition` barrier live in

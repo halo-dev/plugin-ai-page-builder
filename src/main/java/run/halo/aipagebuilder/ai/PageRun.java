@@ -187,11 +187,11 @@ final class PageRun {
     /** Track a write that must not interleave with run transitions. */
     synchronized <T> Mono<T> exclusive(Mono<T> write) {
         var ref = new AtomicReference<Mono<Void>>();
-        var update = write.doFinally(signal -> {
-            synchronized (this) {
-                if (transition == ref.get()) transition = null;
-            }
-        }).cache();
+        var update = write
+            .doOnSuccess(ignored -> clearTransition(ref.get()))
+            .doOnError(ignored -> clearTransition(ref.get()))
+            .doFinally(signal -> clearTransition(ref.get()))
+            .cache();
         var barrier = update.then().onErrorComplete();
         ref.set(barrier);
         transition = barrier;
@@ -270,7 +270,8 @@ final class PageRun {
         return Mono.defer(() -> {
             synchronized (this) {
                 if (transition != null) {
-                    return transition.then(Mono.defer(() -> steer(text, actor)));
+                    return transition.onErrorComplete()
+                        .then(Mono.defer(() -> steer(text, actor)));
                 }
                 if (!this.actor.equals(actor)) {
                     return Mono.error(RunTransitionException.forbidden("只能补充自己的运行"));
@@ -330,7 +331,7 @@ final class PageRun {
         return Mono.defer(() -> {
             synchronized (this) {
                 if (transition != null) {
-                    return transition.then(Mono.defer(this::cancel));
+                    return transition.onErrorComplete().then(Mono.defer(this::cancel));
                 }
                 if (state != State.RUNNING && state != State.WAITING_FOR_USER) {
                     return copy.closeMemory();

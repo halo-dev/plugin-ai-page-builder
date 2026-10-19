@@ -215,6 +215,44 @@ class PageRunTest {
     }
 
     @Test
+    void exclusiveBarrierReleasesWaitingCommandsBeforeNotifying() {
+        var run = run();
+        var gate = Sinks.<String>one();
+        var renamed = new AtomicReference<String>();
+        run.exclusive(gate.asMono()).subscribe(renamed::set);
+
+        var error = new AtomicReference<Throwable>();
+        var turn = new AtomicReference<ChatApi.Turn>();
+        run.steer("after rename", "admin").subscribe(turn::set, error::set);
+
+        gate.tryEmitValue("renamed");
+
+        assertThat(error.get()).isNull();
+        assertThat(renamed.get()).isEqualTo("renamed");
+        assertThat(turn.get()).isNotNull();
+        assertThat(run.turn().steers()).containsExactly("after rename");
+    }
+
+    @Test
+    void cancelRetriesAfterWaitingOnAFailedCheckpointWrite() {
+        var run = run();
+        var gate = Sinks.<Void>empty();
+        persistence.activeGate = gate;
+
+        var steerError = new AtomicReference<Throwable>();
+        run.steer("first", "admin").subscribe(ignored -> { }, steerError::set);
+        var cancelError = new AtomicReference<Throwable>();
+        run.cancel().subscribe(ignored -> { }, cancelError::set);
+
+        persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
+        gate.tryEmitEmpty();
+
+        assertThat(steerError.get()).hasMessageContaining("checkpoint failed");
+        assertThat(cancelError.get()).isNull();
+        assertThat(run.state()).isEqualTo(PageRun.State.CANCELLED);
+    }
+
+    @Test
     void failedAskPersistenceReleasesTransitionForCancel() {
         var run = run();
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");

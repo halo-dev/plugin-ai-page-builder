@@ -411,7 +411,11 @@ public class PageChatService {
                         run.complete(revision);
                         return pages.get(name).flatMap(page -> run.finish(page)).thenReturn(true);
                     }).switchIfEmpty(Mono.defer(() -> {
-                        run.fail("保存未完成，已核对页面未关联本次运行，请重新载入后再试");
+                        // A COMPLETED state already means saveAi returned successfully; only the
+                        // revision lookup is missing, so keep the success instead of reclassifying.
+                        if (!run.is(PageRun.State.COMPLETED)) {
+                            run.fail("保存未完成，已核对页面未关联本次运行，请重新载入后再试");
+                        }
                         return run.finish(null).thenReturn(false);
                     })).then();
                 }
