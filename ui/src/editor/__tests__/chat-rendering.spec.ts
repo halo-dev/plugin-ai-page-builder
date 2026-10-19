@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyUIMessageChunk,
@@ -328,7 +328,7 @@ describe('streaming conversation rendering', () => {
     expect(wrapper.find('pre').exists()).toBe(true)
     wrapper.unmount()
   })
-  it('preserves SDK text/reasoning/tool order and ends animation on cancellation', () => {
+  it('preserves SDK text/reasoning/tool order and ends animation on cancellation', async () => {
     let state = createUIMessageReducer()
     const chunks: UIMessageChunk[] = [
       { type: 'text-start', id: 'text1' },
@@ -349,6 +349,8 @@ describe('streaming conversation rendering', () => {
     ]
     for (const chunk of chunks) state = applyUIMessageChunk(state, chunk)
     const wrapper = mount(ChatMessageParts, { props: { message: state.message, active: false } })
+    // ChatMarkdown is an async component; wait for its chunk before asserting order.
+    await flushPromises()
     const text = wrapper.text()
     expect(text.indexOf('Before')).toBeLessThan(text.indexOf('思考过程'))
     expect(text.indexOf('思考过程')).toBeLessThan(text.indexOf('已暂存'))

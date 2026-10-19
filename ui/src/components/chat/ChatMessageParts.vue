@@ -25,15 +25,17 @@ export function questionSlotCount(parts: DeepReadonly<MessagePart[]> | MessagePa
 </script>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import IconCheck from '~icons/mingcute/check-line'
 import IconError from '~icons/mingcute/warning-line'
 import IconSpinner from '~icons/mingcute/loading-line'
 import IconChevron from '~icons/mingcute/right-line'
 import type { ToolPart } from '@halo-dev/ai-foundation-sdk'
 import type { PageChatAnswerItem, PageChatQuestion } from '../../api/generated'
-import ChatMarkdown from './ChatMarkdown.vue'
 import ChatQuestions from './ChatQuestions.vue'
+// The Markdown renderer brings its own parser (~660 kB); keep it out of the
+// editor chunk until a message actually needs it.
+const ChatMarkdown = defineAsyncComponent(() => import('./ChatMarkdown.vue'))
 
 const props = defineProps<{
   message: DeepReadonly<UIMessage> | UIMessage

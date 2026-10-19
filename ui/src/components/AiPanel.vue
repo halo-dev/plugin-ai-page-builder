@@ -213,6 +213,11 @@ async function earlier() {
 }
 onMounted(async () => {
   await recover()
+  // Markdown rendering is a large async chunk; warm it during idle so the first
+  // streamed reply does not wait on the download. The chat is always visible here.
+  const preload = () => void import('./chat/ChatMarkdown.vue')
+  if ('requestIdleCallback' in window) window.requestIdleCallback(preload, { timeout: 2000 })
+  else setTimeout(preload, 2000)
   if (props.initialModel) modelName.value = props.initialModel
   if (props.initialPrompt) {
     prompt.value = props.initialPrompt
