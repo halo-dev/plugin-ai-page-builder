@@ -2,7 +2,6 @@ package run.halo.aipagebuilder.ai;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +10,7 @@ import reactor.core.publisher.Mono;
 import run.halo.aipagebuilder.theme.ThemeStyleContext;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
+import run.halo.aipagebuilder.content.PageDocumentPatch;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PagePaths;
 
@@ -386,54 +386,12 @@ public final class PageWorkingCopy {
         call();
         consume(Json.toJson(input));
         var tool = "patch_current_page";
-        if (input == null || !(input.get("baseHash") instanceof String hash)
-            || !baseHash().equals(hash)) {
-            return invalid(tool, "baseHash 与当前工作副本不一致，请重新读取页面");
+        try {
+            var patched = PageDocumentPatch.apply(document, input);
+            return stage(tool, patched.get("html"), patched.get("css"), patched.get("js"));
+        } catch (IllegalArgumentException error) {
+            return invalid(tool, error.getMessage());
         }
-        if (!(input.get("patches") instanceof List<?> patches)
-            || patches.isEmpty() || patches.size() > 20) {
-            return invalid(tool, "patches 必须包含 1–20 项修改");
-        }
-        var replacements = new ArrayList<Replacement>();
-        for (var entry : patches) {
-            if (!(entry instanceof Map<?, ?> patch)
-                || !(patch.get("field") instanceof String field)
-                || !("html".equals(field) || "css".equals(field) || "js".equals(field))
-                || !(patch.get("oldText") instanceof String oldText) || oldText.isEmpty()
-                || !(patch.get("newText") instanceof String newText)) {
-                return invalid(tool, "每项修改须指定 html/css/js 字段、非空 oldText 和字符串 newText");
-            }
-            var original = switch (field) {
-                case "html" -> document.html();
-                case "css" -> document.css();
-                default -> document.js();
-            };
-            var start = original.indexOf(oldText);
-            if (start < 0 || original.indexOf(oldText, start + 1) >= 0) {
-                return invalid(tool, "oldText 必须在原始字段中精确且唯一匹配");
-            }
-            var end = start + oldText.length();
-            for (var replacement : replacements) {
-                if (replacement.field().equals(field)
-                    && start < replacement.end() && replacement.start() < end) {
-                    return invalid(tool, "同批修改的匹配区间不能重叠");
-                }
-            }
-            replacements.add(new Replacement(field, start, end, newText));
-        }
-        var html = new StringBuilder(document.html());
-        var css = new StringBuilder(document.css());
-        var js = new StringBuilder(document.js());
-        replacements.sort(Comparator.comparingInt(Replacement::start).reversed());
-        for (var replacement : replacements) {
-            var target = switch (replacement.field()) {
-                case "html" -> html;
-                case "css" -> css;
-                default -> js;
-            };
-            target.replace(replacement.start(), replacement.end(), replacement.newText());
-        }
-        return stage(tool, html.toString(), css.toString(), js.toString());
     }
 
     public Mono<Map<String, Object>> setSlug(Map<String, Object> input) {
@@ -533,9 +491,6 @@ public final class PageWorkingCopy {
 
     private String baseHash() {
         return DocumentHash.of(document.html(), document.css(), document.js());
-    }
-
-    private record Replacement(String field, int start, int end, String newText) {
     }
 
     private void call() {

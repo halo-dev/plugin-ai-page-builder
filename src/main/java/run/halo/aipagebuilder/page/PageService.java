@@ -265,7 +265,15 @@ public class PageService {
     }
 
     public Mono<PageDetail> publish(String name, Long version) {
+        return publish(name, version, null);
+    }
+
+    public Mono<PageDetail> publish(String name, Long version, String expectedDraftRevision) {
         return mutate(name, version, page -> {
+            if (expectedDraftRevision != null
+                && !expectedDraftRevision.equals(page.getSpec().getDraftRevision())) {
+                return Mono.error(conflict("Page changed; reload before publishing"));
+            }
             var slug = page.getSpec().getSlug();
             if (slug == null || slug.isBlank()) {
                 return Mono.error(badRequest("请先设置访问路径再发布"));
@@ -320,6 +328,19 @@ public class PageService {
                 Sort.by(Sort.Order.desc("metadata.creationTimestamp"),
                     Sort.Order.asc("metadata.name"))))
             .map(PageService::revisionSummary).collectList();
+    }
+
+    public record RevisionList(List<RevisionSummary> items, long total, int page, int size) { }
+
+    public Mono<RevisionList> revisions(String name, int page, int size) {
+        if (page < 1 || size < 1 || size > 100) {
+            return Mono.error(badRequest("page must be positive; size must be between 1 and 100"));
+        }
+        return page(name).then(client.listBy(ThemePageRevision.class, revisionOptions(name),
+            PageRequestImpl.of(page, size, Sort.by(Sort.Order.desc("metadata.creationTimestamp"),
+                Sort.Order.asc("metadata.name")))))
+            .map(result -> new RevisionList(result.getItems().stream()
+                .map(PageService::revisionSummary).toList(), result.getTotal(), page, size));
     }
 
     public Mono<RevisionDetail> revisionDetail(String name, String revisionName) {

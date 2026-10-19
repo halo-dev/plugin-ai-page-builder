@@ -38,6 +38,9 @@ class AiPageBuilderPluginTest {
     @Mock
     run.halo.aipagebuilder.ai.PageChatService chats;
 
+    @Mock
+    run.halo.aipagebuilder.page.PagePreviewStore previews;
+
     @InjectMocks
     AiPageBuilderPlugin plugin;
 
@@ -60,6 +63,7 @@ class AiPageBuilderPluginTest {
         when(schemeManager.get(SiteMemory.class)).thenReturn(scheme);
 
         plugin.stop();
+        verify(previews).clear();
 
         var order = inOrder(chats, schemeManager);
         order.verify(chats).stop();

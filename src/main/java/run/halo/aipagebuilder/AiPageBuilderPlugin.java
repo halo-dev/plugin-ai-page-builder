@@ -25,11 +25,15 @@ public class AiPageBuilderPlugin extends BasePlugin {
     private final SchemeManager schemeManager;
     private final run.halo.aipagebuilder.ai.PageChatService chats;
 
+    private final run.halo.aipagebuilder.page.PagePreviewStore previews;
+
     public AiPageBuilderPlugin(PluginContext pluginContext, SchemeManager schemeManager,
-        run.halo.aipagebuilder.ai.PageChatService chats) {
+        run.halo.aipagebuilder.ai.PageChatService chats,
+        run.halo.aipagebuilder.page.PagePreviewStore previews) {
         super(pluginContext);
         this.schemeManager = schemeManager;
         this.chats = chats;
+        this.previews = previews;
     }
 
     @Override
@@ -74,6 +78,7 @@ public class AiPageBuilderPlugin extends BasePlugin {
 
     @Override
     public void stop() {
+        previews.clear();
         chats.stop();
         schemeManager.unregister(schemeManager.get(SiteMemory.class));
         schemeManager.unregister(schemeManager.get(run.halo.aipagebuilder.model.PageChatCheckpoint.class));

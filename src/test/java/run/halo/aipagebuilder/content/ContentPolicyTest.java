@@ -18,6 +18,16 @@ class ContentPolicyTest {
     private final ContentPolicy policy = new ContentPolicy();
 
     @Test
+    void capabilitiesDescribeAttributePrefixesAcceptedByValidation() {
+        assertThat(policy.capabilities().get("rules").toString())
+            .contains("aria-*", "data-*", "data-gjs-*");
+        assertThatCode(() -> policy.validateHtml("<p aria-label='a' data-section='b'>Text</p>"))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> policy.validateHtml("<p data-gjs-script='x'>Text</p>"))
+            .isInstanceOf(ResponseStatusException.class);
+    }
+
+    @Test
     void acceptsStaticContentAndEmptyDraft() {
         assertThatCode(() -> policy.validateHtml("")).doesNotThrowAnyException();
         assertThatCode(() -> policy.validateCss("")).doesNotThrowAnyException();
