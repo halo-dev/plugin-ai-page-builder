@@ -218,14 +218,14 @@ public final class FoundationBridge implements AiGateway {
                             "slug", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 200,
                                 "pattern", run.halo.aipagebuilder.page.PagePaths.SLUG_PATTERN)),
                             "required", java.util.List.of("slug"), "additionalProperties", false))
-                        .executor(context -> copy.edit(() -> copy.setSlug(context.getInput())).cast(Object.class))
+                        .executor(context -> copy.setSlug(context.getInput()).cast(Object.class))
                         .build(),
                     run.halo.aifoundation.tool.ToolDefinition.builder()
                         .name("update_page_title").description("Set the page title (1–200 characters, trimmed). For a new page still titled 未命名页面, call this early with a concise accurate title. Do not change the title for minor edits unless the user asks.")
                         .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
                             "title", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 200)),
                             "required", java.util.List.of("title"), "additionalProperties", false))
-                        .executor(context -> copy.edit(() -> copy.setTitle(context.getInput())).cast(Object.class))
+                        .executor(context -> copy.setTitle(context.getInput()).cast(Object.class))
                         .build(),
                     run.halo.aifoundation.tool.ToolDefinition.builder()
                         .name("rename_session").description("Name the current conversation. Call it before any other tool on every user turn with a concise 1–100 character title summarizing the whole conversation so far, including this turn's request; this is independent of the page title. Always update the title so the sidebar stays recognizable.")
@@ -245,7 +245,7 @@ public final class FoundationBridge implements AiGateway {
                                     "newText", java.util.Map.of("type", "string")),
                                     "required", java.util.List.of("field", "oldText", "newText"), "additionalProperties", false))),
                             "required", java.util.List.of("baseHash", "patches"), "additionalProperties", false))
-                        .executor(context -> copy.prepareTheme().then(copy.edit(() -> copy.patch(context.getInput()))).cast(Object.class))
+                        .executor(context -> copy.patch(context.getInput()).cast(Object.class))
                         .build(),
                     run.halo.aifoundation.tool.ToolDefinition.builder()
                         .name("update_current_page").description("Validate and stage any supplied HTML, CSS or JS fields; omitted fields stay unchanged. Prefer one field or small patch at a time. Repair syntax errors; for unsupported capabilities explain the limitation and clarify alternatives instead of trying equivalent workarounds")
@@ -254,7 +254,7 @@ public final class FoundationBridge implements AiGateway {
                             "css", java.util.Map.of("type", "string"),
                             "js", java.util.Map.of("type", "string", "description", "Standalone page script; omit to keep the existing script, empty string clears it")),
                             "minProperties", 1, "additionalProperties", false))
-                        .executor(context -> copy.prepareTheme().then(copy.edit(() -> copy.update(context.getInput()))).cast(Object.class))
+                        .executor(context -> copy.update(context.getInput()).cast(Object.class))
                         .build())))
                 .toolChoice(run.halo.aifoundation.tool.ToolChoice.auto())
                 .parallelToolCalls(false)

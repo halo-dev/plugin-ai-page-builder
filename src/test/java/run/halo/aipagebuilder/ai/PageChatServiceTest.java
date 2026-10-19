@@ -44,13 +44,17 @@ class PageChatServiceTest {
     private final ContentPolicy policy = new ContentPolicy();
     private final Map<String, PageChatSession> stored = new HashMap<>();
     private final Map<String, PageChatTurnRecord> turns = new HashMap<>();
+    private final run.halo.aipagebuilder.theme.ThemeContextService themes =
+        mock(run.halo.aipagebuilder.theme.ThemeContextService.class);
     private final PageChatService service = new PageChatService(client, pages, gateway, policy,
-        mock(run.halo.aipagebuilder.theme.ThemeContextService.class));
+        themes);
     private final String runId = UUID.randomUUID().toString();
     private final PageDetailFixture fixture = new PageDetailFixture();
 
     @BeforeEach
     void setup() {
+        when(themes.current()).thenReturn(Mono.just(
+            run.halo.aipagebuilder.theme.ThemeStyleContext.unavailable()));
         when(pages.withLivePage(anyString(), any())).thenAnswer(i ->
             i.<java.util.function.Supplier<Mono<Object>>>getArgument(1).get());
         when(pages.reserveRun(anyString(), any(), any())).thenAnswer(i ->
@@ -356,8 +360,8 @@ class PageChatServiceTest {
     void forcedReleaseDoesNotReplaceInFlightSuccessfulCompletion() throws Exception {
         var chunks = Sinks.many().unicast().<Map<String, Object>>onBackpressureBuffer();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
-            ((PageWorkingCopy) i.getArgument(3)).update(Map.of("html", "<p>new</p>", "css", ""));
-            return chunks.asFlux();
+            return ((PageWorkingCopy) i.getArgument(3))
+                .update(Map.of("html", "<p>new</p>", "css", "")).thenMany(chunks.asFlux());
         }));
         var entered = new java.util.concurrent.CountDownLatch(1);
         var deliver = new java.util.concurrent.CountDownLatch(1);
@@ -488,10 +492,10 @@ class PageChatServiceTest {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
             PageWorkingCopy copy = i.getArgument(3);
             assertThat(copy.read()).containsEntry("canSetSlug", true);
-            copy.setTitle(Map.of("title", "关于我们"));
-            copy.setSlug(Map.of("slug", "company/about"));
-            copy.update(Map.of("html", "<p>About us</p>", "css", ""));
-            return Flux.empty();
+            return copy.setTitle(Map.of("title", "关于我们"))
+                .then(copy.setSlug(Map.of("slug", "company/about")))
+                .then(copy.update(Map.of("html", "<p>About us</p>", "css", "")))
+                .thenMany(Flux.empty());
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         verify(pages).saveAi(eq("page"), eq(1L),
@@ -571,8 +575,8 @@ class PageChatServiceTest {
     void pathOnlyRunIsNotMistakenForAnUnchangedDocument() {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
-            ((PageWorkingCopy) i.getArgument(3)).setSlug(Map.of("slug", "about"));
-            return Flux.empty();
+            return ((PageWorkingCopy) i.getArgument(3)).setSlug(Map.of("slug", "about"))
+                .thenMany(Flux.empty());
         }));
         service.start("page", request(), "admin").block().blockLast();
         verify(pages).saveAi(eq("page"), eq(1L), eq(fixture.base.document()),
@@ -583,8 +587,8 @@ class PageChatServiceTest {
     void cancelledGenerationDoesNotSaveItsStagedPath() {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
-            ((PageWorkingCopy) i.getArgument(3)).setSlug(Map.of("slug", "about"));
-            return Flux.never();
+            return ((PageWorkingCopy) i.getArgument(3)).setSlug(Map.of("slug", "about"))
+                .thenMany(Flux.never());
         }));
         service.start("page", request(), "admin").block();
         service.cancel("page", runId).block();
@@ -596,12 +600,12 @@ class PageChatServiceTest {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.setSlug(Map.of("slug", "company/about")))
+            return copy.setSlug(Map.of("slug", "company/about"))
                 .thenMany(Flux.never());
         });
         service.start("page", request(), "admin").block();
         var restarted = new PageChatService(client, pages, gateway, policy,
-            mock(run.halo.aipagebuilder.theme.ThemeContextService.class));
+            themes);
         assertThat(restarted.result("page", runId).block().status()).isEqualTo("interrupted");
         var saved = restarted.checkpoint("page", "page", "admin").block();
         var next = UUID.randomUUID().toString();
@@ -624,8 +628,8 @@ class PageChatServiceTest {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.setSlug(Map.of("slug", "UPPER")))
-                .then(invalidContent ? copy.edit(() -> copy.update(Map.of("html", "<script>bad()</script>"))) : Mono.empty())
+            return copy.setSlug(Map.of("slug", "UPPER"))
+                .then(invalidContent ? copy.update(Map.of("html", "<script>bad()</script>")) : Mono.empty())
                 .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
         });
         service.start("page", request(), "admin").block().blockLast();
@@ -638,9 +642,9 @@ class PageChatServiceTest {
             assertThat(copy.hasInvalidUpdate()).isTrue();
             assertThat(copy.hasInvalidSlugUpdate()).isTrue();
             assertThat(copy.hasInvalidContentUpdate()).isEqualTo(invalidContent);
-            return copy.edit(() -> copy.setSlug(Map.of("slug", "about")))
+            return copy.setSlug(Map.of("slug", "about"))
                 .doOnNext(ignored -> assertThat(copy.hasInvalidUpdate()).isEqualTo(invalidContent))
-                .then(copy.edit(() -> copy.update(Map.of("html", "<p>About</p>"))))
+                .then(copy.update(Map.of("html", "<p>About</p>")))
                 .doOnNext(ignored -> assertThat(copy.hasInvalidUpdate()).isFalse()).thenMany(Flux.empty());
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         service.start("page", resumeRequest(saved, next), "admin").block().blockLast();
@@ -662,9 +666,9 @@ class PageChatServiceTest {
         try {
             when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
                 PageWorkingCopy copy = i.getArgument(3);
-                copy.update(Map.of("html", "<p>unfinished</p>", "css", ""));
-                return Flux.interval(java.time.Duration.ofSeconds(30))
-                    .map(tick -> Map.<String, Object>of("type", "text-delta", "id", "t", "delta", "."));
+                return copy.update(Map.of("html", "<p>unfinished</p>", "css", ""))
+                    .thenMany(Flux.interval(java.time.Duration.ofSeconds(30))
+                        .map(tick -> Map.<String, Object>of("type", "text-delta", "id", "t", "delta", ".")));
             }));
             var events = new java.util.ArrayList<Map<String, Object>>();
             service.start("page", request(), "admin").block().subscribe(events::add);
@@ -687,8 +691,8 @@ class PageChatServiceTest {
     void responseTimeoutPersistsItsOwnReasonWithoutSavingStagedChanges() {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
             PageWorkingCopy copy = i.getArgument(3);
-            copy.update(Map.of("html", "<p>unfinished</p>", "css", ""));
-            return Flux.error(new AiGenerationException(AiGenerationException.Reason.RESPONSE_TIMEOUT));
+            return copy.update(Map.of("html", "<p>unfinished</p>", "css", ""))
+                .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.RESPONSE_TIMEOUT)));
         }));
         service.start("page", request(), "admin").block().blockLast();
         assertThat(service.result("page", runId).block().error())
@@ -701,11 +705,12 @@ class PageChatServiceTest {
         when(gateway.chat(eq("model"), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
             PageWorkingCopy copy = i.getArgument(3);
             assertThat(copy.read().get("html")).isEqualTo("<p>old</p>");
-            assertThat(copy.update(Map.of("html", "<script>bad</script>", "css", "")))
-                .containsEntry("valid", false);
-            copy.update(Map.of("html", "<p>new</p>", "css", ""));
-            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
-            return Flux.just(Map.of("type", "text-delta", "id", "t", "delta", "完成"));
+            return copy.update(Map.of("html", "<script>bad</script>", "css", ""))
+                .doOnNext(result -> assertThat(result).containsEntry("valid", false))
+                .then(copy.update(Map.of("html", "<p>new</p>", "css", "")))
+                .doOnNext(ignored -> verify(pages, never()).saveAi(anyString(), any(), any(),
+                    anyString(), anyString(), anyString(), any()))
+                .thenMany(Flux.just(Map.of("type", "text-delta", "id", "t", "delta", "完成")));
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type"))
@@ -725,11 +730,10 @@ class PageChatServiceTest {
     void stagedPreviewIsSeparateFromDurableCommitAndDisplayHistory() {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
             PageWorkingCopy copy = i.getArgument(3);
-            var output = copy.update(Map.of("html", "<p>new</p>", "css", ""));
-            return Flux.just(
+            return copy.update(Map.of("html", "<p>new</p>", "css", "")).flatMapMany(output -> Flux.just(
                 Map.of("type", "reasoning-delta", "id", "reason", "delta", "provider explanation"),
                 Map.of("type", "tool-input-start", "toolCallId", "tool", "toolName", "update_current_page"),
-                Map.of("type", "tool-output-available", "toolCallId", "tool", "output", output));
+                Map.of("type", "tool-output-available", "toolCallId", "tool", "output", output)));
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type")).containsExactly("reasoning-delta",
@@ -833,7 +837,7 @@ class PageChatServiceTest {
             .thenReturn(Mono.never());
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.update(Map.of("html", "<p>pending checkpoint</p>")))
+            return copy.update(Map.of("html", "<p>pending checkpoint</p>"))
                 .thenMany(Flux.never());
         });
         service.start("page", request(), "admin").block();
@@ -1002,8 +1006,9 @@ class PageChatServiceTest {
     @Test
     void failureAndCancellationDiscardWorkingCopy() {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
-            ((PageWorkingCopy) i.getArgument(3)).update(Map.of("html", "<p>new</p>", "css", ""));
-            return Flux.error(new IllegalStateException("provider-secret"));
+            return ((PageWorkingCopy) i.getArgument(3))
+                .update(Map.of("html", "<p>new</p>", "css", ""))
+                .thenMany(Flux.error(new IllegalStateException("provider-secret")));
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type")).containsExactly("error");
@@ -1102,8 +1107,8 @@ class PageChatServiceTest {
             PageWorkingCopy copy = i.getArgument(3);
             prompts.add(i.getArgument(2));
             if (prompts.size() == 1) {
-                copy.update(Map.of("html", "<p>new</p>", "css", ""));
-                return gate.asMono().flux();
+                return copy.update(Map.of("html", "<p>new</p>", "css", ""))
+                    .thenMany(gate.asMono());
             }
             return Flux.just(Map.of("type", "text-delta", "id", "t", "delta", "收到补充"));
         }));
@@ -1128,8 +1133,8 @@ class PageChatServiceTest {
             PageWorkingCopy copy = i.getArgument(3);
             prompts.add(i.getArgument(2));
             if (prompts.size() == 1) {
-                copy.update(Map.of("html", "<p>new</p>", "css", ""));
-                return copy.askUser(questionInput()).thenMany(Flux.empty());
+                return copy.update(Map.of("html", "<p>new</p>", "css", ""))
+                    .then(copy.askUser(questionInput())).thenMany(Flux.empty());
             }
             return Flux.just(Map.of("type", "text-delta", "id", "t", "delta", "收到补充"));
         }));
@@ -1206,9 +1211,9 @@ class PageChatServiceTest {
     void invalidFinalUpdateDiscardsEarlierValidStaging() {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
             var copy = (PageWorkingCopy) i.getArgument(3);
-            copy.update(Map.of("html", "<p>new</p>", "css", ""));
-            copy.update(Map.of("html", "<script>bad</script>", "css", ""));
-            return Flux.empty();
+            return copy.update(Map.of("html", "<p>new</p>", "css", ""))
+                .then(copy.update(Map.of("html", "<script>bad</script>", "css", "")))
+                .thenMany(Flux.empty());
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type")).containsExactly("error");
@@ -1365,8 +1370,8 @@ class PageChatServiceTest {
         try {
             when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
                 PageWorkingCopy copy = i.getArgument(3);
-                copy.update(Map.of("html", "<p>new</p>", "css", ""));
-                return copy.askUser(questionInput()).doOnNext(answer -> {
+                return copy.update(Map.of("html", "<p>new</p>", "css", ""))
+                    .then(copy.askUser(questionInput())).doOnNext(answer -> {
                     assertThat(copy.document().html()).isEqualTo("<p>new</p>");
                     assertThat(stored.get("page").getSpec().getActive().questions().getLast().answers())
                         .hasSize(1);
@@ -1549,8 +1554,8 @@ class PageChatServiceTest {
         }).when(client).update(any(PageChatSession.class));
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
             PageWorkingCopy copy = i.getArgument(3);
-            copy.update(Map.of("html", "<p>new</p>", "css", ""));
-            return copy.askUser(questionInput()).onErrorResume(error -> Mono.just(Map.of("error", "tool failed")))
+            return copy.update(Map.of("html", "<p>new</p>", "css", ""))
+                .then(copy.askUser(questionInput())).onErrorResume(error -> Mono.just(Map.of("error", "tool failed")))
                 .thenMany(Flux.never());
         }));
         service.start("page", request(), "admin").block();
@@ -1601,7 +1606,7 @@ class PageChatServiceTest {
     void persistsValidatedEditsAndResumesWithFreshBudgetsWithoutCommittingPartialWork() {
         org.mockito.Mockito.doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.update(Map.of("html", "<p>saved progress</p>")))
+            return copy.update(Map.of("html", "<p>saved progress</p>"))
                 .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.STEP_LIMIT)));
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         service.start("page", request(), "admin").block().collectList().block();
@@ -1657,8 +1662,8 @@ class PageChatServiceTest {
         });
         org.mockito.Mockito.doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.update(Map.of("html", "<p>persisted</p>")))
-                .then(copy.edit(() -> copy.update(Map.of("html", "<p>not persisted</p>"))))
+            return copy.update(Map.of("html", "<p>persisted</p>"))
+                .then(copy.update(Map.of("html", "<p>not persisted</p>")))
                 .onErrorResume(error -> Mono.empty()).thenMany(Flux.empty());
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         service.start("page", request(), "admin").block().collectList().block();
@@ -1695,8 +1700,8 @@ class PageChatServiceTest {
     void stickyInvalidUpdateSurvivesManualResumeAndCannotBeCommittedByStop() {
         org.mockito.Mockito.doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.update(Map.of("html", "<p>valid</p>")))
-                .then(copy.edit(() -> copy.update(Map.of("html", "<script>bad()</script>"))))
+            return copy.update(Map.of("html", "<p>valid</p>"))
+                .then(copy.update(Map.of("html", "<script>bad()</script>")))
                 .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.TRUNCATED)));
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         service.start("page", request(), "admin").block().collectList().block();
@@ -1714,13 +1719,13 @@ class PageChatServiceTest {
     void restartExposesDurableProgressWithoutInvokingModelAndCancelledRunDeletesIt() {
         org.mockito.Mockito.doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.update(Map.of("html", "<p>before restart</p>")))
+            return copy.update(Map.of("html", "<p>before restart</p>"))
                 .thenMany(Flux.never());
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         service.start("page", request(), "admin").block();
         org.mockito.Mockito.clearInvocations(gateway);
         var restarted = new PageChatService(client, pages, gateway, policy,
-            mock(run.halo.aipagebuilder.theme.ThemeContextService.class));
+            themes);
         assertThat(restarted.result("page", runId).block().status()).isEqualTo("interrupted");
         var saved = restarted.checkpoint("page", "page", "admin").block();
         assertThat(saved.document().html()).isEqualTo("<p>before restart</p>");
@@ -1781,7 +1786,7 @@ class PageChatServiceTest {
         });
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.edit(() -> copy.update(Map.of("html", "<p>complete</p>"))).thenMany(Flux.empty());
+            return copy.update(Map.of("html", "<p>complete</p>")).thenMany(Flux.empty());
         });
         service.start("page", request(), "admin").block().blockLast();
         assertThat(checkpoints).hasSize(1);
@@ -1801,8 +1806,8 @@ class PageChatServiceTest {
     private void waitingGateway(Flux<Map<String, Object>> afterAnswer) {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
             PageWorkingCopy copy = i.getArgument(3);
-            copy.update(Map.of("html", "<p>new</p>", "css", ""));
-            return copy.askUser(questionInput()).thenMany(afterAnswer);
+            return copy.update(Map.of("html", "<p>new</p>", "css", ""))
+                .then(copy.askUser(questionInput())).thenMany(afterAnswer);
         }));
     }
 
@@ -1857,8 +1862,8 @@ class PageChatServiceTest {
 
     private void stagedSuccess() {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
-            ((PageWorkingCopy) i.getArgument(3)).update(Map.of("html", "<p>new</p>", "css", ""));
-            return Flux.empty();
+            return ((PageWorkingCopy) i.getArgument(3))
+                .update(Map.of("html", "<p>new</p>", "css", "")).thenMany(Flux.empty());
         }));
     }
 

@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import reactor.core.publisher.Mono;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
@@ -19,35 +21,93 @@ class PageWorkingCopyTest {
     @Test
     void partialUpdatesPreserveOmittedFieldsAndEmptyInputDoesNotClearInvalidState() {
         var copy = copy("<p>old</p>", "p{color:red}");
-        assertThat(copy.update(Map.of("html", "<p>new</p>"))).containsEntry("valid", true);
+        assertThat(copy.update(Map.of("html", "<p>new</p>")).block()).containsEntry("valid", true);
         assertThat(copy.document().css()).isEqualTo("p{color:red}");
-        assertThat(copy.update(Map.of("css", ""))).containsEntry("valid", true);
+        assertThat(copy.update(Map.of("css", "")).block()).containsEntry("valid", true);
         assertThat(copy.document().html()).isEqualTo("<p>new</p>");
         assertThat(copy.document().css()).isEmpty();
-        assertThat(copy.update(Map.of())).containsEntry("valid", false);
+        assertThat(copy.update(Map.of()).block()).containsEntry("valid", false);
         assertThat(copy.hasInvalidUpdate()).isTrue();
-        assertThat(copy.update(Map.of("unknown", ""))).containsEntry("valid", false);
+        assertThat(copy.update(Map.of("unknown", "")).block()).containsEntry("valid", false);
         assertThat(copy.hasInvalidUpdate()).isTrue();
     }
 
-    @Test
-    void pageToolAcknowledgementWaitsForDurableCheckpointAndCloseWaitsForWrite() {
+    @ParameterizedTest
+    @ValueSource(strings = {"update", "patch", "title", "slug"})
+    void pageToolAcknowledgementWaitsForDurableCheckpointAndCloseWaitsForWrite(String operation) {
         var copy = copy("<p>old</p>", "");
         var write = reactor.core.publisher.Sinks.<Void>empty();
         copy.checkpoint(write::asMono);
         var acknowledged = new java.util.concurrent.atomic.AtomicBoolean();
-        copy.edit(() -> copy.update(Map.of("html", "<p>new</p>")))
-            .subscribe(output -> acknowledged.set(true));
+        var pending = edit(copy, operation);
+        assertThat(copy.calls()).isZero();
+        pending.subscribe(output -> acknowledged.set(true));
         assertThat(acknowledged).isFalse();
+        var staged = copy.document();
+        var slug = copy.slug();
         var closed = new java.util.concurrent.atomic.AtomicBoolean();
         copy.closeEdits().subscribe(ignored -> { }, error -> { }, () -> closed.set(true));
         assertThat(closed).isFalse();
         write.tryEmitEmpty();
         assertThat(acknowledged).isTrue();
         assertThat(closed).isTrue();
-        assertThatThrownBy(() -> copy.edit(() -> copy.update(Map.of("html", "<p>late</p>"))).block())
+        assertThatThrownBy(() -> edit(copy, operation).block())
             .isInstanceOf(AiGenerationException.class);
-        assertThat(copy.document().html()).isEqualTo("<p>new</p>");
+        assertThat(copy.document()).isEqualTo(staged);
+        assertThat(copy.slug()).isEqualTo(slug);
+        assertThat(copy.calls()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"update", "patch", "title", "slug"})
+    void checkpointFailureRejectsQueuedAndLaterEditsWithoutRollingBackMemory(String operation) {
+        var copy = copy("<p>old</p>", "");
+        var write = reactor.core.publisher.Sinks.<Void>empty();
+        copy.checkpoint(write::asMono);
+        var first = edit(copy, operation).toFuture();
+        var staged = copy.document();
+        var slug = copy.slug();
+        var queued = copy.setTitle(Map.of("title", "Queued title")).toFuture();
+        assertThat(first).isNotDone();
+        assertThat(queued).isNotDone();
+        assertThat(copy.calls()).isEqualTo(1);
+
+        var failure = new IllegalStateException("checkpoint unavailable");
+        write.tryEmitError(failure);
+
+        assertThatThrownBy(first::join).hasCause(failure);
+        assertThatThrownBy(queued::join).hasCause(failure);
+        assertThat(copy.checkpointFailed()).isTrue();
+        assertThatThrownBy(() -> edit(copy, operation).block())
+            .isInstanceOf(AiGenerationException.class);
+        assertThat(copy.document()).isEqualTo(staged);
+        assertThat(copy.slug()).isEqualTo(slug);
+        assertThat(copy.calls()).isEqualTo(1);
+    }
+
+    @Test
+    void queuedEditsWaitForCheckpointWithoutReplayingPreviousMutations() {
+        var copy = copy("<p>old</p>", "");
+        var write = reactor.core.publisher.Sinks.<Void>empty();
+        var snapshots = new ArrayList<PageDocument>();
+        copy.checkpoint(() -> {
+            snapshots.add(copy.document());
+            return snapshots.size() == 1 ? write.asMono() : Mono.empty();
+        });
+        var first = copy.update(Map.of("html", "<p>new</p>")).toFuture();
+        var second = copy.setTitle(Map.of("title", "New title")).toFuture();
+        assertThat(snapshots).hasSize(1);
+        assertThat(copy.document().title()).isEqualTo("Title");
+        assertThat(second).isNotDone();
+
+        write.tryEmitEmpty();
+
+        assertThat(first.join()).containsEntry("valid", true);
+        assertThat(second.join()).containsEntry("valid", true);
+        assertThat(snapshots).extracting(PageDocument::title).containsExactly("Title", "New title");
+        assertThat(snapshots).allSatisfy(document ->
+            assertThat(document.html()).isEqualTo("<p>new</p>"));
+        assertThat(copy.calls()).isEqualTo(2);
     }
 
     @Test
@@ -94,7 +154,7 @@ class PageWorkingCopyTest {
         annotations.clear();
         assertThat(copy.read()).containsEntry("baseHash", hash(copy))
             .containsEntry("annotations", List.of(annotation));
-        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")))
+        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")).block())
             .containsEntry("valid", true).containsEntry("staged", true)
             .containsEntry("baseHash", DocumentHash.of("<p>new</p>", ""));
         assertThat(copy.read()).containsEntry("baseHash", hash(copy));
@@ -104,13 +164,13 @@ class PageWorkingCopyTest {
     void semanticSlugIsStagedWithTitleAndContent() {
         var copy = copy("<p>old</p>", "");
         assertThat(copy.read()).containsEntry("slug", "").containsEntry("canSetSlug", true);
-        assertThat(copy.setSlug(Map.of("slug", "  company/about-us  ")))
+        assertThat(copy.setSlug(Map.of("slug", "  company/about-us  ")).block())
             .containsEntry("valid", true).containsEntry("staged", true);
-        copy.setTitle(Map.of("title", "关于我们"));
-        copy.update(Map.of("html", "<p>About us</p>", "css", ""));
+        copy.setTitle(Map.of("title", "关于我们")).block();
+        copy.update(Map.of("html", "<p>About us</p>", "css", "")).block();
         assertThat(copy.read()).containsEntry("slug", "company/about-us")
             .containsEntry("title", "关于我们");
-        assertThat(copy.setSlug(Map.of("slug", "company/about-us")))
+        assertThat(copy.setSlug(Map.of("slug", "company/about-us")).block())
             .containsEntry("staged", false);
         assertThat(copy.hasInvalidUpdate()).isFalse();
     }
@@ -119,12 +179,12 @@ class PageWorkingCopyTest {
     void invalidSlugCannotBeHiddenByContentOrTitleUpdates() {
         for (var slug : List.of("", "UPPER", "/about", "console/about", "a".repeat(201))) {
             var copy = copy("<p>old</p>", "");
-            assertThat(copy.setSlug(Map.of("slug", slug))).containsEntry("valid", false);
+            assertThat(copy.setSlug(Map.of("slug", slug)).block()).containsEntry("valid", false);
             assertThat(copy.slug()).isNull();
-            copy.setTitle(Map.of("title", "About"));
-            copy.update(Map.of("html", "<p>About</p>", "css", ""));
+            copy.setTitle(Map.of("title", "About")).block();
+            copy.update(Map.of("html", "<p>About</p>", "css", "")).block();
             assertThat(copy.hasInvalidUpdate()).isTrue();
-            assertThat(copy.setSlug(Map.of("slug", "about"))).containsEntry("valid", true);
+            assertThat(copy.setSlug(Map.of("slug", "about")).block()).containsEntry("valid", true);
             assertThat(copy.hasInvalidUpdate()).isFalse();
         }
     }
@@ -136,24 +196,24 @@ class PageWorkingCopyTest {
             var copy = new PageWorkingCopy(document, new ContentPolicy(),
                 Mono.just(ThemeStyleContext.unavailable()), "custom-path", published);
             assertThat(copy.read()).containsEntry("canSetSlug", false);
-            assertThat(copy.setSlug(Map.of("slug", "about"))).containsEntry("valid", false);
+            assertThat(copy.setSlug(Map.of("slug", "about")).block()).containsEntry("valid", false);
             assertThat(copy.slug()).isEqualTo("custom-path");
         }
         var legacy = new PageWorkingCopy(document, new ContentPolicy(),
             Mono.just(ThemeStyleContext.unavailable()), null, true);
-        assertThat(legacy.setSlug(Map.of("slug", "about"))).containsEntry("valid", false);
+        assertThat(legacy.setSlug(Map.of("slug", "about")).block()).containsEntry("valid", false);
         assertThat(legacy.slug()).isNull();
     }
 
     @Test
     void setTitleStagesTrimmedTitleAndSurvivesLaterContentUpdates() {
         var copy = copy("<p>old</p>", "");
-        assertThat(copy.setTitle(Map.of("title", "  新标题  ")))
+        assertThat(copy.setTitle(Map.of("title", "  新标题  ")).block())
             .containsEntry("valid", true).containsEntry("staged", true);
         assertThat(copy.document().title()).isEqualTo("新标题");
         assertThat(copy.document().html()).isEqualTo("<p>old</p>");
         assertThat(copy.hasInvalidUpdate()).isFalse();
-        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")))
+        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")).block())
             .containsEntry("valid", true);
         assertThat(copy.document().title()).isEqualTo("新标题");
         assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
@@ -170,15 +230,15 @@ class PageWorkingCopyTest {
             Map.<String, Object>of("title", "x".repeat(201)),
             Map.<String, Object>of("title", 1));
         for (var input : invalidInputs) {
-            assertThat(copy.setTitle(input)).containsEntry("valid", false)
+            assertThat(copy.setTitle(input).block()).containsEntry("valid", false)
                 .containsEntry("staged", false);
             assertThat(copy.document()).isSameAs(original);
             assertThat(copy.hasInvalidUpdate()).isTrue();
         }
-        assertThat(copy.setTitle(Map.of("title", "恢复")))
+        assertThat(copy.setTitle(Map.of("title", "恢复")).block())
             .containsEntry("valid", true).containsEntry("staged", true);
         assertThat(copy.hasInvalidUpdate()).isFalse();
-        assertThat(copy.setTitle(Map.of("title", "恢复")))
+        assertThat(copy.setTitle(Map.of("title", "恢复")).block())
             .containsEntry("valid", true).containsEntry("staged", false);
         assertThat(copy.document().title()).isEqualTo("恢复");
     }
@@ -190,7 +250,7 @@ class PageWorkingCopyTest {
             patch("html", "one", "a much longer first value"),
             patch("css", "red", "blue"),
             patch("html", "three", ""),
-            patch("html", "two", "one"))));
+            patch("html", "two", "one")))).block();
         assertThat(copy.document().html()).isEqualTo("<p>a much longer first value one </p>");
         assertThat(copy.document().css()).isEqualTo("p{color:blue}");
         assertThat(result).containsEntry("valid", true).containsEntry("staged", true)
@@ -209,7 +269,7 @@ class PageWorkingCopyTest {
         for (var input : invalidInputs) {
             var copy = copy("<p>old</p>", "");
             var original = copy.document();
-            assertThat(copy.patch(input)).containsEntry("valid", false)
+            assertThat(copy.patch(input).block()).containsEntry("valid", false)
                 .containsEntry("staged", false).containsEntry("baseHash", hash(copy));
             assertThat(copy.document()).isSameAs(original);
             assertThat(copy.hasInvalidUpdate()).isTrue();
@@ -231,7 +291,7 @@ class PageWorkingCopyTest {
         for (var patches : batches) {
             var copy = copy("<p>old</p>", "");
             var original = copy.document();
-            assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", patches)))
+            assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", patches)).block())
                 .containsEntry("valid", false);
             assertThat(copy.document()).isSameAs(original);
         }
@@ -243,13 +303,13 @@ class PageWorkingCopyTest {
             var copy = copy("<p>aaa</p>", "");
             var original = copy.document();
             assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-                List.of(patch("html", oldText, "new")))))
+                List.of(patch("html", oldText, "new")))).block())
                 .containsEntry("valid", false);
             assertThat(copy.document()).isSameAs(original);
         }
         var repeated = copy("<p>old old</p>", "");
         assertThat(repeated.patch(Map.of("baseHash", hash(repeated), "patches",
-            List.of(patch("html", "old", "new")))))
+            List.of(patch("html", "old", "new")))).block())
             .containsEntry("valid", false);
     }
 
@@ -259,13 +319,13 @@ class PageWorkingCopyTest {
             var copy = copy("<p>abc</p>", "");
             var original = copy.document();
             assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", List.of(
-                patch("html", "ab", "X"), patch("html", second, "Y")))))
+                patch("html", "ab", "X"), patch("html", second, "Y")))).block())
                 .containsEntry("valid", false);
             assertThat(copy.document()).isSameAs(original);
         }
         var adjacent = copy("<p>abc</p>", "");
         assertThat(adjacent.patch(Map.of("baseHash", hash(adjacent), "patches", List.of(
-            patch("html", "a", "X"), patch("html", "bc", "Y")))))
+            patch("html", "a", "X"), patch("html", "bc", "Y")))).block())
             .containsEntry("valid", true);
         assertThat(adjacent.document().html()).isEqualTo("<p>XY</p>");
     }
@@ -275,7 +335,7 @@ class PageWorkingCopyTest {
         var copy = copy("<p>old</p>", "");
         var original = copy.document();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", List.of(
-            patch("html", "old", "new"), patch("html", "new", "latest")))))
+            patch("html", "old", "new"), patch("html", "new", "latest")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document()).isSameAs(original);
     }
@@ -285,7 +345,7 @@ class PageWorkingCopyTest {
         var copy = copy("<p>old</p>", "p{color:red}");
         var original = copy.document();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", List.of(
-            patch("html", "old", "new"), patch("css", "red", "expression(alert(1))")))))
+            patch("html", "old", "new"), patch("css", "red", "expression(alert(1))")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document()).isSameAs(original);
         assertThat(copy.hasInvalidUpdate()).isTrue();
@@ -293,16 +353,16 @@ class PageWorkingCopyTest {
         copy.readTheme().block();
         assertThat(copy.hasInvalidUpdate()).isTrue();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("html", "old", "new")))))
+            List.of(patch("html", "old", "new")))).block())
             .containsEntry("valid", true);
         assertThat(copy.hasInvalidUpdate()).isFalse();
         var staged = copy.document();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("html", "new", "<script>bad</script>")))))
+            List.of(patch("html", "new", "<script>bad</script>")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document()).isSameAs(staged);
         assertThat(copy.hasInvalidUpdate()).isTrue();
-        assertThat(copy.update(Map.of("html", "<p>recovered</p>", "css", "p{color:red}")))
+        assertThat(copy.update(Map.of("html", "<p>recovered</p>", "css", "p{color:red}")).block())
             .containsEntry("valid", true);
         assertThat(copy.hasInvalidUpdate()).isFalse();
     }
@@ -317,15 +377,15 @@ class PageWorkingCopyTest {
                 var originalHash = hash(copy);
                 var result = usePatch
                     ? copy.patch(Map.of("baseHash", originalHash, "patches",
-                        List.of(patch("html", "<p>old</p>", html))))
-                    : copy.update(Map.of("html", html, "css", ""));
+                        List.of(patch("html", "<p>old</p>", html)))).block()
+                    : copy.update(Map.of("html", html, "css", "")).block();
                 assertThat(result).containsEntry("valid", false).containsEntry("staged", false)
                     .containsEntry("baseHash", originalHash);
                 assertThat((String) result.get("guidance"))
                     .contains("ask_user", "do not try equivalent workarounds", "not staged");
                 assertThat(copy.document()).isSameAs(original);
                 assertThat(copy.hasInvalidUpdate()).isTrue();
-                assertThat(copy.update(Map.of("html", "<button type=\"button\">All</button>", "css", "")))
+                assertThat(copy.update(Map.of("html", "<button type=\"button\">All</button>", "css", "")).block())
                     .containsEntry("valid", true).containsEntry("staged", true);
                 assertThat(copy.hasInvalidUpdate()).isFalse();
             }
@@ -336,9 +396,9 @@ class PageWorkingCopyTest {
     void successfulPatchInvalidatesOldBaseHash() {
         var copy = copy("<p>old</p>", "");
         var oldHash = hash(copy);
-        copy.patch(Map.of("baseHash", oldHash, "patches", List.of(patch("html", "old", "new"))));
+        copy.patch(Map.of("baseHash", oldHash, "patches", List.of(patch("html", "old", "new")))).block();
         assertThat(copy.patch(Map.of("baseHash", oldHash, "patches",
-            List.of(patch("html", "new", "latest")))))
+            List.of(patch("html", "new", "latest")))).block())
             .containsEntry("valid", false).containsEntry("baseHash", hash(copy));
         assertThat(copy.document().html()).isEqualTo("<p>new</p>");
     }
@@ -347,14 +407,14 @@ class PageWorkingCopyTest {
     void noOpDoesNotNormalizeLegacyDocumentAndCanClearInvalidState() {
         var document = new PageDocument(1, "visual", "legacy", Map.of(), "<p>old</p>", "", "Title", "desc");
         var copy = new PageWorkingCopy(document, new ContentPolicy());
-        copy.update(Map.of("html", "<script>bad</script>", "css", ""));
+        copy.update(Map.of("html", "<script>bad</script>", "css", "")).block();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("html", "old", "old")))))
+            List.of(patch("html", "old", "old")))).block())
             .containsEntry("valid", true).containsEntry("staged", false)
             .containsEntry("baseHash", hash(copy));
         assertThat(copy.document()).isSameAs(document);
         assertThat(copy.hasInvalidUpdate()).isFalse();
-        assertThat(copy.update(Map.of("html", document.html(), "css", document.css())))
+        assertThat(copy.update(Map.of("html", document.html(), "css", document.css())).block())
             .containsEntry("valid", true).containsEntry("staged", false);
         assertThat(copy.document()).isSameAs(document);
     }
@@ -364,7 +424,7 @@ class PageWorkingCopyTest {
         var copy = copy("<script>bad</script>", "");
         var original = copy.document();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("html", "bad", "bad")))))
+            List.of(patch("html", "bad", "bad")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document()).isSameAs(original);
         assertThat(copy.hasInvalidUpdate()).isTrue();
@@ -374,17 +434,17 @@ class PageWorkingCopyTest {
     void patchReusesCallAndByteBudgetsWithoutPartialStaging() {
         var copy = copy("<p>old</p>", "");
         for (int i = 0; i < PageWorkingCopy.MAX_CALLS; i++) {
-            copy.patch(Map.of());
+            copy.patch(Map.of()).block();
         }
         assertThatThrownBy(() -> copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("html", "old", "new")))))
+            List.of(patch("html", "old", "new")))).block())
             .isInstanceOf(IllegalStateException.class);
         assertThat(copy.exhausted()).isTrue();
         assertThat(copy.document().html()).isEqualTo("<p>old</p>");
         var bytes = copy("<p>old</p>", "");
         bytes.consume("x".repeat(PageWorkingCopy.MAX_BYTES));
         assertThatThrownBy(() -> bytes.patch(Map.of("baseHash", hash(bytes), "patches",
-            List.of(patch("html", "old", "new")))))
+            List.of(patch("html", "old", "new")))).block())
             .isInstanceOf(IllegalStateException.class);
         assertThat(bytes.exhausted()).isTrue();
         assertThat(bytes.document().html()).isEqualTo("<p>old</p>");
@@ -400,44 +460,44 @@ class PageWorkingCopyTest {
             patches.add(patch("html", "[" + i + "]", "x"));
         }
         var copy = copy(html.append("</p>").toString(), "");
-        assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", patches)))
+        assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", patches)).block())
             .containsEntry("valid", true);
         assertThat(copy.document().html()).isEqualTo("<p>" + "x".repeat(20) + "</p>");
     }
 
     @Test
-    void changedCssHonorsReadThemeSnapshotWhileTextOnlyPatchPreservesLegacyCss() {
+    void changedCssPreparesThemeWhileTextOnlyPatchPreservesLegacyCss() {
         var css = "@media (prefers-color-scheme:dark){p{color:red}}";
         var context = new ThemeStyleContext("sample", "Sample", "SUPPORTED", List.of(), List.of(), "",
             new ThemeStyleContext.ColorMode("explicit", List.of(), List.of()));
         var copy = new PageWorkingCopy(
             new PageDocument(1, "code", null, null, "<p>old</p>", css, "Title", ""),
             new ContentPolicy(), Mono.just(context));
-        copy.readTheme().block();
         var original = copy.document();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", List.of(
-            patch("html", "old", "new"), patch("css", "red", "blue")))))
+            patch("html", "old", "new"), patch("css", "red", "blue")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document()).isSameAs(original);
         assertThat(copy.hasInvalidUpdate()).isTrue();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("html", "old", "new")))))
+            List.of(patch("html", "old", "new")))).block())
             .containsEntry("valid", true).containsEntry("staged", true);
         assertThat(copy.document().css()).isEqualTo(css);
         assertThat(copy.hasInvalidUpdate()).isFalse();
-        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", css.replace("red", "blue"))))
+        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", css.replace("red", "blue"))).block())
             .containsEntry("valid", false);
         assertThat(copy.document().css()).isEqualTo(css);
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("css", css, "p{color:blue}")))))
+            List.of(patch("css", css, "p{color:blue}")))).block())
             .containsEntry("valid", true);
         assertThat(copy.hasInvalidUpdate()).isFalse();
     }
 
     @Test
-    void preparingThemeEnforcesColorModeWithoutConsumingToolBudgetOrSummaries() {
+    void editsPrepareThemeOnceWithoutChargingItsContentOrAnExtraToolCall() {
         var reads = new AtomicInteger();
-        var context = new ThemeStyleContext("sample", "Sample", "SUPPORTED", List.of(), List.of(), "",
+        var context = new ThemeStyleContext("sample", "Sample", "SUPPORTED", List.of(), List.of(),
+            "x".repeat(PageWorkingCopy.MAX_BYTES),
             new ThemeStyleContext.ColorMode("explicit", List.of(), List.of()));
         var copy = new PageWorkingCopy(
             new PageDocument(1, "code", null, null, "<p>old</p>", "p{color:red}", "Title", ""),
@@ -445,40 +505,50 @@ class PageWorkingCopyTest {
                 reads.incrementAndGet();
                 return context;
             }));
-        for (int i = 0; i <= PageWorkingCopy.MAX_CALLS; i++) {
-            assertThat(copy.prepareTheme().block()).isSameAs(context);
-        }
-        assertThat(reads).hasValue(1);
-        assertThat(copy.summaries()).isEmpty();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", List.of(
-            patch("css", "p{color:red}", "@media(prefers-color-scheme:dark){p{color:blue}}")))))
+            patch("css", "p{color:red}", "@media(prefers-color-scheme:dark){p{color:blue}}")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document().css()).isEqualTo("p{color:red}");
         for (int i = 1; i < PageWorkingCopy.MAX_CALLS; i++) {
-            copy.read();
+            assertThat(copy.update(Map.of("html", "<p>new</p>")).block())
+                .containsEntry("valid", true);
         }
+        assertThat(reads).hasValue(1);
+        assertThat(copy.summaries()).hasSize(PageWorkingCopy.MAX_CALLS)
+            .extracting(ChatApi.Tool::name).doesNotContain("get_theme_context");
         assertThat(copy.exhausted()).isFalse();
-        assertThatThrownBy(copy::read).isInstanceOf(IllegalStateException.class);
-        var byteLimited = new PageWorkingCopy(copy.document(), new ContentPolicy(), Mono.just(context));
-        byteLimited.consume("x".repeat(PageWorkingCopy.MAX_BYTES));
-        assertThat(byteLimited.prepareTheme().block()).isSameAs(context);
-        assertThat(byteLimited.exhausted()).isFalse();
-        assertThat(byteLimited.summaries()).isEmpty();
+        assertThatThrownBy(() -> copy.update(Map.of("html", "<p>late</p>")).block())
+            .isInstanceOf(IllegalStateException.class);
     }
 
-    @Test
-    void cssChangeDoesNotReadThemeImplicitly() {
+    @ParameterizedTest
+    @ValueSource(strings = {"update", "patch"})
+    void themeFailureDoesNotMutateOrPreventIndependentTitleAndPathEdits(String operation) {
         var reads = new AtomicInteger();
         var copy = new PageWorkingCopy(
             new PageDocument(1, "code", null, null, "<p>old</p>", "p{color:red}", "Title", ""),
-            new ContentPolicy(), Mono.fromSupplier(() -> {
+            new ContentPolicy(), Mono.defer(() -> {
                 reads.incrementAndGet();
-                return ThemeStyleContext.unavailable();
+                return Mono.error(new IllegalStateException("theme unavailable"));
             }));
-        assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("css", "red", "blue")))))
-            .containsEntry("valid", true);
+        copy.setTitle(Map.of("title", "Before theme failure")).block();
+        copy.setSlug(Map.of("slug", "before")).block();
         assertThat(reads).hasValue(0);
+        var writes = new AtomicInteger();
+        copy.checkpoint(() -> Mono.fromRunnable(writes::incrementAndGet));
+        var original = copy.document();
+        assertThatThrownBy(() -> edit(copy, operation).block()).hasMessage("theme unavailable");
+        assertThat(copy.document()).isSameAs(original);
+        assertThat(copy.checkpointFailed()).isFalse();
+        assertThat(writes).hasValue(0);
+        copy.setTitle(Map.of("title", "After theme failure")).block();
+        copy.setSlug(Map.of("slug", "after")).block();
+        assertThat(copy.document().title()).isEqualTo("After theme failure");
+        assertThat(copy.slug()).isEqualTo("after");
+        assertThat(writes).hasValue(2);
+        assertThatThrownBy(() -> edit(copy, operation).block()).hasMessage("theme unavailable");
+        assertThat(reads).hasValue(1);
+        assertThat(copy.calls()).isEqualTo(4);
     }
 
     @Test
@@ -494,6 +564,17 @@ class PageWorkingCopyTest {
     private static PageWorkingCopy copy(String html, String css) {
         return new PageWorkingCopy(new PageDocument(1, "code", null, null, html, css, "Title", ""),
             new ContentPolicy());
+    }
+
+    private static Mono<Map<String, Object>> edit(PageWorkingCopy copy, String operation) {
+        return switch (operation) {
+            case "update" -> copy.update(Map.of("html", "<p>new</p>"));
+            case "patch" -> copy.patch(Map.of("baseHash", hash(copy), "patches",
+                List.of(patch("html", "old", "new"))));
+            case "title" -> copy.setTitle(Map.of("title", "New title"));
+            case "slug" -> copy.setSlug(Map.of("slug", "new-path"));
+            default -> throw new IllegalArgumentException(operation);
+        };
     }
 
     private static String hash(PageWorkingCopy copy) {

@@ -120,19 +120,20 @@ class ReferenceWorkingCopyTest {
     }
 
     @Test
-    void preparesAndBindsContextThemeBeforeReferenceExecutionWithoutUsingCallBudget() {
+    void editingBindsContextThemeBeforeReferenceExecutionWithoutAnExtraToolCall() {
         var session = mock(PageReferenceTools.Session.class);
         var context = new ThemeStyleContext("theme-a", "Theme A", "SUPPORTED", List.of(), List.of(), "");
         var copy = copy(session, context);
         when(session.execute(anyString(), any())).thenReturn(Mono.just(Map.of("themeName", "theme-a")));
-        assertThat(copy.prepareTheme().block()).isSameAs(context);
+        assertThat(copy.update(Map.of("html", "<p>Edited</p>")).block()).containsEntry("valid", true);
         verify(session).bindTheme("theme-a");
-        assertThat(copy.summaries()).isEmpty();
-        for (int i = 0; i < PageWorkingCopy.MAX_CALLS; i++) {
+        assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
+            .containsExactly("update_current_page");
+        for (int i = 1; i < PageWorkingCopy.MAX_CALLS; i++) {
             copy.reference("list_theme_files", Map.of()).block();
         }
         assertThat(copy.exhausted()).isFalse();
-        verify(session, times(PageWorkingCopy.MAX_CALLS)).execute("list_theme_files", Map.of());
+        verify(session, times(PageWorkingCopy.MAX_CALLS - 1)).execute("list_theme_files", Map.of());
     }
 
     @Test
@@ -140,13 +141,20 @@ class ReferenceWorkingCopyTest {
         var session = mock(PageReferenceTools.Session.class);
         var context = new ThemeStyleContext("theme-a", "Theme A", "SUPPORTED", List.of(), List.of(), "");
         var copy = copy(session, context);
-        doThrow(new IllegalStateException("Active theme changed")).when(session).bindTheme("theme-a");
-        assertThatThrownBy(() -> copy.prepareTheme().block())
+        doThrow(new IllegalStateException("Active theme changed")).doNothing()
+            .when(session).bindTheme("theme-a");
+        assertThatThrownBy(() -> copy.update(Map.of("html", "<p>Edited</p>")).block())
             .isInstanceOf(IllegalStateException.class).hasMessageContaining("changed");
         verify(session, never()).execute(anyString(), any());
         assertThat(copy.summaries()).isEmpty();
+        assertThat(copy.document().html()).isEqualTo("<p>Original</p>");
+        copy.setTitle(Map.of("title", "Independent title")).block();
+        assertThat(copy.update(Map.of("html", "<p>Edited</p>")).block()).containsEntry("valid", true);
+        verify(session, times(2)).bindTheme("theme-a");
+        assertThat(copy.document().title()).isEqualTo("Independent title");
         var unavailableSession = mock(PageReferenceTools.Session.class);
-        copy(unavailableSession, ThemeStyleContext.unavailable()).prepareTheme().block();
+        copy(unavailableSession, ThemeStyleContext.unavailable())
+            .update(Map.of("html", "<p>Edited</p>")).block();
         verifyNoInteractions(unavailableSession);
     }
 

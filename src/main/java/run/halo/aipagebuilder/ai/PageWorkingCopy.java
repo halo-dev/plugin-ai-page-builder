@@ -76,7 +76,7 @@ public final class PageWorkingCopy {
     }
 
     /** Serialize edits and await durable storage before acknowledging a tool result. */
-    Mono<Map<String, Object>> edit(java.util.function.Supplier<Map<String, Object>> mutation) {
+    private Mono<Map<String, Object>> edit(java.util.function.Supplier<Map<String, Object>> mutation) {
         return Mono.defer(() -> {
             synchronized (this) {
                 if (closed || checkpointFailed) return Mono.error(
@@ -281,7 +281,7 @@ public final class PageWorkingCopy {
         this.canSetSlug = this.slug == null && !published;
     }
 
-    public Mono<ThemeStyleContext> prepareTheme() {
+    private Mono<ThemeStyleContext> prepareTheme() {
         return themeContext.doOnNext(context -> {
             synchronized (this) {
                 if (references != null && context.themeName() != null) {
@@ -360,7 +360,12 @@ public final class PageWorkingCopy {
         return result;
     }
 
-    public synchronized Map<String, Object> update(Map<String, Object> input) {
+    public Mono<Map<String, Object>> update(Map<String, Object> input) {
+        // Prepare outside the edit queue: a theme failure must not block title or path edits.
+        return prepareTheme().then(edit(() -> applyUpdate(input)));
+    }
+
+    private Map<String, Object> applyUpdate(Map<String, Object> input) {
         call();
         consume(Json.toJson(input));
         if (input == null || input.isEmpty()
@@ -373,7 +378,11 @@ public final class PageWorkingCopy {
             (String) input.getOrDefault("js", document.js()));
     }
 
-    public synchronized Map<String, Object> patch(Map<String, Object> input) {
+    public Mono<Map<String, Object>> patch(Map<String, Object> input) {
+        return prepareTheme().then(edit(() -> applyPatch(input)));
+    }
+
+    private Map<String, Object> applyPatch(Map<String, Object> input) {
         call();
         consume(Json.toJson(input));
         var tool = "patch_current_page";
@@ -427,7 +436,11 @@ public final class PageWorkingCopy {
         return stage(tool, html.toString(), css.toString(), js.toString());
     }
 
-    public synchronized Map<String, Object> setSlug(Map<String, Object> input) {
+    public Mono<Map<String, Object>> setSlug(Map<String, Object> input) {
+        return edit(() -> applySlug(input));
+    }
+
+    private Map<String, Object> applySlug(Map<String, Object> input) {
         call();
         consume(Json.toJson(input));
         var tool = "set_page_slug";
@@ -453,7 +466,11 @@ public final class PageWorkingCopy {
 
     public synchronized String slug() { return slug; }
 
-    public synchronized Map<String, Object> setTitle(Map<String, Object> input) {
+    public Mono<Map<String, Object>> setTitle(Map<String, Object> input) {
+        return edit(() -> applyTitle(input));
+    }
+
+    private Map<String, Object> applyTitle(Map<String, Object> input) {
         call();
         consume(Json.toJson(input));
         var tool = "update_page_title";

@@ -18,18 +18,18 @@ class ScriptWorkingCopyTest {
         assertThat(before.get("baseHash")).isNotEqualTo(DocumentHash.of(copy.document().html(), ""));
         var result = copy.patch(Map.of("baseHash", before.get("baseHash"), "patches", List.of(
             Map.of("field", "html", "oldText", "Next", "newText", "Previous"),
-            Map.of("field", "js", "oldText", "index = 0", "newText", "index = 1"))));
+            Map.of("field", "js", "oldText", "index = 0", "newText", "index = 1")))).block();
         assertThat(result).containsEntry("valid", true);
         assertThat(copy.document().js()).isEqualTo("let index = 1;");
         assertThat(copy.document().schemaVersion()).isEqualTo(2);
         var hash = result.get("baseHash");
         assertThat(copy.patch(Map.of("baseHash", hash, "patches", List.of(
             Map.of("field", "html", "oldText", "Previous", "newText", "Changed"),
-            Map.of("field", "js", "oldText", "index = 1", "newText", "bad\u0000")))))
+            Map.of("field", "js", "oldText", "index = 1", "newText", "bad\u0000")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document().html()).contains("Previous");
         assertThat(copy.document().js()).isEqualTo("let index = 1;");
-        assertThat(copy.update(Map.of("html", "<p>New</p>", "css", ""))).containsEntry("valid", true);
+        assertThat(copy.update(Map.of("html", "<p>New</p>", "css", "")).block()).containsEntry("valid", true);
         assertThat(copy.document().js()).isEqualTo("let index = 1;");
     }
 

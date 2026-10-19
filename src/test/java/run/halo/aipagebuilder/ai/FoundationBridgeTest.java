@@ -607,7 +607,7 @@ class FoundationBridgeTest {
             Flux<TextStreamPart> source;
             if (attempts.size() == 1) {
                 assertThat(prompt).contains("old checkpoint");
-                source = copy.edit(() -> copy.update(java.util.Map.of("html", "<p>new checkpoint</p>")))
+                source = copy.update(java.util.Map.of("html", "<p>new checkpoint</p>"))
                     .thenMany(Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
             } else {
                 assertThat(prompt).contains("new checkpoint").doesNotContain("old checkpoint");
