@@ -45,7 +45,7 @@ class PageImportReviewServiceTest {
     }
 
     @Test
-    void safeReviewIsStoredAndAuthorizesImport() throws Exception {
+    void safeReviewIsStored() throws Exception {
         var bytes = archive("<p>Hello</p>", "p {color: red}", "console.log('ok')");
         when(gateway.review(anyString(), anyString()))
             .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
@@ -57,7 +57,7 @@ class PageImportReviewServiceTest {
         assertThat(report.title()).isEqualTo("Test");
         assertThat(report.themeLayout()).isFalse();
         assertThat(report.expiresAt()).isAfter(Instant.now());
-        assertThat(service.authorize(report.reviewId(), bytes, "admin", false).block()).isNull();
+        assertThat(store.get(report.reviewId()).review()).isEqualTo(report);
     }
 
     @Test
@@ -93,7 +93,7 @@ class PageImportReviewServiceTest {
     }
 
     @Test
-    void suspiciousReviewRequiresConfirmation() throws Exception {
+    void suspiciousReviewPreservesFindings() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "eval('code')");
         when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
             AiReview.Verdict.SUSPICIOUS, finding(AiReview.Severity.MEDIUM,
@@ -103,15 +103,10 @@ class PageImportReviewServiceTest {
 
         assertThat(report.verdict()).isEqualTo("suspicious");
         assertThat(report.findings()).hasSize(1);
-        assertThatThrownBy(() -> service.authorize(report.reviewId(), bytes, "admin", false)
-            .block()).isInstanceOfSatisfying(ResponseStatusException.class,
-                error -> assertThat(error.getStatusCode())
-                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
-        assertThat(service.authorize(report.reviewId(), bytes, "admin", true).block()).isNull();
     }
 
     @Test
-    void maliciousReviewBlocksImportEvenWhenConfirmed() throws Exception {
+    void maliciousReviewRetainsArchiveDenyRecord() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "document.cookie");
         when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
             AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
@@ -120,10 +115,7 @@ class PageImportReviewServiceTest {
         var report = service.review(bytes, "admin").block();
 
         assertThat(report.verdict()).isEqualTo("malicious");
-        assertThatThrownBy(() -> service.authorize(report.reviewId(), bytes, "admin", true)
-            .block()).isInstanceOfSatisfying(ResponseStatusException.class,
-                error -> assertThat(error.getStatusCode())
-                    .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
+        assertThat(store.getMalicious(sha256(bytes))).isEqualTo(report.expiresAt());
     }
 
     @Test
@@ -258,42 +250,6 @@ class PageImportReviewServiceTest {
     }
 
     @Test
-    void maliciousReviewBlocksASafeReviewForTheSameArchive() throws Exception {
-        var bytes = archive("<p>Hello</p>", "", "document.cookie");
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
-                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
-        service.review(bytes, "admin").block();
-
-        var safe = new PageApi.ImportReview("safe-review", "safe", "summary", List.of(),
-            "Test", "", false, Instant.now().plusSeconds(600));
-        store.put("admin", sha256(bytes), safe);
-
-        assertThatThrownBy(() -> service.authorize("safe-review", bytes, "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
-    }
-
-    @Test
-    void laterMaliciousVerdictInvalidatesAnEarlierSafeReview() throws Exception {
-        var bytes = archive("<p>Hello</p>", "", "document.cookie");
-        when(gateway.review(anyString(), anyString()))
-            .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
-        var safe = service.review(bytes, "admin").block();
-        assertThat(service.authorize(safe.reviewId(), bytes, "admin", false).block()).isNull();
-
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
-                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
-        var malicious = service.review(bytes, "admin").block();
-        assertThat(malicious.verdict()).isEqualTo("malicious");
-
-        assertThatThrownBy(() -> service.authorize(safe.reviewId(), bytes, "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
-    }
-
-    @Test
     void findingLimitDoesNotHideDangerousCategoriesFromTheVerdict() throws Exception {
         var findings = new ArrayList<AiReview.Finding>();
         for (var index = 0; index < 50; index++) {
@@ -314,11 +270,8 @@ class PageImportReviewServiceTest {
     }
 
     @Test
-    void authorizeRejectsWhileAReviewOfTheSameArchiveIsInFlight() throws Exception {
+    void cancellingPendingReviewClearsInFlightState() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "");
-        var safe = new PageApi.ImportReview("safe-review", "safe", "summary", List.of(),
-            "Test", "", false, Instant.now().plusSeconds(600));
-        store.put("admin", sha256(bytes), safe);
         var started = new CountDownLatch(1);
         when(gateway.review(anyString(), anyString())).thenAnswer(invocation -> {
             started.countDown();
@@ -326,13 +279,12 @@ class PageImportReviewServiceTest {
         });
 
         var review = service.review(bytes, "admin").subscribe();
-        assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
-
-        assertThatThrownBy(() -> service.authorize("safe-review", bytes, "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
-
-        review.dispose();
+        try {
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(store.isReviewing(sha256(bytes))).isTrue();
+        } finally {
+            review.dispose();
+        }
         assertThat(store.isReviewing(sha256(bytes))).isFalse();
     }
 
@@ -425,46 +377,6 @@ class PageImportReviewServiceTest {
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
             .isInstanceOfSatisfying(ResponseStatusException.class, error ->
                 assertThat(error.getStatusCode()).isEqualTo(expected));
-    }
-
-    @Test
-    void authorizeRejectsMissingActorMismatchAndHashMismatch() throws Exception {
-        var bytes = archive("<p>Hello</p>", "", "");
-        when(gateway.review(anyString(), anyString()))
-            .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
-        var report = service.review(bytes, "admin").block();
-
-        assertThatThrownBy(() -> service.authorize(null, bytes, "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-        assertThatThrownBy(() -> service.authorize("missing", bytes, "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-        assertThatThrownBy(() -> service.authorize(report.reviewId(), bytes, "other", false)
-            .block()).isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-        assertThatThrownBy(() -> service.authorize(report.reviewId(),
-            archive("<p>Changed</p>", "", ""), "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-    }
-
-    @Test
-    void authorizeRejectsExpiredAndUnknownReviews() throws Exception {
-        var bytes = archive("<p>Hello</p>", "", "");
-        var expired = new PageApi.ImportReview("expired", "safe", "summary", List.of(),
-            "Test", "", false, Instant.now().minusSeconds(1));
-        store.put("admin", sha256(bytes), expired);
-        var unknown = new PageApi.ImportReview("unknown", "unexpected", "summary", List.of(),
-            "Test", "", false, Instant.now().plusSeconds(600));
-        store.put("admin", sha256(bytes), unknown);
-
-        assertThatThrownBy(() -> service.authorize("expired", bytes, "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-        assertThatThrownBy(() -> service.authorize("unknown", bytes, "admin", false).block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
 
     private static byte[] archive(String html, String css, String js) throws Exception {

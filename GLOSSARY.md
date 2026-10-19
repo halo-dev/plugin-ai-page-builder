@@ -22,3 +22,8 @@ shown to visitors.
 **Conversation Turn**:
 A user request together with the assistant's responses, tool activity, clarification questions,
 and follow-up instructions during the resulting page-generation run.
+
+**Import Review**:
+A time-limited assessment of a page archive, tied to the archive's exact contents and the
+reviewing user. Its verdict determines whether import is allowed, requires risk confirmation,
+or is blocked.

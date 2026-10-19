@@ -103,8 +103,7 @@ public class PageEndpoint implements CustomEndpoint {
                     var confirmed = Boolean.parseBoolean(
                         request.queryParam("confirmed").orElse("false"));
                     return archiveBody(request).flatMap(bytes -> actor().flatMap(actor ->
-                        reviewService.authorize(reviewId, bytes, actor, confirmed)
-                            .then(Mono.defer(() -> json(service.importPage(bytes, actor))))));
+                        json(service.importPage(reviewId, bytes, actor, confirmed))));
                 },
                 builder -> operation(builder, "importPage", PageDetail.class)
                     .parameter(parameterBuilder().name("reviewId").in(ParameterIn.QUERY)

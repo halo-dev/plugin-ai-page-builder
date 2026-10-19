@@ -49,12 +49,15 @@ import run.halo.aipagebuilder.page.PageApi.SavePageRequest;
 public class PageService {
     private final ReactiveExtensionClient client;
     private final ContentPolicy contentPolicy;
+    private final PageImportReviewService importReviews;
     private final Set<String> slugWrites = ConcurrentHashMap.newKeySet();
     private final Map<String, Object> pageWrites = new ConcurrentHashMap<>();
 
-    public PageService(ReactiveExtensionClient client, ContentPolicy contentPolicy) {
+    public PageService(ReactiveExtensionClient client, ContentPolicy contentPolicy,
+        PageImportReviewService importReviews) {
         this.client = client;
         this.contentPolicy = contentPolicy;
+        this.importReviews = importReviews;
     }
 
     public Mono<PageList> list(int page, int size, String keyword, String status, String sort) {
@@ -94,10 +97,11 @@ public class PageService {
             request.themeLayout(), actor);
     }
 
-    /** Low-level import. Callers must complete the AI review and authorization first. */
-    public Mono<PageDetail> importPage(byte[] archive, String actor) {
-        return Mono.fromCallable(() -> PageArchive.read(archive))
-            .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+    public Mono<PageDetail> importPage(String reviewId, byte[] archive, String actor,
+        boolean confirmed) {
+        return importReviews.authorize(reviewId, archive, actor, confirmed)
+            .then(Mono.fromCallable(() -> PageArchive.read(archive))
+                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic()))
             .flatMap(imported -> createDocument(null, imported.document(),
                 imported.themeLayout(), actor));
     }

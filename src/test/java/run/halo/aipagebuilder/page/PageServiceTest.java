@@ -10,10 +10,15 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static run.halo.app.extension.index.query.Queries.equal;
 
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.dao.DuplicateKeyException;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +37,9 @@ import run.halo.app.extension.PageRequest;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.extension.router.selector.FieldSelector;
 import run.halo.aipagebuilder.Json;
+import run.halo.aipagebuilder.ai.AiEndpoint;
+import run.halo.aipagebuilder.ai.AiGateway;
+import run.halo.aipagebuilder.ai.AiReview;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.model.ThemePage;
@@ -45,7 +53,12 @@ class PageServiceTest {
     private final ContentPolicy policy = mock(ContentPolicy.class);
     private final Map<String, ThemePage> pages = new HashMap<>();
     private final Map<String, ThemePageRevision> revisions = new HashMap<>();
-    private final PageService service = new PageService(client, policy);
+    private final AiGateway gateway = mock(AiGateway.class);
+    private final ImportReviewStore reviewStore = new ImportReviewStore();
+    private final PageImportReviewService importReviews =
+        new PageImportReviewService(gateway, new ContentPolicy(), reviewStore);
+    private final PageService service = new PageService(client, policy, importReviews);
+    private final PageService importer = new PageService(client, new ContentPolicy(), importReviews);
     private boolean failUpdate;
 
     @BeforeEach
@@ -218,12 +231,15 @@ class PageServiceTest {
 
     @Test
     void importsExportAsNewUnpublishedPageWithNoOriginalPathOrHistory() {
-        var importer = new PageService(client, new ContentPolicy());
         var document = new PageDocument(2, "code", null, null, "<p>共享</p>", "p {color:red}",
             "共享页面", "描述", "console.log('shared');");
         var archive = PageExport.zip(PageExportTest.detail(document, false));
-        var first = importer.importPage(archive, "recipient").block();
-        var second = importer.importPage(archive, "recipient").block();
+        var review = reviewImport(archive, AiReview.Verdict.SAFE);
+        var pending = importer.importPage(review.reviewId(), archive, "recipient", false);
+        assertThat(pages).isEmpty();
+        assertThat(revisions).isEmpty();
+        var first = pending.block();
+        var second = importer.importPage(review.reviewId(), archive, "recipient", false).block();
         assertThat(first.document()).isEqualTo(document);
         assertThat(first.page().themeLayout()).isFalse();
         assertThat(first.page().slug()).isNull();
@@ -238,11 +254,11 @@ class PageServiceTest {
 
     @Test
     void invalidImportedContentDoesNotCreatePageOrRevision() throws Exception {
-        var importer = new PageService(client, new ContentPolicy());
         var files = PageArchiveTest.files();
         files.put("page.html", "<script>alert(1)</script>");
         var bytes = PageArchiveTest.zip(files);
-        assertThatThrownBy(() -> importer.importPage(bytes, "recipient").block())
+        storeReview("review", "safe", bytes, Instant.now().plusSeconds(600));
+        assertThatThrownBy(() -> importer.importPage("review", bytes, "recipient", false).block())
             .isInstanceOf(ResponseStatusException.class);
         assertThat(pages).isEmpty();
         assertThat(revisions).isEmpty();
@@ -252,7 +268,9 @@ class PageServiceTest {
     void uncertainImportedPageCreationRetainsRevisionForReconciliation() throws Exception {
         when(client.create(any(ThemePage.class))).thenReturn(Mono.error(new IllegalStateException("failed")));
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
-        assertThatThrownBy(() -> service.importPage(bytes, "recipient").block())
+        var review = reviewImport(bytes, AiReview.Verdict.SAFE);
+        assertThatThrownBy(() -> importer.importPage(review.reviewId(), bytes, "recipient", false)
+            .block())
             .isInstanceOf(IllegalStateException.class);
         assertThat(pages).isEmpty();
         assertThat(revisions).hasSize(1);
@@ -262,10 +280,107 @@ class PageServiceTest {
     void rejectedImportedPageCreationCleansUpInitialRevision() throws Exception {
         when(client.create(any(ThemePage.class))).thenReturn(Mono.error(new OptimisticLockingFailureException("rejected")));
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
-        assertThatThrownBy(() -> service.importPage(bytes, "recipient").block())
+        var review = reviewImport(bytes, AiReview.Verdict.SAFE);
+        assertThatThrownBy(() -> importer.importPage(review.reviewId(), bytes, "recipient", false)
+            .block())
             .isInstanceOf(ResponseStatusException.class);
         assertThat(pages).isEmpty();
         assertThat(revisions).isEmpty();
+    }
+
+    @Test
+    void importRejectsMissingActorMismatchAndHashMismatchWithoutWrites() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var review = reviewImport(bytes, AiReview.Verdict.SAFE);
+        assertImportRejected(null, bytes, "recipient", false, HttpStatus.BAD_REQUEST);
+        assertImportRejected("", bytes, "recipient", false, HttpStatus.BAD_REQUEST);
+        assertImportRejected("  ", bytes, "recipient", false, HttpStatus.BAD_REQUEST);
+        assertImportRejected("missing", bytes, "recipient", false, HttpStatus.BAD_REQUEST);
+        assertImportRejected(review.reviewId(), bytes, "other", false, HttpStatus.BAD_REQUEST);
+        var changed = PageArchiveTest.files();
+        changed.put("page.html", "<p>Changed</p>");
+        assertImportRejected(review.reviewId(), PageArchiveTest.zip(changed), "recipient", false,
+            HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void importRejectsExpiredAndUnknownReviewsWithoutWrites() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        storeReview("expired", "safe", bytes, Instant.now().minusSeconds(1));
+        storeReview("unknown", "unexpected", bytes, Instant.now().plusSeconds(600));
+        assertImportRejected("expired", bytes, "recipient", false, HttpStatus.BAD_REQUEST);
+        assertImportRejected("unknown", bytes, "recipient", false, HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    void suspiciousImportRequiresConfirmationBeforeCreatingDraft() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var review = reviewImport(bytes, AiReview.Verdict.SUSPICIOUS);
+        assertImportRejected(review.reviewId(), bytes, "recipient", false,
+            HttpStatus.UNPROCESSABLE_CONTENT);
+        var imported = importer.importPage(review.reviewId(), bytes, "recipient", true).block();
+        assertThat(imported.page().publishedRevision()).isNull();
+        assertThat(pages).containsOnlyKeys(imported.page().name());
+        assertThat(revisions).containsOnlyKeys(imported.page().draftRevision());
+    }
+
+    @Test
+    void maliciousImportRejectsConfirmationAndEarlierOrLaterSafeReviews() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var safe = reviewImport(bytes, AiReview.Verdict.SAFE);
+        var malicious = reviewImport(bytes, AiReview.Verdict.MALICIOUS);
+        assertImportRejected(malicious.reviewId(), bytes, "recipient", true,
+            HttpStatus.UNPROCESSABLE_CONTENT);
+        assertImportRejected(safe.reviewId(), bytes, "recipient", false,
+            HttpStatus.UNPROCESSABLE_CONTENT);
+        storeReview("later-safe", "safe", bytes, Instant.now().plusSeconds(600));
+        assertImportRejected("later-safe", bytes, "recipient", true,
+            HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void importRejectsPendingReviewAndAllowsRetryAfterCancellation() throws Exception {
+        var bytes = PageArchiveTest.zip(PageArchiveTest.files());
+        var safe = reviewImport(bytes, AiReview.Verdict.SAFE);
+        var started = new CountDownLatch(1);
+        when(gateway.review(anyString(), anyString())).thenAnswer(invocation -> {
+            started.countDown();
+            return Mono.<AiReview>never();
+        });
+        var pending = importReviews.review(bytes, "recipient").subscribe();
+        try {
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            assertImportRejected(safe.reviewId(), bytes, "recipient", false, HttpStatus.CONFLICT);
+        } finally {
+            pending.dispose();
+        }
+        var imported = importer.importPage(safe.reviewId(), bytes, "recipient", false).block();
+        assertThat(pages).containsOnlyKeys(imported.page().name());
+        assertThat(revisions).containsOnlyKeys(imported.page().draftRevision());
+    }
+
+    private PageApi.ImportReview reviewImport(byte[] bytes, AiReview.Verdict verdict) {
+        when(gateway.status()).thenReturn(Mono.just(new AiEndpoint.AiStatus(true, "ok")));
+        when(gateway.review(anyString(), anyString()))
+            .thenReturn(Mono.just(new AiReview(verdict, "summary", List.of())));
+        return importReviews.review(bytes, "recipient").block();
+    }
+
+    private void storeReview(String id, String verdict, byte[] bytes, Instant expiresAt)
+        throws Exception {
+        var hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        reviewStore.put("recipient", hash, new PageApi.ImportReview(id, verdict, "summary", List.of(),
+            "Test", "", false, expiresAt));
+    }
+
+    private void assertImportRejected(String id, byte[] bytes, String actor, boolean confirmed,
+        HttpStatus status) {
+        assertThatThrownBy(() -> importer.importPage(id, bytes, actor, confirmed).block())
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                error -> assertThat(error.getStatusCode()).isEqualTo(status));
+        assertThat(pages).isEmpty();
+        assertThat(revisions).isEmpty();
+        org.mockito.Mockito.verify(client, org.mockito.Mockito.never()).create(any());
     }
 
     @Test

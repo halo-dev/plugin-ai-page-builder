@@ -34,6 +34,7 @@ import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageChatSession;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PageApi;
+import run.halo.aipagebuilder.page.PageImportReviewService;
 import run.halo.aipagebuilder.page.PageService;
 
 class PageChatServiceTest {
@@ -164,7 +165,7 @@ class PageChatServiceTest {
         when(client.fetch(run.halo.aipagebuilder.model.ThemePage.class, "page"))
             .thenReturn(Mono.just(page));
         // Exercise the production page lock rather than the usual pass-through fixture.
-        var coordinatedPages = new PageService(client, policy);
+        var coordinatedPages = new PageService(client, policy, mock(PageImportReviewService.class));
         doAnswer(i -> coordinatedPages.withLivePage(i.getArgument(0), i.getArgument(1)))
             .when(pages).withLivePage(anyString(), any());
         doAnswer(i -> coordinatedPages.reserveRun(i.getArgument(0), i.getArgument(1), i.getArgument(2)))

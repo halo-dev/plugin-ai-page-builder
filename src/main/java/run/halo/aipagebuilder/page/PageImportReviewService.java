@@ -137,7 +137,7 @@ public class PageImportReviewService {
                 (System.nanoTime() - start) / 1_000_000));
     }
 
-    public Mono<Void> authorize(String reviewId, byte[] archive, String actor, boolean confirmed) {
+    Mono<Void> authorize(String reviewId, byte[] archive, String actor, boolean confirmed) {
         return Mono.fromRunnable(() -> {
             if (reviewId == null || reviewId.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,

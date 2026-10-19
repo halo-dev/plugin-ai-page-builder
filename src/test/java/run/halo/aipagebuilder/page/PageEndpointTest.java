@@ -155,12 +155,11 @@ class PageEndpointTest {
     void importsBinaryUploadWithAuthenticatedActor() throws Exception {
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
         var document = PageArchive.read(bytes).document();
-        when(reviewService.authorize(eq("review-1"), any(byte[].class), eq("admin"), eq(false)))
-            .thenReturn(Mono.empty());
-        when(service.importPage(any(byte[].class), eq("admin"))).thenReturn(Mono.just(detail(document)));
+        when(service.importPage(eq("review-1"), any(byte[].class), eq("admin"), eq(false)))
+            .thenReturn(Mono.just(detail(document)));
         assertThat(asAdmin(endpoint, importRequest(bytes)).block().statusCode()).isEqualTo(HttpStatus.OK);
-        verify(reviewService).authorize(eq("review-1"), eq(bytes), eq("admin"), eq(false));
-        verify(service).importPage(eq(bytes), eq("admin"));
+        verify(service).importPage(eq("review-1"), eq(bytes), eq("admin"), eq(false));
+        verifyNoInteractions(reviewService);
         verifyNoMoreInteractions(service);
     }
 
@@ -177,25 +176,25 @@ class PageEndpointTest {
     void confirmedSuspiciousReviewIsPassedToImport() throws Exception {
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
         var document = PageArchive.read(bytes).document();
-        when(reviewService.authorize(eq("review-1"), any(byte[].class), eq("admin"), eq(true)))
-            .thenReturn(Mono.empty());
-        when(service.importPage(any(byte[].class), eq("admin"))).thenReturn(Mono.just(detail(document)));
+        when(service.importPage(eq("review-1"), any(byte[].class), eq("admin"), eq(true)))
+            .thenReturn(Mono.just(detail(document)));
         assertThat(asAdmin(endpoint, importRequest(bytes, "reviewId=review-1&confirmed=true"))
             .block().statusCode()).isEqualTo(HttpStatus.OK);
-        verify(reviewService).authorize(eq("review-1"), eq(bytes), eq("admin"), eq(true));
-        verify(service).importPage(eq(bytes), eq("admin"));
+        verify(service).importPage(eq("review-1"), eq(bytes), eq("admin"), eq(true));
+        verifyNoInteractions(reviewService);
     }
 
     @Test
-    void rejectedReviewDoesNotImport() throws Exception {
+    void importRejectionPreservesStatus() throws Exception {
         var bytes = PageArchiveTest.zip(PageArchiveTest.files());
-        when(reviewService.authorize(eq("review-1"), any(byte[].class), eq("admin"), eq(false)))
+        when(service.importPage(eq("review-1"), any(byte[].class), eq("admin"), eq(false)))
             .thenReturn(Mono.error(new ResponseStatusException(
                 HttpStatus.UNPROCESSABLE_CONTENT, "blocked")));
         var result = asAdmin(endpoint, importRequest(bytes));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
-        verify(service, org.mockito.Mockito.never()).importPage(any(byte[].class), any());
+        verify(service).importPage(eq("review-1"), eq(bytes), eq("admin"), eq(false));
+        verifyNoInteractions(reviewService);
     }
 
     @ParameterizedTest
