@@ -11,6 +11,7 @@ import IconClose from '~icons/mingcute/close-line'
 import IconSpinner from '~icons/mingcute/loading-line'
 import IconChevron from '~icons/mingcute/right-line'
 import type { PageDetail, PageChatQuestion } from '../api/generated'
+import { pageAdjustmentPresets, promptPresetGroups } from '../data/promptPresets'
 import { usePageChat } from '../composables/usePageChat'
 import ChatComposer from './chat/ChatComposer.vue'
 import ChatMessageParts, { questionSlotCount } from './chat/ChatMessageParts.vue'
@@ -163,13 +164,20 @@ watch([running, loading], ([value, fetching]) => emit('running', value || fetchi
 watch(
   messages,
   async () => {
+    const hadMessages = !!messages.value?.length
     const nearBottom =
       !feed.value || feed.value.scrollHeight - feed.value.scrollTop - feed.value.clientHeight < 100
     await nextTick()
+    if (!feed.value) return
+    // The empty state can be taller than the panel (the preset catalog), so a
+    // fresh session must start at the top instead of inheriting the old scroll.
+    if (!hadMessages) {
+      feed.value.scrollTop = 0
+      return
+    }
     // The question card positions its first question itself; keeping the feed at
     // the bottom here would push that question back above the fold.
-    if (nearBottom && feed.value && !waitingForUser.value)
-      feed.value.scrollTop = feed.value.scrollHeight
+    if (nearBottom && !waitingForUser.value) feed.value.scrollTop = feed.value.scrollHeight
   },
   { deep: true },
 )
@@ -235,11 +243,19 @@ async function retry() {
     await send(lastPrompt.value, true)
   }
 }
-const suggestions = [
-  '参考站点介绍和已有关于页，制作个人介绍页；缺少必要信息时先问我',
-  '从站内文章整理一个专题导读页，保留真实链接，先确认专题',
-  '使用已有附件和项目资料制作作品展示页，沿用当前主题风格',
-]
+const blankPage = computed(() => {
+  const { html, css, js } = props.document
+  return !html?.trim() && !css?.trim() && !js?.trim()
+})
+const suggestionGroups = computed(() =>
+  blankPage.value ? promptPresetGroups : [{ label: '常见调整', presets: pageAdjustmentPresets }],
+)
+const activePresetGroup = shallowRef(0)
+const activePresets = computed(
+  () =>
+    (suggestionGroups.value[activePresetGroup.value] || suggestionGroups.value[0])?.presets || [],
+)
+watch(blankPage, () => (activePresetGroup.value = 0))
 </script>
 
 <template>
@@ -347,26 +363,50 @@ const suggestions = [
       <VLoading v-if="loading" />
       <div
         v-else-if="!visibleMessages.length"
-        class="flex h-full flex-col items-center justify-center gap-3 text-center"
+        class="flex min-h-full flex-col items-center justify-center gap-3 px-1 py-6 text-center"
       >
         <span class="grid h-11 w-11 place-items-center rounded-2xl bg-gray-900 text-white">
           <IconSparkles class="text-xl" />
         </span>
-        <h2 class="text-base font-semibold">从一个想法开始</h2>
-        <p class="max-w-64 text-xs leading-6 text-gray-500">
-          描述想要的页面，或告诉助手哪里需要调整。每次完成的修改都会保存为草稿，也可以直接在右侧画布中编辑。
+        <h2 class="text-base font-semibold">{{ blankPage ? '从一个想法开始' : '想调整哪里？' }}</h2>
+        <p class="max-w-64 text-xs leading-5 text-gray-500">
+          {{
+            blankPage
+              ? '描述想要的页面，或从下面的页面类型开始。生成内容会先保存为草稿，也可以直接在右侧画布中编辑。'
+              : '告诉助手需要修改的地方，或从下面的常见调整开始。每次修改都会先保存为草稿。'
+          }}
         </p>
-        <div class="mt-1 flex flex-col items-stretch gap-1.5">
-          <button
-            v-for="item in suggestions"
-            :key="item"
-            type="button"
-            class="rounded-full border border-gray-200 px-3 py-1.5 text-xs text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900"
-            :disabled="disabled || !available"
-            @click="prompt = item"
-          >
-            {{ item }}
-          </button>
+        <div class="mt-1 w-full">
+          <div v-if="suggestionGroups.length > 1" class="mb-2 flex flex-wrap justify-center gap-1">
+            <button
+              v-for="(group, index) in suggestionGroups"
+              :key="group.label"
+              type="button"
+              class="rounded-full px-2.5 py-1 text-[11px] transition-colors"
+              :class="
+                index === activePresetGroup
+                  ? 'bg-gray-900 text-white'
+                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+              "
+              :aria-pressed="index === activePresetGroup"
+              @click="activePresetGroup = index"
+            >
+              {{ group.label }}
+            </button>
+          </div>
+          <p v-else class="mb-1.5 text-[11px] text-gray-400">{{ suggestionGroups[0]?.label }}</p>
+          <div class="flex flex-wrap justify-center gap-1.5">
+            <button
+              v-for="preset in activePresets"
+              :key="preset.label"
+              type="button"
+              class="rounded-full border border-gray-200 px-2.5 py-1 text-xs text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+              :disabled="disabled || !available"
+              @click="prompt = preset.prompt"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
       </div>
       <article v-for="message in visibleMessages" :key="message.id" class="mb-6 text-[13px]">
