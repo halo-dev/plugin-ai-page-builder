@@ -28,7 +28,7 @@ public class PagePreviewRoutes {
                         && entry.revision().equals(detail.page().draftRevision()))
                     .flatMap(detail -> preview.token(request, entry.name(),
                         detail.page().slug() == null ? entry.name() : detail.page().slug(),
-                        detail.page().themeLayout(), detail.document()))
+                        detail.page().themeLayout(), detail.document(), detail.page().title(), detail.page().description()))
                     .switchIfEmpty(ServerResponse.notFound().build())
                     .onErrorResume(ResponseStatusException.class, error ->
                         error.getStatusCode().value() == 404 ? ServerResponse.notFound().build()

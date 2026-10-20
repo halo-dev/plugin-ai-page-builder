@@ -55,7 +55,7 @@ class PageMcpToolProviderTest {
     @BeforeEach
     void setup() throws Exception {
         current = detail(new PageDocument(1, "visual", "editor", Map.of("components", List.of()),
-            "<h1>Before</h1>", "h1 {color: red}", "Title", "Description"));
+            "<h1>Before</h1>", "h1 {color: red}"));
         when(pages.get("page")).thenReturn(Mono.just(current));
         when(pages.save(eq("page"), any(), eq("key-owner")))
             .thenAnswer(call -> Mono.just(detail(call.<PageApi.SavePageRequest>getArgument(1)
@@ -65,9 +65,9 @@ class PageMcpToolProviderTest {
     }
 
     @Test
-    void declaresTwelveStrictSchemasAndPermissions() {
+    void declaresThirteenStrictSchemasAndPermissions() {
         var tools = provider.tools().collectList().block();
-        assertThat(tools).hasSize(12);
+        assertThat(tools).hasSize(13);
         assertThat(tools).extracting(McpToolDefinition::name).doesNotHaveDuplicates();
         for (var tool : tools) {
             assertThat(tool.inputSchema()).containsEntry("additionalProperties", false)
@@ -111,7 +111,7 @@ class PageMcpToolProviderTest {
 
     @Test
     void outputsAllowOmittedNullsAndEmptyPagesWithoutLeakingEditorData() {
-        var document = new PageDocument(1, "code", null, null, "", "", "Title", null);
+        var document = new PageDocument(1, "code", null, null, "", "");
         var page = new PageApi.PageSummary("page", null, "Title", null, 4L, true, "draft", null,
             Instant.now(), true);
         when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
@@ -122,7 +122,7 @@ class PageMcpToolProviderTest {
         assertThat(read).doesNotContainKeys("slug", "description", "publishedRevision",
             "publicPath",
             "publicUrl");
-        assertThat(((Map<?, ?>) read.get("document")).get("description")).isEqualTo("");
+        assertThat(((Map<?, ?>) read.get("document")).containsKey("description")).isFalse();
         assertThat(call("create_page", Map.of("title", "Title", "slug", "new")).error()).isFalse();
         when(pages.list(1, 20, null, null, null)).thenReturn(Mono.just(
             new PageApi.PageList(List.of(page, current.page()), 2, 1, 20)));
@@ -131,10 +131,9 @@ class PageMcpToolProviderTest {
             new PageApi.PageList(List.of(), 2, 2, 20)));
         assertThat(call("list_pages", Map.of("page", 2)).error()).isFalse();
         when(pages.revisions("page", 1, 20)).thenReturn(Mono.just(new PageService.RevisionList(
-            List.of(new PageApi.RevisionSummary("first", Instant.now(), "owner", "ai", "Title",
+            List.of(new PageApi.RevisionSummary("first", Instant.now(), "owner", "ai",
                 null),
-                new PageApi.RevisionSummary("second", Instant.now(), "owner", "manual",
-                    "Title", "first")),
+                new PageApi.RevisionSummary("second", Instant.now(), "owner", "manual", "first")),
             2, 1, 20)));
         assertThat(call("list_page_revisions", Map.of("name", "page")).error()).isFalse();
         when(pages.revisions("page", 2, 20)).thenReturn(Mono.just(
@@ -210,7 +209,7 @@ class PageMcpToolProviderTest {
 
     @Test
     void publishedAndHistoricalReadsDoNotReturnDraftSource() {
-        var old = new PageDocument(1, "code", null, null, "<p>Old</p>", "", "Old", "");
+        var old = new PageDocument(1, "code", null, null, "<p>Old</p>", "");
         when(pages.revisionDetail("page", "live")).thenReturn(Mono.just(
             new PageApi.RevisionDetail(null, old)));
         when(pages.revisionDetail("page", "history")).thenReturn(Mono.just(
@@ -235,21 +234,19 @@ class PageMcpToolProviderTest {
         assertThat(saved.mode()).isEqualTo("code");
         assertThat(saved.projectData()).isNull();
         assertThat(saved.css()).isEqualTo(current.document().css());
-        assertThat(saved.title()).isEqualTo("Title");
-        assertThat(saved.description()).isEqualTo("Description");
         assertThat(result.structuredContent()).doesNotContainKey("document");
         verifyNoInteractions(themes);
     }
 
     @Test
-    void metadataAndNoOpEditsPreserveVisualState() {
-        call("update_page", Map.of("name", "page", "expectedVersion", 4, "description", ""));
-        assertThat(savedDocument().mode()).isEqualTo("visual");
-        assertThat(savedDocument().projectData()).isEqualTo(current.document().projectData());
-        assertThat(savedDocument().description()).isEmpty();
-        clearInvocations(pages);
-        call("update_page", Map.of("name", "page", "expectedVersion", 4, "html",
-            "<h1>Before</h1>"));
+    void propertiesUseTheirOwnOperationAndNoOpSourcePreservesVisualState() {
+        when(pages.updateProperties(eq("page"), any())).thenReturn(Mono.just(current));
+        assertThat(call("update_page_properties", Map.of("name", "page", "expectedVersion", 4,
+            "title", "Renamed", "description", "", "slug", "new-path", "themeLayout", false)).error()).isFalse();
+        verify(pages).updateProperties("page", new PageApi.UpdatePagePropertiesRequest(
+            4L, "Renamed", "", "new-path", false));
+        verify(pages, never()).save(any(), any(), any());
+        call("update_page", Map.of("name", "page", "expectedVersion", 4, "html", "<h1>Before</h1>"));
         assertThat(savedDocument()).isEqualTo(current.document());
     }
 
@@ -308,28 +305,17 @@ class PageMcpToolProviderTest {
     }
 
     @Test
-    void mixedMetadataAndSourceEditsValidateTheFinalCandidate() {
-        var original = current.document();
-        when(pages.get("page")).thenReturn(Mono.just(detail(new PageDocument(
-            original.schemaVersion(), original.mode(), original.editorVersion(),
-            original.projectData(), original.html(), original.css(), "", "", original.js()))));
-        assertThat(call("update_page", Map.of("name", "page", "expectedVersion", 4,
-            "title", " Repaired ", "description", "New description", "html", "<p>New</p>"))
-            .error()).isFalse();
-        var saved = savedDocument();
-        assertThat(saved.title()).isEqualTo(" Repaired ");
-        assertThat(saved.description()).isEqualTo("New description");
-        assertThat(saved.html()).isEqualTo("<p>New</p>");
-        assertThat(saved.mode()).isEqualTo("code");
-        verifyNoInteractions(themes);
+    void contentToolSchemaExcludesPropertiesAndPropertyToolDescribesLiveEffects() {
+        var schema = tool("update_page").inputSchema();
+        assertThat(((Map<?, ?>) schema.get("properties")).containsKey("title")).isFalse();
+        assertThat(((Map<?, ?>) schema.get("properties")).containsKey("description")).isFalse();
+        assertThat(tool("update_page_properties").description()).contains("immediately", "published");
     }
 
     @Test
-    void invalidMetadataRejectsBeforeThemeLoading() {
-        var result = call("update_page", Map.of("name", "page", "expectedVersion", 4,
-            "title", "", "css", "@media(prefers-color-scheme:dark){h1{color:white}}"));
-        assertError(result, "INVALID_ARGUMENT");
-        assertThat(result.textContent()).contains("页面标题");
+    void propertiesCannotBeSentAsContentOnlyUpdate() {
+        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4, "title", "Changed")),
+            "INVALID_ARGUMENT");
         verifyNoInteractions(themes);
         verify(pages, never()).save(any(), any(), any());
     }
@@ -347,12 +333,12 @@ class PageMcpToolProviderTest {
     @Test
     void staleVersionAndServiceConflictsAreNeverRetried() {
         assertError(call("update_page", Map.of("name", "page", "expectedVersion", 3,
-            "title", "New")), "CONFLICT");
+            "html", "<p>New</p>")), "CONFLICT");
         verify(pages, never()).save(any(), any(), any());
         when(pages.save(any(), any(), any())).thenReturn(Mono.error(
             new ResponseStatusException(HttpStatus.CONFLICT, "Changed")));
         assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4,
-            "title", "New")), "CONFLICT");
+            "html", "<p>New</p>")), "CONFLICT");
         verify(pages, times(1)).save(any(), any(), any());
     }
 
@@ -413,8 +399,8 @@ class PageMcpToolProviderTest {
     }
 
     private static PageApi.PageDetail detail(PageDocument document) {
-        return new PageApi.PageDetail(new PageApi.PageSummary("page", "about", document.title(),
-            document.description(), 4L, true, "draft", "live", Instant.now(), true), document);
+        return new PageApi.PageDetail(new PageApi.PageSummary("page", "about", "Title",
+            "Description", 4L, true, "draft", "live", Instant.now(), true), document);
     }
 
     private static Map<String, Object> draftArgs() {

@@ -38,7 +38,7 @@ class PagePreviewRenderingTest {
         MockServerWebExchange.from(MockServerHttpRequest.get("http://localhost/p/about")),
         HandlerStrategies.withDefaults().messageReaders());
     private final PageDocument document = new PageDocument(1, "code", "", Map.of(),
-        "<p>About</p>", "p { color: red }", "About", "Description");
+        "<p>About</p>", "p { color: red }");
 
     @org.junit.jupiter.api.BeforeEach
     void defaultCompiledContent() {
@@ -54,11 +54,11 @@ class PagePreviewRenderingTest {
             .thenReturn(Mono.just("plugin:ai-page-builder:" + template));
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
             "/apis/api.content.halo.run/v1alpha1/", "/apis/api.photo.halo.run/v1alpha1/"));
-        var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "", "Title", null,
+        var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "",
             "document.querySelector('p').textContent = 'Ready';");
         when(policy.sanitizeHtml(scripted.html())).thenReturn(scripted.html());
         var preview = (RenderingResponse) previews.render(request, "about", "about", themeLayout,
-            scripted).block();
+            scripted, "About", "Description").block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
             .isEqualTo("sandbox allow-scripts; default-src 'none'; "
                 + "script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'; "
@@ -69,7 +69,7 @@ class PagePreviewRenderingTest {
                 + "base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; "
                 + "form-action 'none'");
         var published = (RenderingResponse) renderer.render(request, "about", "about", themeLayout,
-            scripted).block();
+            scripted, "About", "Description").block();
         assertThat(published.headers().getFirst("Content-Security-Policy")).isNull();
         assertThat(preview.model()).isEqualTo(published.model());
         assertThat(((PageRenderer.PageView) preview.model().get("aiPageBuilder")).html())
@@ -83,7 +83,7 @@ class PagePreviewRenderingTest {
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
         var preview = (RenderingResponse) previews.render(request, "about", "about", true,
-            document).block();
+            document, "About", "Description").block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
             .contains("connect-src 'none'").doesNotContain("allow-same-origin");
     }
@@ -99,7 +99,7 @@ class PagePreviewRenderingTest {
             MockServerHttpRequest.get("/p/about").header("Host", "a; connect-src *").build()),
             HandlerStrategies.withDefaults().messageReaders());
         var preview = (RenderingResponse) previews.render(injected, "about", "about", true,
-            document).block();
+            document, "About", "Description").block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
             .contains("connect-src 'none'").doesNotContain("connect-src *");
     }
@@ -116,7 +116,7 @@ class PagePreviewRenderingTest {
             HandlerStrategies.withDefaults().messageReaders());
         var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog,
             fixedExternalUrl("https://pages.example.com/site;x"))
-            .render(relative, "about", "about", true, document).block();
+            .render(relative, "about", "about", true, document, "About", "Description").block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
             .contains("script-src 'unsafe-inline' 'unsafe-eval'")
             .contains("connect-src 'none'").doesNotContain("site;x");
@@ -132,7 +132,7 @@ class PagePreviewRenderingTest {
         var external = fixedExternalUrl("https://pages.example.com/site");
         var configuredRenderer = new PageRenderer(resolver, policy, external);
         var preview = (RenderingResponse) new PagePreview(configuredRenderer, publicApiCatalog,
-            external).render(request, "about", "about", true, document).block();
+            external).render(request, "about", "about", true, document, "About", "Description").block();
         var policy = preview.headers().getFirst("Content-Security-Policy");
         assertThat(policy)
             .contains("connect-src http://localhost/apis/api.content.halo.run/v1alpha1/;")
@@ -154,7 +154,7 @@ class PagePreviewRenderingTest {
             HandlerStrategies.withDefaults().messageReaders());
         var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog,
             fixedExternalUrl("https://pages.example.com/site"))
-            .render(relative, "about", "about", true, document).block();
+            .render(relative, "about", "about", true, document, "About", "Description").block();
         var policy = preview.headers().getFirst("Content-Security-Policy");
         assertThat(policy)
             .contains("connect-src "
@@ -170,7 +170,7 @@ class PagePreviewRenderingTest {
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
         var preview = (RenderingResponse) previews.render(request, "about", "about", true,
-            document).block();
+            document, "About", "Description").block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
             .contains("connect-src 'none'");
     }

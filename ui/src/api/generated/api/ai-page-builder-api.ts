@@ -46,9 +46,7 @@ import type { SavePageRequest } from '../models';
 // @ts-ignore
 import type { SiteUrlResponse } from '../models';
 // @ts-ignore
-import type { UpdatePageLayoutRequest } from '../models';
-// @ts-ignore
-import type { UpdatePageSlugRequest } from '../models';
+import type { UpdatePagePropertiesRequest } from '../models';
 /**
  * AiPageBuilderApi - axios parameter creator
  * @export
@@ -887,16 +885,16 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
         /**
          * 
          * @param {string} name Stable page identifier
-         * @param {UpdatePageLayoutRequest} updatePageLayoutRequest 
+         * @param {UpdatePagePropertiesRequest} updatePagePropertiesRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        updatePageLayout: async (name: string, updatePageLayoutRequest: UpdatePageLayoutRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        updatePageProperties: async (name: string, updatePagePropertiesRequest: UpdatePagePropertiesRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'name' is not null or undefined
-            assertParamExists('updatePageLayout', 'name', name)
-            // verify required parameter 'updatePageLayoutRequest' is not null or undefined
-            assertParamExists('updatePageLayout', 'updatePageLayoutRequest', updatePageLayoutRequest)
-            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/{name}/layout`
+            assertParamExists('updatePageProperties', 'name', name)
+            // verify required parameter 'updatePagePropertiesRequest' is not null or undefined
+            assertParamExists('updatePageProperties', 'updatePagePropertiesRequest', updatePagePropertiesRequest)
+            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/{name}/properties`
                 .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -924,54 +922,7 @@ export const AiPageBuilderApiAxiosParamCreator = function (configuration?: Confi
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(updatePageLayoutRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * 
-         * @param {string} name Stable page identifier
-         * @param {UpdatePageSlugRequest} updatePageSlugRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        updatePageSlug: async (name: string, updatePageSlugRequest: UpdatePageSlugRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'name' is not null or undefined
-            assertParamExists('updatePageSlug', 'name', name)
-            // verify required parameter 'updatePageSlugRequest' is not null or undefined
-            assertParamExists('updatePageSlug', 'updatePageSlugRequest', updatePageSlugRequest)
-            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/{name}/slug`
-                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication basicAuth required
-            // http basic authentication required
-            setBasicAuthToObject(localVarRequestOptions, configuration)
-
-            // authentication bearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-
-    
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(updatePageSlugRequest, localVarRequestOptions, configuration)
+            localVarRequestOptions.data = serializeDataIfNeeded(updatePagePropertiesRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -1222,27 +1173,14 @@ export const AiPageBuilderApiFp = function(configuration?: Configuration) {
         /**
          * 
          * @param {string} name Stable page identifier
-         * @param {UpdatePageLayoutRequest} updatePageLayoutRequest 
+         * @param {UpdatePagePropertiesRequest} updatePagePropertiesRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async updatePageLayout(name: string, updatePageLayoutRequest: UpdatePageLayoutRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageDetail>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.updatePageLayout(name, updatePageLayoutRequest, options);
+        async updatePageProperties(name: string, updatePagePropertiesRequest: UpdatePagePropertiesRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageDetail>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.updatePageProperties(name, updatePagePropertiesRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.updatePageLayout']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * 
-         * @param {string} name Stable page identifier
-         * @param {UpdatePageSlugRequest} updatePageSlugRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async updatePageSlug(name: string, updatePageSlugRequest: UpdatePageSlugRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageDetail>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.updatePageSlug(name, updatePageSlugRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.updatePageSlug']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderApi.updatePageProperties']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
@@ -1418,21 +1356,12 @@ export const AiPageBuilderApiFactory = function (configuration?: Configuration, 
         },
         /**
          * 
-         * @param {AiPageBuilderApiUpdatePageLayoutRequest} requestParameters Request parameters.
+         * @param {AiPageBuilderApiUpdatePagePropertiesRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        updatePageLayout(requestParameters: AiPageBuilderApiUpdatePageLayoutRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageDetail> {
-            return localVarFp.updatePageLayout(requestParameters.name, requestParameters.updatePageLayoutRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * 
-         * @param {AiPageBuilderApiUpdatePageSlugRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        updatePageSlug(requestParameters: AiPageBuilderApiUpdatePageSlugRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageDetail> {
-            return localVarFp.updatePageSlug(requestParameters.name, requestParameters.updatePageSlugRequest, options).then((request) => request(axios, basePath));
+        updatePageProperties(requestParameters: AiPageBuilderApiUpdatePagePropertiesRequest, options?: RawAxiosRequestConfig): AxiosPromise<PageDetail> {
+            return localVarFp.updatePageProperties(requestParameters.name, requestParameters.updatePagePropertiesRequest, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -1788,45 +1717,24 @@ export interface AiPageBuilderApiUnpublishPageRequest {
 }
 
 /**
- * Request parameters for updatePageLayout operation in AiPageBuilderApi.
+ * Request parameters for updatePageProperties operation in AiPageBuilderApi.
  * @export
- * @interface AiPageBuilderApiUpdatePageLayoutRequest
+ * @interface AiPageBuilderApiUpdatePagePropertiesRequest
  */
-export interface AiPageBuilderApiUpdatePageLayoutRequest {
+export interface AiPageBuilderApiUpdatePagePropertiesRequest {
     /**
      * Stable page identifier
      * @type {string}
-     * @memberof AiPageBuilderApiUpdatePageLayout
+     * @memberof AiPageBuilderApiUpdatePageProperties
      */
     readonly name: string
 
     /**
      * 
-     * @type {UpdatePageLayoutRequest}
-     * @memberof AiPageBuilderApiUpdatePageLayout
+     * @type {UpdatePagePropertiesRequest}
+     * @memberof AiPageBuilderApiUpdatePageProperties
      */
-    readonly updatePageLayoutRequest: UpdatePageLayoutRequest
-}
-
-/**
- * Request parameters for updatePageSlug operation in AiPageBuilderApi.
- * @export
- * @interface AiPageBuilderApiUpdatePageSlugRequest
- */
-export interface AiPageBuilderApiUpdatePageSlugRequest {
-    /**
-     * Stable page identifier
-     * @type {string}
-     * @memberof AiPageBuilderApiUpdatePageSlug
-     */
-    readonly name: string
-
-    /**
-     * 
-     * @type {UpdatePageSlugRequest}
-     * @memberof AiPageBuilderApiUpdatePageSlug
-     */
-    readonly updatePageSlugRequest: UpdatePageSlugRequest
+    readonly updatePagePropertiesRequest: UpdatePagePropertiesRequest
 }
 
 /**
@@ -2035,24 +1943,13 @@ export class AiPageBuilderApi extends BaseAPI {
 
     /**
      * 
-     * @param {AiPageBuilderApiUpdatePageLayoutRequest} requestParameters Request parameters.
+     * @param {AiPageBuilderApiUpdatePagePropertiesRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      * @memberof AiPageBuilderApi
      */
-    public updatePageLayout(requestParameters: AiPageBuilderApiUpdatePageLayoutRequest, options?: RawAxiosRequestConfig) {
-        return AiPageBuilderApiFp(this.configuration).updatePageLayout(requestParameters.name, requestParameters.updatePageLayoutRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * 
-     * @param {AiPageBuilderApiUpdatePageSlugRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     * @memberof AiPageBuilderApi
-     */
-    public updatePageSlug(requestParameters: AiPageBuilderApiUpdatePageSlugRequest, options?: RawAxiosRequestConfig) {
-        return AiPageBuilderApiFp(this.configuration).updatePageSlug(requestParameters.name, requestParameters.updatePageSlugRequest, options).then((request) => request(this.axios, this.basePath));
+    public updatePageProperties(requestParameters: AiPageBuilderApiUpdatePagePropertiesRequest, options?: RawAxiosRequestConfig) {
+        return AiPageBuilderApiFp(this.configuration).updatePageProperties(requestParameters.name, requestParameters.updatePagePropertiesRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

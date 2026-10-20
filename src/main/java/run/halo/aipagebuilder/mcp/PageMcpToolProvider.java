@@ -16,7 +16,6 @@ import run.halo.aipagebuilder.ai.DocumentHash;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.content.PageDocumentPatch;
 import run.halo.aipagebuilder.content.PageSourceEdits;
-import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PageApi;
 import run.halo.aipagebuilder.page.PagePreviewStore;
 import run.halo.aipagebuilder.page.PageService;
@@ -99,6 +98,10 @@ public final class PageMcpToolProvider implements McpToolProvider {
             case "create_page" -> pages.create(new PageApi.CreatePageRequest(string(args, "slug"),
                 string(args, "title"), (Boolean) args.getOrDefault("themeLayout", true)), actor)
                 .map(this::summary);
+            case "update_page_properties" -> pages.updateProperties(string(args, "name"),
+                new PageApi.UpdatePagePropertiesRequest(version(args), (String) args.get("title"),
+                    (String) args.get("description"), (String) args.get("slug"),
+                    (Boolean) args.get("themeLayout"))).map(this::summary);
             case "update_page", "patch_page" -> edit(args, actor, tool.equals("patch_page"));
             case "preview_page" -> preview(args, actor);
             case "publish_page" -> pages.publish(string(args, "name"), version(args),
@@ -138,8 +141,6 @@ public final class PageMcpToolProvider implements McpToolProvider {
                 result.put("revision", revision);
                 result.put("mode", value.mode());
                 var source = new LinkedHashMap<String, Object>();
-                source.put("title", value.title());
-                source.put("description", Objects.requireNonNullElse(value.description(), ""));
                 source.put("html", value.html());
                 source.put("css", value.css());
                 source.put("js", value.js());
@@ -163,7 +164,7 @@ public final class PageMcpToolProvider implements McpToolProvider {
                 fields = PageDocumentPatch.apply(original, args);
             } else {
                 fields = args;
-                if (List.of("html", "css", "js", "title", "description").stream()
+                if (List.of("html", "css", "js").stream()
                     .noneMatch(args::containsKey)) {
                     throw new IllegalArgumentException("Provide at least one document field");
                 }
@@ -171,11 +172,7 @@ public final class PageMcpToolProvider implements McpToolProvider {
             var html = field(fields, "html", original.html());
             var css = field(fields, "css", original.css());
             var js = field(fields, "js", original.js());
-            var base = new PageDocument(original.schemaVersion(), original.mode(),
-                original.editorVersion(), original.projectData(), original.html(), original.css(),
-                field(fields, "title", original.title()),
-                field(fields, "description", original.description()), original.js());
-            var prepared = sourceEdits.prepare(base, html, css, js);
+            var prepared = sourceEdits.prepare(original, html, css, js);
             var context = prepared.cssChanged() ? theme(current.page().themeLayout())
                 : Mono.just(ThemeStyleContext.unavailable());
             return context.defaultIfEmpty(ThemeStyleContext.unavailable())

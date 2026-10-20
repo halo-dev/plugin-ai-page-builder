@@ -43,7 +43,7 @@ class PagePreviewIsolationTest {
         new PagePreview(renderer, catalog, mock(ExternalUrlSupplier.class));
     private final HandlerStrategies strategies = HandlerStrategies.withDefaults();
     private final PageDocument document = new PageDocument(2, "code", null, null,
-        "<p>中文页面</p>", "p {color: red}", "Title", "", "window.executed = true");
+        "<p>中文页面</p>", "p {color: red}", "window.executed = true");
 
     @ParameterizedTest
     @ValueSource(strings = {"", "/site"})
@@ -68,7 +68,7 @@ class PagePreviewIsolationTest {
             });
         when(catalog.publicPathPrefixes()).thenReturn(List.of("/apis/api.content.halo.run/"));
 
-        var response = previews.token(request, "one", "about", true, document).block();
+        var response = previews.token(request, "one", "about", true, document, "About", "Description").block();
         var expectedPolicy = response.headers().getFirst("Content-Security-Policy");
         response.writeTo(exchange, context(new View() {
             @Override
@@ -127,7 +127,7 @@ class PagePreviewIsolationTest {
             .thenReturn(Mono.just("test"));
         // A changing public catalog must still render with all connections blocked.
         when(catalog.publicPathPrefixes()).thenThrow(new IllegalStateException("refreshing"));
-        var response = previews.render(request, "one", "about", layout, document).block();
+        var response = previews.render(request, "one", "about", layout, document, "About", "Description").block();
         response.writeTo(exchange, context(new View() {
             @Override
             public Mono<Void> render(Map<String, ?> model, MediaType type,

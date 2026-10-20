@@ -20,7 +20,7 @@ vi.mock('../../api/clients', () => ({
   aiPageBuilderApi: {
     listPages: mocks.list,
     getPage: mocks.get,
-    updatePageSlug: mocks.updateSlug,
+    updatePageProperties: mocks.updateSlug,
     savePage: mocks.save,
     unpublishPage: mocks.unpublish,
     publishPage: mocks.publish,
@@ -118,7 +118,7 @@ function summary(name: string, extra: Record<string, unknown> = {}) {
 function detail(name: string, extra: Record<string, unknown> = {}) {
   return {
     page: summary(name, extra),
-    document: { mode: 'visual', title: `Page ${name}`, html: '', css: '', schemaVersion: 1 },
+    document: { mode: 'visual', html: '', css: '', schemaVersion: 1 },
   }
 }
 function deferred<T>() {
@@ -181,20 +181,17 @@ function mountHome(withPublish = false) {
 }
 describe('first publication from a filtered list', () => {
   it.each(['success', 'failure'] as const)(
-    'keeps the card mounted until publication ends in %s, then refreshes the list',
+    'keeps the card until publication ends in %s',
     async (outcome) => {
       mocks.routeQuery = { keyword: 'Page a' }
       mocks.list
         .mockResolvedValueOnce({ data: { items: [summary('a')], total: 1 } })
         .mockResolvedValue({ data: { items: [], total: 0 } })
-      const renamed = detail('a', { title: 'New title', version: 2 })
-      renamed.document.title = 'New title'
-      mocks.save.mockResolvedValue({ data: renamed })
-      const slug = deferred<unknown>()
-      mocks.updateSlug.mockReturnValue(slug.promise)
-      mocks.publish.mockResolvedValue({
-        data: detail('a', { title: 'New title', version: 4, publishedRevision: 'r4' }),
+      mocks.updateSlug.mockResolvedValue({
+        data: detail('a', { title: 'New title', slug: 'new-path', version: 2 }),
       })
+      const publication = deferred<unknown>()
+      mocks.publish.mockReturnValue(publication.promise)
       const wrapper = mountHome(true)
       try {
         await flushPromises()
@@ -202,25 +199,23 @@ describe('first publication from a filtered list', () => {
           .getComponent(PublishPagePopper)
           .findComponent({ name: 'FormKit' })
           .vm.$emit('submit', { title: 'New title', slug: 'new-path' })
-        await vi.waitFor(() => expect(mocks.updateSlug).toHaveBeenCalled())
-        await flushPromises()
+        await vi.waitFor(() => expect(mocks.publish).toHaveBeenCalled())
         expect(wrapper.findComponent(PublishPagePopper).exists()).toBe(true)
         expect(mocks.list).toHaveBeenCalledTimes(1)
         expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
           page: { title: 'New title', version: 2 },
         })
-        if (outcome === 'failure') slug.reject(new Error('Path taken'))
+        expect(mocks.save).not.toHaveBeenCalled()
+        if (outcome === 'failure') publication.reject(new Error('Publish failed'))
         else
-          slug.resolve({ data: detail('a', { title: 'New title', slug: 'new-path', version: 3 }) })
-        await flushPromises()
-        if (outcome === 'success') {
-          expect(mocks.publish).toHaveBeenCalledWith({ name: 'a', mutationRequest: { version: 3 } })
-        } else {
-          expect(mocks.publish).not.toHaveBeenCalled()
-          expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
-            page: { title: 'New title', version: 2 },
+          publication.resolve({
+            data: detail('a', {
+              title: 'New title',
+              slug: 'new-path',
+              version: 3,
+              publishedRevision: 'r1',
+            }),
           })
-        }
         await vi.waitFor(() =>
           expect(wrapper.findComponent(PublishPagePopper).exists()).toBe(false),
         )
@@ -256,12 +251,12 @@ describe('page settings from the list', () => {
     await openSettingsFor(wrapper, 0)
     await openSettingsFor(wrapper, 1)
     await flushPromises()
-    expect(wrapper.findComponent(PageSettings).props('slug')).toBe('b-path')
+    expect(wrapper.findComponent(PageSettings).props('page').slug).toBe('b-path')
     slow.resolve({ data: detail('a') })
     await flushPromises()
     const settings = wrapper.findComponent(PageSettings)
-    expect(settings.props('slug')).toBe('b-path')
-    expect(settings.props('document').title).toBe('Page b')
+    expect(settings.props('page').slug).toBe('b-path')
+    expect(settings.props('page').title).toBe('Page b')
     wrapper.unmount()
   })
   it('refetches the detail when the modal is reopened', async () => {
@@ -279,7 +274,7 @@ describe('page settings from the list', () => {
   })
   it('does not revive a closed modal when a late save resolves', async () => {
     const slow = deferred<unknown>()
-    mocks.save.mockReturnValue(slow.promise)
+    mocks.updateSlug.mockReturnValue(slow.promise)
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
@@ -309,7 +304,7 @@ describe('page settings from the list', () => {
     })
     const first = deferred<unknown>()
     let saveCalls = 0
-    mocks.save.mockImplementation(() => {
+    mocks.updateSlug.mockImplementation(() => {
       saveCalls++
       return saveCalls === 1
         ? first.promise
@@ -334,16 +329,15 @@ describe('page settings from the list', () => {
     first.resolve({ data: detail('a', { version: 2 }) })
     await flushPromises()
     const secondSettings = wrapper.findComponent(PageSettings)
-    expect(secondSettings.props('document').title).toBe('Page a')
+    expect(secondSettings.props('page').title).toBe('Page a')
     settingsField(secondSettings, 'title').vm.$emit('update:modelValue', 'Second')
     await flushPromises()
     await submitSettings(secondSettings)
-    expect(mocks.save).toHaveBeenLastCalledWith({
+    expect(mocks.updateSlug).toHaveBeenLastCalledWith({
       name: 'a',
-      savePageRequest: {
+      updatePagePropertiesRequest: {
         version: 2,
-        document: expect.objectContaining({ title: 'Second' }),
-        source: 'manual',
+        title: 'Second',
       },
     })
     expect(queryClient.getQueryData(pageKeys.detail('a'))).toMatchObject({
@@ -352,7 +346,7 @@ describe('page settings from the list', () => {
     wrapper.unmount()
   })
   it('refreshes the detail after a version conflict so retry uses the new version', async () => {
-    mocks.save
+    mocks.updateSlug
       .mockRejectedValueOnce({ response: { status: 409 }, message: 'Page changed' })
       .mockResolvedValue({ data: detail('a', { version: 3 }) })
     const wrapper = mountHome()
@@ -374,18 +368,17 @@ describe('page settings from the list', () => {
     expect(wrapper.findComponent(PageSettings).exists()).toBe(true)
     settings.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
-    expect(mocks.save).toHaveBeenLastCalledWith({
+    expect(mocks.updateSlug).toHaveBeenLastCalledWith({
       name: 'a',
-      savePageRequest: {
+      updatePagePropertiesRequest: {
         version: 2,
-        document: expect.objectContaining({ title: 'New title' }),
-        source: 'manual',
+        title: 'New title',
       },
     })
     wrapper.unmount()
   })
   it('keeps only edited fields when retrying after a conflict refresh', async () => {
-    mocks.save
+    mocks.updateSlug
       .mockRejectedValueOnce({ response: { status: 409 }, message: 'Page changed' })
       .mockResolvedValue({ data: detail('a', { version: 3 }) })
     const wrapper = mountHome()
@@ -396,10 +389,9 @@ describe('page settings from the list', () => {
     // them in. The user only edited the title.
     mocks.get.mockResolvedValue({
       data: {
-        page: summary('a', { version: 2, slug: 'someone-elses-path' }),
+        page: summary('a', { version: 2, slug: 'someone-elses-path', description: 'other desc' }),
         document: {
           mode: 'visual',
-          title: 'Page a',
           description: 'other desc',
           html: '',
           css: '',
@@ -418,19 +410,18 @@ describe('page settings from the list', () => {
     settings.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
     // The unedited slug/description must follow the refresh, not revert it.
-    expect(mocks.updateSlug).not.toHaveBeenCalled()
-    expect(mocks.save).toHaveBeenLastCalledWith({
+    expect(mocks.updateSlug).toHaveBeenCalledTimes(2)
+    expect(mocks.updateSlug).toHaveBeenLastCalledWith({
       name: 'a',
-      savePageRequest: {
+      updatePagePropertiesRequest: {
         version: 2,
-        document: expect.objectContaining({ title: 'My title', description: 'other desc' }),
-        source: 'manual',
+        title: 'My title',
       },
     })
     wrapper.unmount()
   })
   it('ignores a stale conflict refresh that resolves after a newer save', async () => {
-    mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
+    mocks.updateSlug.mockRejectedValueOnce({ response: { status: 409 }, message: 'Slug exists' })
     const refresh = deferred<unknown>()
     let getCalls = 0
     mocks.get.mockImplementation(() => {
@@ -439,7 +430,7 @@ describe('page settings from the list', () => {
         ? Promise.resolve({ data: detail('a', { version: 1 }) })
         : refresh.promise
     })
-    mocks.save.mockResolvedValue({ data: detail('a', { version: 2 }) })
+    mocks.updateSlug.mockResolvedValue({ data: detail('a', { version: 2 }) })
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
@@ -466,7 +457,7 @@ describe('page settings from the list', () => {
     wrapper.unmount()
   })
   it('ignores a late save response that resolves after a newer refresh', async () => {
-    mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
+    mocks.updateSlug.mockRejectedValueOnce({ response: { status: 409 }, message: 'Slug exists' })
     const refresh = deferred<unknown>()
     const slowSave = deferred<unknown>()
     let getCalls = 0
@@ -476,7 +467,7 @@ describe('page settings from the list', () => {
         ? Promise.resolve({ data: detail('a', { version: 1 }) })
         : refresh.promise
     })
-    mocks.save.mockReturnValue(slowSave.promise)
+    mocks.updateSlug.mockReturnValue(slowSave.promise)
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
@@ -502,25 +493,24 @@ describe('page settings from the list', () => {
       page: { version: 3 },
     })
     // Reopening builds the next save on the refreshed version.
-    mocks.save.mockResolvedValue({ data: detail('a', { version: 4 }) })
+    mocks.updateSlug.mockResolvedValue({ data: detail('a', { version: 4 }) })
     await openSettingsFor(wrapper, 0)
     await flushPromises()
     const reopened = wrapper.findComponent(PageSettings)
     settingsField(reopened, 'title').vm.$emit('update:modelValue', 'Again')
     await flushPromises()
     await submitSettings(reopened)
-    expect(mocks.save).toHaveBeenLastCalledWith({
+    expect(mocks.updateSlug).toHaveBeenLastCalledWith({
       name: 'a',
-      savePageRequest: {
+      updatePagePropertiesRequest: {
         version: 3,
-        document: expect.objectContaining({ title: 'Again' }),
-        source: 'manual',
+        title: 'Again',
       },
     })
     wrapper.unmount()
   })
   it('saves the theme layout with the form instead of on toggle', async () => {
-    mocks.save.mockResolvedValue({ data: detail('a', { version: 2, themeLayout: false }) })
+    mocks.updateSlug.mockResolvedValue({ data: detail('a', { version: 2, themeLayout: false }) })
     const wrapper = mountHome()
     await flushPromises()
     await openSettingsFor(wrapper, 0)
@@ -528,14 +518,12 @@ describe('page settings from the list', () => {
     const settings = wrapper.findComponent(PageSettings)
     settingsField(settings, 'themeLayout').vm.$emit('update:modelValue', false)
     await flushPromises()
-    expect(mocks.save).not.toHaveBeenCalled()
+    expect(mocks.updateSlug).not.toHaveBeenCalled()
     await submitSettings(settings)
-    expect(mocks.save).toHaveBeenCalledWith({
+    expect(mocks.updateSlug).toHaveBeenCalledWith({
       name: 'a',
-      savePageRequest: {
+      updatePagePropertiesRequest: {
         version: 1,
-        document: expect.objectContaining({ title: 'Page a' }),
-        source: 'manual',
         themeLayout: false,
       },
     })
@@ -548,7 +536,7 @@ describe('page settings from the list', () => {
     mocks.get
       .mockResolvedValueOnce({ data: detail('a', { publishedRevision: 'r1' }) })
       .mockResolvedValue({ data: detail('a', { version: 2, publishedRevision: 'r1' }) })
-    mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Slug exists' })
+    mocks.updateSlug.mockRejectedValueOnce({ response: { status: 409 }, message: 'Slug exists' })
     mocks.unpublish.mockResolvedValue({
       data: detail('a', { version: 3, publishedRevision: null }),
     })
@@ -561,9 +549,7 @@ describe('page settings from the list', () => {
     expect(mocks.warning).toHaveBeenCalledTimes(1)
     // A conflict refresh completes while the confirmation dialog is open,
     // bumping the optimistic-lock version.
-    await settings
-      .props('saveSlug')('taken-path')
-      .catch(() => undefined)
+    settings.vm.$emit('apply', { slug: 'taken-path' })
     await flushPromises()
     const options = mocks.warning.mock.calls[0]![0]
     await options.onConfirm()

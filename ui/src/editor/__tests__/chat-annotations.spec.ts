@@ -56,7 +56,7 @@ async function panel() {
       pageName: 'one',
       disabled: false,
       prepare: async () => 1,
-      document: { schemaVersion: 2, mode: 'code', title: 'Page', html: '', css: '' },
+      document: { schemaVersion: 2, mode: 'code', html: '', css: '' },
       annotations: [],
     },
     global: { stubs: { FormKit: true }, directives: { 'close-popper': {} } },

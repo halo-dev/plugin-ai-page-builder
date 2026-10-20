@@ -1,10 +1,16 @@
 import { computed, onScopeDispose, shallowRef } from 'vue'
 import { aiPageBuilderApi } from '../api/clients'
-import type { PageDetail, PageDocument, PageSummary } from '../api/generated'
+import type {
+  PageDetail,
+  PageDocument,
+  PageSummary,
+  UpdatePagePropertiesRequest,
+} from '../api/generated'
 import { pageKeys, queryClient } from '../lib/query-client'
 
 export type PageWriteTarget = Pick<PageSummary, 'name' | 'title' | 'slug' | 'version'>
-type Draft = { document: PageDocument; themeLayout?: boolean }
+type Draft = { document: PageDocument }
+export type PagePropertiesPatch = Omit<UpdatePagePropertiesRequest, 'version'>
 type Confirm = (page: PageWriteTarget) => Promise<boolean>
 type Accepted = (detail: PageDetail, content: boolean) => void
 
@@ -124,14 +130,13 @@ export function usePageWrites(onAccepted?: Accepted) {
     })
   }
 
-  function updateSlug(slug: string) {
+  function updateProperties(properties: PagePropertiesPatch) {
     return run((write, current) => {
       const page = current()
-      if (slug === page.slug) return Promise.resolve(detail.value)
       return write(
-        aiPageBuilderApi.updatePageSlug({
+        aiPageBuilderApi.updatePageProperties({
           name: page.name,
-          updatePageSlugRequest: { version: page.version, slug },
+          updatePagePropertiesRequest: { version: page.version, ...properties },
         }),
       )
     })
@@ -167,28 +172,12 @@ export function usePageWrites(onAccepted?: Accepted) {
       const base = current()
       if (!(await verify(base))) return undefined
       if (current().version !== base.version) throw new Error('页面已更新，请重新确认发布。')
-      if (metadata.title !== base.title) {
-        const saved = (await aiPageBuilderApi.getPage({ name: base.name })).data
-        const page = current()
-        if (page.version !== base.version) throw new Error('页面已更新，请重新确认发布。')
-        await write(
-          aiPageBuilderApi.savePage({
-            name: page.name,
-            savePageRequest: {
-              version: page.version,
-              document: { ...saved.document, title: metadata.title },
-              source: 'manual',
-            },
-          }),
-          true,
-        )
-      }
-      if (metadata.slug !== current().slug) {
+      if (metadata.title !== base.title || metadata.slug !== base.slug) {
         const page = current()
         await write(
-          aiPageBuilderApi.updatePageSlug({
+          aiPageBuilderApi.updatePageProperties({
             name: page.name,
-            updatePageSlugRequest: { version: page.version, slug: metadata.slug },
+            updatePagePropertiesRequest: { version: page.version, ...metadata },
           }),
         )
       }
@@ -241,7 +230,7 @@ export function usePageWrites(onAccepted?: Accepted) {
     receive,
     refresh,
     save,
-    updateSlug,
+    updateProperties,
     restore,
     publish,
     publishUpdate,

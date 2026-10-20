@@ -34,7 +34,6 @@ describe('annotation snapshots', () => {
     const scope = effectScope()
     const document = shallowRef<PageDocument>({
       ...content,
-      title: 'Title',
       schemaVersion: 2,
       mode: 'code',
     })
@@ -49,13 +48,12 @@ describe('annotation snapshots', () => {
     const scope = effectScope()
     const document = shallowRef<PageDocument>({
       ...content,
-      title: 'Title',
       schemaVersion: 1,
       mode: 'code',
     })
     const state = scope.run(() => usePageAnnotations(document))!
     await state.add(target, ' Change this ')
-    document.value = { ...document.value, title: 'Other' }
+    document.value = { ...document.value }
     expect((await state.snapshot(content)).annotations[0]?.comment).toBe('Change this')
     document.value = { ...document.value, html: 'changed' }
     document.value = { ...document.value, html: content.html }
@@ -67,7 +65,6 @@ describe('annotation snapshots', () => {
     const scope = effectScope()
     const document = shallowRef<PageDocument>({
       ...content,
-      title: 'Title',
       schemaVersion: 1,
       mode: 'code',
     })

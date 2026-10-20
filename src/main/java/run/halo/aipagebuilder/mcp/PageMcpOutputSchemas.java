@@ -19,7 +19,7 @@ final class PageMcpOutputSchemas {
             case "get_theme_context" -> theme();
             case "list_pages" -> page(summary(false));
             case "get_page" -> detail();
-            case "create_page", "update_page", "patch_page", "publish_page", "unpublish_page",
+            case "create_page", "update_page_properties", "update_page", "patch_page", "publish_page", "unpublish_page",
                 "restore_page_revision" -> summary(true);
             case "preview_page" -> fields("name", text(), "version", integer(),
                 "draftRevision", text(), "previewUrl", uri(), "expiresAt", timestamp());
@@ -50,8 +50,7 @@ final class PageMcpOutputSchemas {
         var schema = summary(true);
         add(schema, "target", enumeration("draft", "published", "revision"), true);
         add(schema, "revision", text(), true);
-        add(schema, "document", fields("title", text(), "description", text(),
-            "html", text(), "css", text(), "js", text()), true);
+        add(schema, "document", fields("html", text(), "css", text(), "js", text()), true);
         add(schema, "baseHash", Map.of("type", "string", "pattern", "^[a-f0-9]{64}$",
             "description", "Hash of the selected document's HTML, CSS and JavaScript."), true);
         return schema;
@@ -59,7 +58,7 @@ final class PageMcpOutputSchemas {
 
     private static Map<String, Object> revision() {
         var schema = fields("name", text(), "createdAt", timestamp(), "createdBy", text(),
-            "source", text(), "title", text());
+            "source", text());
         add(schema, "parentRevision", text(), false);
         return schema;
     }

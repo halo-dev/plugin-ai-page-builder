@@ -13,7 +13,7 @@ import run.halo.aipagebuilder.model.PageDocument;
 class PageExportTest {
     static PageApi.PageDetail detail(PageDocument document, boolean themeLayout) {
         return new PageApi.PageDetail(new PageApi.PageSummary("original-id", "original-path",
-            document.title(), document.description(), 8L, themeLayout, "draft", "published",
+            "<unsafe & title>", "Description", 8L, themeLayout, "draft", "published",
             java.time.Instant.now(), true), document);
     }
 
@@ -22,8 +22,7 @@ class PageExportTest {
     void sourceAndMetadataSurviveRoundTrip(boolean themeLayout) {
         for (var script : java.util.List.of("", "console.log('中文 </script>');\n")) {
             var document = new PageDocument(2, "code", null, null,
-                "\n<section><p>中文 &amp; 空白</p></section>\n", "p { color: red; }\n",
-                "页面", "页面描述", script);
+                "\n<section><p>中文 &amp; 空白</p></section>\n", "p { color: red; }\n", script);
             var imported = PageArchive.read(PageExport.zip(detail(document, themeLayout)));
             assertThat(imported.document()).isEqualTo(document);
             assertThat(imported.themeLayout()).isEqualTo(themeLayout);
@@ -33,8 +32,7 @@ class PageExportTest {
     @Test
     void exportsExactSourceAndEscapedShellWithoutEditorOrChatState() throws Exception {
         var document = new PageDocument(2, "code", null, null,
-            "<button id=\"next\">下一项</button>", "button { color: red; }",
-            "<unsafe & title>", "", "document.querySelector('#next').textContent = '</script>'; ");
+            "<button id=\"next\">下一项</button>", "button { color: red; }", "document.querySelector('#next').textContent = '</script>'; ");
         var files = new LinkedHashMap<String, String>();
         try (var zip = new ZipInputStream(new ByteArrayInputStream(PageExport.zip(detail(document, false))), StandardCharsets.UTF_8)) {
             java.util.zip.ZipEntry entry;
@@ -50,7 +48,7 @@ class PageExportTest {
         assertThat(metadata.size()).isEqualTo(5);
         assertThat(metadata.get("format").asString()).isEqualTo("ai-page-builder");
         assertThat(metadata.get("version").asInt()).isEqualTo(1);
-        assertThat(metadata.get("title").asString()).isEqualTo(document.title());
+        assertThat(metadata.get("title").asString()).isEqualTo(detail(document, false).page().title());
         assertThat(metadata.get("themeLayout").asBoolean()).isFalse();
         assertThat(files.get("styles.css")).isEqualTo(document.css());
         assertThat(files.get("script.js")).isEqualTo(document.js());

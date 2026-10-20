@@ -24,7 +24,7 @@ const props = withDefaults(
   defineProps<{
     name: string
     document: PageDocument
-    themeLayout: boolean
+    pageVersion: number
     validated: boolean
     disabled?: boolean
     device?: PreviewDevice
@@ -45,7 +45,13 @@ const frame = shallowRef<HTMLIFrameElement>()
 const frameWrap = useTemplateRef<HTMLElement>('frameWrap')
 const stage = useTemplateRef<HTMLElement>('stage')
 const rendered = shallowRef<PageDocument>()
-const preview = shallowRef<{ source: string; snapshot: PageDocument; name: string; id: number }>()
+const preview = shallowRef<{
+  source: string
+  snapshot: PageDocument
+  name: string
+  id: number
+  pageVersion: number
+}>()
 const previewError = shallowRef('')
 const refresh = shallowRef(0)
 const sameDocument = (a: PageDocument | undefined, b: PageDocument) =>
@@ -97,7 +103,7 @@ watch(
       JSON.stringify(props.document),
       props.validated,
       refresh.value,
-      props.themeLayout,
+      props.pageVersion,
     ] as const,
   async (_, previous, onCleanup) => {
     const id = ++requestId
@@ -116,7 +122,7 @@ watch(
       sameDocument(rendered.value, props.document) &&
       sameDocument(preview.value?.snapshot, props.document) &&
       previous?.[3] === refresh.value &&
-      previous?.[4] === props.themeLayout
+      preview.value?.pageVersion === props.pageVersion
     ) {
       previewError.value = ''
       pending.value = false
@@ -124,6 +130,7 @@ watch(
     }
     const snapshot = JSON.parse(JSON.stringify(props.document)) as PageDocument
     const name = props.name
+    const pageVersion = props.pageVersion
     if (!unsupported.value) previewError.value = ''
     try {
       const source = await renderPagePreview(name, snapshot, controller.signal)
@@ -155,6 +162,7 @@ watch(
         snapshot,
         name,
         id,
+        pageVersion,
       }
     } catch (e) {
       if (id === requestId && !controller.signal.aborted) previewError.value = errorMessage(e)

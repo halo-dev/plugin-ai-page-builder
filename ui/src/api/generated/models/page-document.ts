@@ -31,12 +31,6 @@ export interface PageDocument {
      * @type {string}
      * @memberof PageDocument
      */
-    'description'?: string | null;
-    /**
-     * 
-     * @type {string}
-     * @memberof PageDocument
-     */
     'editorVersion'?: string | null;
     /**
      * 
@@ -68,12 +62,6 @@ export interface PageDocument {
      * @memberof PageDocument
      */
     'schemaVersion': number;
-    /**
-     * 
-     * @type {string}
-     * @memberof PageDocument
-     */
-    'title': string;
 }
 
 export const PageDocumentModeEnum = {

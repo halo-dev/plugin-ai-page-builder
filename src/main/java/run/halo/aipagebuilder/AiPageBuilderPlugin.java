@@ -71,8 +71,6 @@ public class AiPageBuilderPlugin extends BasePlugin {
         schemeManager.register(ThemePageRevision.class, indexes -> {
             indexes.add(IndexSpecs.<ThemePageRevision, String>single("spec.pageName", String.class)
                 .indexFunc(revision -> revision.getSpec().getPageName()));
-            indexes.add(IndexSpecs.<ThemePageRevision, String>single("spec.runId", String.class)
-                .nullable(true).indexFunc(revision -> revision.getSpec().getRunId()));
         });
     }
 

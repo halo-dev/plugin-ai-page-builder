@@ -23,7 +23,6 @@ const document: PageDocument = {
   mode: 'visual',
   editorVersion: 'legacy',
   projectData: { script: 'ignored' },
-  title: 'Legacy',
   html: '<section><h2>Hello</h2><a href="/destination">Link</a></section>',
   css: 'h2 { color: red }',
 }
@@ -42,7 +41,7 @@ function themePage(snapshot = document, name = 'demo') {
 }
 function render(props: Partial<InstanceType<typeof VisualEditor>['$props']> = {}) {
   const wrapper = mount(VisualEditor, {
-    props: { name: 'demo', document, themeLayout: true, validated: true, ...props },
+    props: { name: 'demo', document, pageVersion: 1, validated: true, ...props },
     attachTo: window.document.body,
     global: { stubs: { FormKit: true } },
   })
@@ -336,7 +335,7 @@ describe('theme preview canvas', () => {
     const wrapper = render()
     await load(wrapper)
     expect(mocks.renderPagePreview).toHaveBeenCalledTimes(1)
-    await wrapper.setProps({ themeLayout: false })
+    await wrapper.setProps({ pageVersion: 2 })
     await flushPromises()
     expect(mocks.renderPagePreview).toHaveBeenCalledTimes(2)
     expect(mocks.renderPagePreview).toHaveBeenLastCalledWith(
@@ -344,6 +343,28 @@ describe('theme preview canvas', () => {
       document,
       expect.any(AbortSignal),
     )
+  })
+
+  it('refreshes saved properties after invalid content is undone', async () => {
+    const wrapper = render()
+    const original = await load(wrapper)
+    expect(original.querySelector('header')?.textContent).toBe('主题头')
+    await wrapper.setProps({
+      document: { ...document, html: document.html + '<script>bad()</script>' },
+      validated: false,
+    })
+    await wrapper.setProps({ pageVersion: 2 })
+    mocks.renderPagePreview.mockResolvedValueOnce(
+      '<!doctype html><html><head></head><body><main id="ai-page-builder-demo">' +
+        document.html +
+        '</main></body></html>',
+    )
+    await wrapper.setProps({ document })
+    await wrapper.setProps({ validated: true })
+    const current = await load(wrapper)
+    expect(mocks.renderPagePreview).toHaveBeenCalledTimes(2)
+    expect(current.querySelector('header')).toBeNull()
+    expect(current.querySelector('footer')).toBeNull()
   })
 
   it('ignores an older async response arriving after the current preview', async () => {

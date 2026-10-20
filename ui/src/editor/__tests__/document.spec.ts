@@ -15,8 +15,6 @@ const document: PageDocument = {
   projectData: { pages: [{ component: { script: 'ignored legacy data' } }] },
   html: '<section id="intro"><h2>Hello</h2><p>World <em>together</em></p></section>',
   css: '.card { --space: 2rem; padding: var(--space); }\n@media (max-width: 600px) { @supports (display: grid) { .card { display: grid } } }',
-  title: '测试',
-  description: '',
 }
 
 describe('single source document', () => {
@@ -34,9 +32,9 @@ describe('single source document', () => {
     })
     expect(document.mode).toBe('visual')
   })
-  it('normalizes only an actual change, including a settings-only change', () => {
-    expect(updateDocument(document, { title: '新标题' })).toMatchObject({
-      title: '新标题',
+  it('normalizes only an actual change, when the content changes', () => {
+    expect(updateDocument(document, { html: '<p>New</p>' })).toMatchObject({
+      html: '<p>New</p>',
       mode: 'code',
       projectData: null,
       editorVersion: null,

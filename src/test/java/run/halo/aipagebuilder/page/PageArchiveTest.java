@@ -54,8 +54,8 @@ class PageArchiveTest {
         files.put("index.html", "<html>Not imported</html>");
         var imported = PageArchive.read(zip(files));
         assertThat(imported.document().html()).isEqualTo("<p>Shared</p>");
-        assertThat(imported.document().title()).isEqualTo("共享页面");
-        assertThat(imported.document().description()).isEqualTo("描述");
+        assertThat(imported.title()).isEqualTo("共享页面");
+        assertThat(imported.description()).isEqualTo("描述");
         assertThat(imported.document().mode()).isEqualTo("code");
         assertThat(imported.document().projectData()).isNull();
         assertThat(imported.themeLayout()).isFalse();
@@ -67,7 +67,7 @@ class PageArchiveTest {
         files.put("page.json", "﻿" + files.get("page.json"));
         files.put("page.html", "﻿<p>Shared</p>");
         var imported = PageArchive.read(zip(files));
-        assertThat(imported.document().title()).isEqualTo("共享页面");
+        assertThat(imported.title()).isEqualTo("共享页面");
         assertThat(imported.document().html()).isEqualTo(files.get("page.html"));
     }
 

@@ -45,6 +45,5 @@ export * from './test-operation';
 export * from './theme-color-mode';
 export * from './theme-root-state';
 export * from './theme-style-context';
-export * from './update-page-layout-request';
-export * from './update-page-slug-request';
+export * from './update-page-properties-request';
 export * from './validate-page-content-request';

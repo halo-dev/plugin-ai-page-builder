@@ -145,7 +145,7 @@ class PageReferenceToolsTest {
         when(client.fetch(ThemePageRevision.class, "draft-a"))
             .thenReturn(Mono.just(revision("draft-a", "a", "Draft title", "draft source")));
         var published = tools.session(null, false).readAiPageBuilder(Map.of("name", "a")).block();
-        assertThat(published).containsEntry("version", "PUBLISHED").containsEntry("title", "Published title")
+        assertThat(published).containsEntry("version", "PUBLISHED").containsEntry("title", "Draft title")
             .containsEntry("draft", false).containsEntry("js", "window.test = true;");
         assertThatThrownBy(() -> tools.session(null, false)
             .readAiPageBuilder(Map.of("name", "a", "version", "DRAFT")).block())
@@ -278,8 +278,7 @@ class PageReferenceToolsTest {
         revision.setMetadata(metadata(name, false));
         revision.setSpec(new ThemePageRevision.Spec());
         revision.getSpec().setPageName(pageName);
-        revision.getSpec().setDocument(new PageDocument(1, "code", "", Map.of(), html, "body{}", title,
-            "Description", "window.test = true;"));
+        revision.getSpec().setDocument(new PageDocument(1, "code", "", Map.of(), html, "body{}", "window.test = true;"));
         return revision;
     }
 }

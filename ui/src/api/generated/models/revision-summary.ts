@@ -50,11 +50,5 @@ export interface RevisionSummary {
      * @memberof RevisionSummary
      */
     'source': string;
-    /**
-     * 
-     * @type {string}
-     * @memberof RevisionSummary
-     */
-    'title': string;
 }
 

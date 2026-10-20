@@ -15,7 +15,7 @@ vi.mock('../../api/clients', () => ({
   aiPageBuilderApi: {
     getPage: mocks.get,
     savePage: mocks.save,
-    updatePageSlug: mocks.slug,
+    updatePageProperties: mocks.slug,
     publishPage: mocks.publish,
   },
   getPublicSiteUrl: () => Promise.resolve('http://localhost'),
@@ -111,8 +111,6 @@ function detail(version = 1, title = '关于我们', slug: string | null = 'abou
       html: '<p>Keep this content</p>',
       css: '',
       js: '',
-      title,
-      description: '',
     },
   }
 }
@@ -240,7 +238,7 @@ describe('first publish confirmation', () => {
     await publish(wrapper)
     expect(mocks.slug).toHaveBeenCalledWith({
       name: 'page',
-      updatePageSlugRequest: { version: 1, slug: 'company/about' },
+      updatePagePropertiesRequest: { version: 1, title: '关于我们', slug: 'company/about' },
     })
   })
 
@@ -249,17 +247,10 @@ describe('first publish confirmation', () => {
     await wrapper.get('[name=title]').setValue(' 公司介绍 ')
     await wrapper.get('[name=slug]').setValue('company/about')
     await publish(wrapper)
-    expect(mocks.save).toHaveBeenCalledWith({
-      name: 'page',
-      savePageRequest: {
-        version: 1,
-        document: { ...detail().document, title: '公司介绍' },
-        source: 'manual',
-      },
-    })
+    expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.slug).toHaveBeenCalledWith({
       name: 'page',
-      updatePageSlugRequest: { version: 2, slug: 'company/about' },
+      updatePagePropertiesRequest: { version: 1, title: '公司介绍', slug: 'company/about' },
     })
     expect(mocks.publish).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 3 } })
   })
@@ -273,7 +264,7 @@ describe('first publish confirmation', () => {
     expect(mocks.toastError).toHaveBeenCalledWith('暂时无法发布')
     mocks.get.mockResolvedValue({ data: detail(3, '公司介绍', 'company/about') })
     await publish(wrapper)
-    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.slug).toHaveBeenCalledTimes(1)
     expect(mocks.publish).toHaveBeenLastCalledWith({
       name: 'page',
@@ -281,7 +272,7 @@ describe('first publish confirmation', () => {
     })
   })
 
-  it('keeps path conflicts editable and retries after the title has already been saved', async () => {
+  it('keeps path conflicts editable and retries without partially saving the title', async () => {
     mocks.slug.mockRejectedValueOnce(new Error('访问路径已被占用'))
     const wrapper = popper()
     await wrapper.get('[name=title]').setValue('公司介绍')
@@ -290,22 +281,22 @@ describe('first publish confirmation', () => {
     expect(mocks.toastError).toHaveBeenCalledWith('访问路径已被占用')
     expect(mocks.publish).not.toHaveBeenCalled()
     await wrapper.get('[name=slug]').setValue('company/about')
-    mocks.get.mockResolvedValue({ data: detail(2, '公司介绍', 'taken') })
+    mocks.get.mockResolvedValue({ data: detail() })
     await publish(wrapper)
-    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.slug).toHaveBeenLastCalledWith({
       name: 'page',
-      updatePageSlugRequest: { version: 2, slug: 'company/about' },
+      updatePagePropertiesRequest: { version: 1, title: '公司介绍', slug: 'company/about' },
     })
   })
 
   it('does not publish after a stale-version title save fails', async () => {
-    mocks.save.mockRejectedValue(new Error('Page changed; reload before saving'))
+    mocks.slug.mockRejectedValue(new Error('Page changed; reload before saving'))
     const wrapper = popper()
     await wrapper.get('[name=title]').setValue('公司介绍')
     await publish(wrapper)
-    expect(mocks.save.mock.calls[0]![0].savePageRequest.version).toBe(1)
-    expect(mocks.slug).not.toHaveBeenCalled()
+    expect(mocks.slug.mock.calls[0]![0].updatePagePropertiesRequest.version).toBe(1)
+    expect(mocks.save).not.toHaveBeenCalled()
     expect(mocks.publish).not.toHaveBeenCalled()
     expect(mocks.toastError).toHaveBeenCalledWith('Page changed; reload before saving')
   })

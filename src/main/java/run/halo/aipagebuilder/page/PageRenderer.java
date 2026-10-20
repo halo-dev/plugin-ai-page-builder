@@ -27,17 +27,17 @@ public class PageRenderer {
     }
 
     public Mono<RenderingResponse> render(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document) {
-        return render(request, name, slug, themeLayout, document, false);
+        boolean themeLayout, PageDocument document, String title, String description) {
+        return render(request, name, slug, themeLayout, document, title, description, false);
     }
 
     public Mono<RenderingResponse> render(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document, boolean disableScripts) {
+        boolean themeLayout, PageDocument document, String title, String description, boolean disableScripts) {
         return Mono.defer(() -> {
             var rootId = "ai-page-builder-" + name;
             var compiled = content.compile(rootId, document);
             var scriptBlocked = disableScripts && !document.js().isEmpty();
-            var pageView = new PageView(slug, document.title(), document.description(), rootId,
+            var pageView = new PageView(slug, title, description, rootId,
                 renderHtml(compiled.html(), document.js(), disableScripts),
                 compiled.css(), scriptBlocked);
             var templateName = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";

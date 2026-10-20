@@ -93,8 +93,8 @@ public class PageService {
 
     public Mono<PageDetail> create(CreatePageRequest request, String actor) {
         return createDocument(request.slug(),
-            new PageDocument(1, "code", "", Map.of(), "", "", request.title(), ""),
-            request.themeLayout(), actor);
+            new PageDocument(1, "code", "", Map.of(), "", ""),
+            request.title(), "", request.themeLayout(), actor);
     }
 
     public Mono<PageDetail> importPage(String reviewId, byte[] archive, String actor,
@@ -103,7 +103,7 @@ public class PageService {
             .then(Mono.fromCallable(() -> PageArchive.read(archive))
                 .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic()))
             .flatMap(imported -> createDocument(null, imported.document(),
-                imported.themeLayout(), actor));
+                imported.title(), imported.description(), imported.themeLayout(), actor));
     }
 
     public Mono<PageDetail> clonePage(String name, PageApi.ClonePageRequest request, String actor) {
@@ -112,16 +112,19 @@ public class PageService {
             PagePaths.validate(request.slug());
             var original = detail.document();
             var copy = new PageDocument(original.js().isEmpty() ? 1 : 2, "code", null, null,
-                original.html(), original.css(), request.title(), original.description(), original.js());
-            return createDocument(request.slug(), copy, source.getSpec().getThemeLayout(), actor);
+                original.html(), original.css(), original.js());
+            return createDocument(request.slug(), copy, request.title(), source.getSpec().getDescription(),
+                source.getSpec().isThemeLayout(), actor);
         }));
     }
 
-    private Mono<PageDetail> createDocument(String slug, PageDocument document, Boolean themeLayout,
+    private Mono<PageDetail> createDocument(String slug, PageDocument document, String title,
+        String description, Boolean themeLayout,
         String actor) {
         return Mono.defer(() -> {
             // Normalize blank slugs so callers cannot persist an empty string.
             final var normalizedSlug = slug == null || slug.isBlank() ? null : slug;
+            validateProperties(title, description);
             contentPolicy.validate(document);
             Supplier<Mono<PageDetail>> write = () -> {
                 var name = UUID.randomUUID().toString();
@@ -133,8 +136,10 @@ public class PageService {
                     metadata.setFinalizers(Set.of(PageReconciler.FINALIZER));
                     page.setMetadata(metadata);
                     page.setSpec(new ThemePage.Spec());
+                    page.getSpec().setTitle(title);
+                    page.getSpec().setDescription(description);
                     page.getSpec().setSlug(normalizedSlug);
-                    page.getSpec().setThemeLayout(themeLayout);
+                    page.getSpec().setThemeLayout(themeLayout == null || themeLayout);
                     applyDraft(page, created);
                     return client.create(page).flux().single()
                         .onErrorResume(error -> {
@@ -174,98 +179,82 @@ public class PageService {
                 return Mono.error(badRequest("source must be manual or ai"));
             }
             contentPolicy.validate(request.document());
-            var layout = request.themeLayout();
-            var layoutChanged = layout != null && layout != themeLayout(page);
             return revision(name, page.getSpec().getDraftRevision()).flatMap(current -> {
                 if (Objects.equals(current.getSpec().getDocument(), request.document())) {
-                    if (!layoutChanged) {
-                        return Mono.just(detail(page, current));
-                    }
-                    page.getSpec().setThemeLayout(layout);
-                    page.getSpec().setUpdatedAt(Instant.now());
-                    return client.update(page).map(saved -> detail(saved, current));
+                    return Mono.just(detail(page, current));
                 }
-                if (layoutChanged) {
-                    page.getSpec().setThemeLayout(layout);
-                }
-                return writeDraft(page, request.document(), request.source(), actor);
+                return writeDraft(page, request.document(), request.source(), actor, null);
             });
         });
     }
 
     public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
-        String actor, String runId) {
-        return saveAi(name, version, document, actor, runId, null);
-    }
-
-    public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
-        String actor, String runId, String baseRevision) {
-        return saveAi(name, version, document, actor, runId, baseRevision, null);
-    }
-
-    public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
-        String actor, String runId, String baseRevision, String slug) {
+        String actor, String runId, String baseRevision, String slug, String title) {
         return mutate(name, version, page -> {
             if (baseRevision != null && !baseRevision.equals(page.getSpec().getDraftRevision())) {
                 return Mono.error(conflict("Page changed; reload before saving"));
             }
             contentPolicy.validate(document);
-            if (slug != null) {
-                if (page.getSpec().getSlug() != null && !page.getSpec().getSlug().isBlank()
-                    || page.getSpec().getPublishedRevision() != null) {
-                    return Mono.error(conflict("已有访问路径或已发布的页面不能由 AI 更改路径"));
-                }
-                PagePaths.validate(slug);
-                return writeSlug(slug, () -> checkSlugAvailable(slug, name)
-                    .then(Mono.defer(() -> {
-                        page.getSpec().setSlug(slug);
-                        // Even a path-only run needs a revision for commit reconciliation.
-                        return writeDraft(page, document, "ai", actor, runId);
-                    })));
+            if (title != null) validateProperties(title, page.getSpec().getDescription());
+            if (slug != null && (page.getSpec().getSlug() != null
+                || page.getSpec().getPublishedRevision() != null)) {
+                return Mono.error(conflict("已有访问路径或已发布的页面不能由 AI 更改路径"));
             }
-            return revision(name, page.getSpec().getDraftRevision()).flatMap(current -> {
-                if (Objects.equals(current.getSpec().getDocument(), document)) {
-                    return Mono.just(detail(page, current));
-                }
-                return writeDraft(page, document, "ai", actor, runId);
-            });
+            Supplier<Mono<PageDetail>> write = () -> {
+                if (title != null) page.getSpec().setTitle(title);
+                if (slug != null) page.getSpec().setSlug(slug);
+                page.getSpec().setLastAiCommit(new ThemePage.AiCommit(runId, null));
+                page.getSpec().setUpdatedAt(Instant.now());
+                return revision(name, page.getSpec().getDraftRevision()).flatMap(current -> {
+                    if (Objects.equals(current.getSpec().getDocument(), document)) {
+                        return client.update(page).map(saved -> detail(saved, current));
+                    }
+                    return writeDraft(page, document, "ai", actor, runId);
+                });
+            };
+            return slug == null ? write.get() : writeSlug(slug,
+                () -> checkSlugAvailable(slug, name).then(Mono.defer(write)));
         });
     }
 
-    /** An orphan revision alone is not proof that the page CAS succeeded. */
-    public Mono<String> committedAiRevision(String name, String runId) {
-        var candidates = revisionOptions(name);
-        candidates.setFieldSelector(candidates.getFieldSelector().andQuery(equal("spec.runId", runId)));
-        return page(name).flatMapMany(page -> client.listBy(ThemePageRevision.class, candidates,
-                PageRequestImpl.of(1, 1, Sort.unsorted()))
-            // Most start requests have a new runId. Avoid walking the entire history for them.
-            // A candidate is not proof: only a revision reachable from the draft counts.
-            .filter(result -> !result.getItems().isEmpty())
-            .flatMapMany(ignored -> revision(name, page.getSpec().getDraftRevision())
-                .expand(value -> value.getSpec().getParentRevision() == null ? Mono.empty()
-                    : revision(name, value.getSpec().getParentRevision()))))
-            .filter(value -> runId.equals(value.getSpec().getRunId()))
-            .map(value -> value.getMetadata().getName()).next();
+    /** A pending run is committed only when its receipt reached the page CAS. */
+    public Mono<ThemePage.AiCommit> committedAiRun(String name, String runId) {
+        return page(name).mapNotNull(page -> page.getSpec().getLastAiCommit())
+            .filter(commit -> runId.equals(commit.runId()));
     }
 
-    public Mono<PageDetail> updateSlug(String name, PageApi.UpdatePageSlugRequest request) {
+    public Mono<PageDetail> updateProperties(String name, PageApi.UpdatePagePropertiesRequest request) {
         return mutate(name, request.version(), page -> {
-            PagePaths.validate(request.slug());
-            return writeSlug(request.slug(), () -> checkSlugAvailable(request.slug(), name)
-                .then(Mono.defer(() -> {
-                    page.getSpec().setSlug(request.slug());
-                    page.getSpec().setUpdatedAt(Instant.now());
-                    return client.update(page).flux().single().flatMap(this::draftDetail);
-                })));
+            var spec = page.getSpec();
+            var title = request.title() == null ? spec.getTitle() : request.title();
+            var description = request.description() == null ? spec.getDescription() : request.description();
+            validateProperties(title, description);
+            var slug = request.slug() == null ? spec.getSlug() : request.slug();
+            var layout = request.themeLayout() == null ? spec.isThemeLayout() : request.themeLayout();
+            if (Objects.equals(title, spec.getTitle()) && Objects.equals(description, spec.getDescription())
+                && Objects.equals(slug, spec.getSlug()) && layout == spec.isThemeLayout()) {
+                return draftDetail(page);
+            }
+            Supplier<Mono<PageDetail>> write = () -> {
+                spec.setTitle(title);
+                spec.setDescription(description);
+                spec.setSlug(slug);
+                spec.setThemeLayout(layout);
+                spec.setUpdatedAt(Instant.now());
+                return client.update(page).flatMap(this::draftDetail);
+            };
+            return Objects.equals(slug, spec.getSlug()) ? write.get() : writeSlug(slug,
+                () -> checkSlugAvailable(slug, name).then(Mono.defer(write)));
         });
     }
 
-    public Mono<PageDetail> updateLayout(String name, PageApi.UpdatePageLayoutRequest request) {
-        return mutate(name, request.version(), page -> {
-            page.getSpec().setThemeLayout(request.themeLayout());
-            page.getSpec().setUpdatedAt(Instant.now());
-            return client.update(page).flatMap(this::draftDetail);
-        });
+    public static void validateProperties(String title, String description) {
+        if (title == null || title.isBlank() || title.length() > 200) {
+            throw badRequest("页面标题须为 1–200 个字符");
+        }
+        if (description != null && description.length() > 1000) {
+            throw badRequest("页面描述不能超过 1000 个字符");
+        }
     }
 
     public Mono<PageDetail> publish(String name, Long version) {
@@ -304,7 +293,7 @@ public class PageService {
         return mutate(name, request.version(), page ->
             revision(name, request.revision()).flatMap(historical -> {
                 contentPolicy.validate(historical.getSpec().getDocument());
-                return writeDraft(page, historical.getSpec().getDocument(), "restore", actor);
+                return writeDraft(page, historical.getSpec().getDocument(), "restore", actor, null);
             }));
     }
 
@@ -396,17 +385,15 @@ public class PageService {
     }
 
     private Mono<PageDetail> writeDraft(ThemePage page, PageDocument document, String source,
-        String actor) {
-        return writeDraft(page, document, source, actor, null);
-    }
-
-    private Mono<PageDetail> writeDraft(ThemePage page, PageDocument document, String source,
         String actor, String runId) {
         var revision = newRevision(page.getMetadata().getName(), document, source, actor);
-        revision.getSpec().setRunId(runId);
         revision.getSpec().setParentRevision(page.getSpec().getDraftRevision());
         return client.create(revision).flatMap(created -> {
             applyDraft(page, created);
+            if (runId != null) {
+                page.getSpec().setLastAiCommit(new ThemePage.AiCommit(
+                    runId, created.getMetadata().getName()));
+            }
             return client.update(page)
                 .onErrorResume(OptimisticLockingFailureException.class, error ->
                     // A rejected compare-and-set cannot have referenced this unique revision.
@@ -507,10 +494,7 @@ public class PageService {
     }
 
     private static void applyDraft(ThemePage page, ThemePageRevision revision) {
-        var document = revision.getSpec().getDocument();
         page.getSpec().setDraftRevision(revision.getMetadata().getName());
-        page.getSpec().setTitle(document.title());
-        page.getSpec().setDescription(document.description());
         page.getSpec().setUpdatedAt(Instant.now());
     }
 
@@ -522,20 +506,15 @@ public class PageService {
         var spec = page.getSpec();
         var name = page.getMetadata().getName();
         return new PageSummary(name, spec.getSlug(), spec.getTitle(), spec.getDescription(),
-            page.getMetadata().getVersion(), themeLayout(page), spec.getDraftRevision(),
+            page.getMetadata().getVersion(), page.getSpec().isThemeLayout(), spec.getDraftRevision(),
             spec.getPublishedRevision(),
             spec.getUpdatedAt(), !Objects.equals(spec.getDraftRevision(), spec.getPublishedRevision()));
-    }
-
-    /** Pages created before the setting existed default to rendering inside the theme layout. */
-    public static boolean themeLayout(ThemePage page) {
-        return !Boolean.FALSE.equals(page.getSpec().getThemeLayout());
     }
 
     private static RevisionSummary revisionSummary(ThemePageRevision revision) {
         return new RevisionSummary(revision.getMetadata().getName(),
             revision.getMetadata().getCreationTimestamp(), revision.getSpec().getCreatedBy(),
-            revision.getSpec().getSource(), revision.getSpec().getDocument().title(),
+            revision.getSpec().getSource(),
             revision.getSpec().getParentRevision());
     }
 

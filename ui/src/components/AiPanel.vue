@@ -262,7 +262,7 @@ watch(blankPage, () => (activePresetGroup.value = 0))
           />
           <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
         </span>
-        {{ activeRun?.status === 'committing' ? '正在保存本轮草稿…' : '助手正在处理页面…' }}
+        {{ activeRun?.status === 'committing' ? '正在保存本轮修改…' : '助手正在处理页面…' }}
       </div>
       <p v-else-if="notice" class="text-xs text-gray-400" role="status">{{ notice }}</p>
     </div>

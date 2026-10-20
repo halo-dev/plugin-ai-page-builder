@@ -63,7 +63,7 @@ class ChatFailureReasonTest {
     }
 
     private PageWorkingCopy copy() {
-        return new PageWorkingCopy(new PageDocument(1, "code", null, null, "", "", "Test", ""),
+        return new PageWorkingCopy(new PageDocument(1, "code", null, null, "", ""),
             new ContentPolicy());
     }
 }

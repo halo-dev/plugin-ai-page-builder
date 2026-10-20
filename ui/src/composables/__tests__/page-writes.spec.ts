@@ -7,7 +7,7 @@ import type { PageDetail } from '../../api/generated'
 const api = vi.hoisted(() => ({
   getPage: vi.fn(),
   savePage: vi.fn(),
-  updatePageSlug: vi.fn(),
+  updatePageProperties: vi.fn(),
   publishPage: vi.fn(),
   unpublishPage: vi.fn(),
   restorePageRevision: vi.fn(),
@@ -15,8 +15,18 @@ const api = vi.hoisted(() => ({
 vi.mock('../../api/clients', () => ({ aiPageBuilderApi: api }))
 function page(version = 1, name = 'page', title = 'Title', slug = 'path'): PageDetail {
   return {
-    page: { name, title, slug, version, themeLayout: true, draftRevision: `r${version}` },
-    document: { schemaVersion: 2, mode: 'code', title, html: '<p>Saved</p>', css: '', js: '' },
+    page: {
+      name,
+      title,
+      slug,
+      version,
+      themeLayout: true,
+      description: '',
+      updatedAt: '',
+      hasUnpublishedChanges: true,
+      draftRevision: `r${version}`,
+    },
+    document: { schemaVersion: 2, mode: 'code', html: '<p>Saved</p>', css: '', js: '' },
   } as PageDetail
 }
 function deferred<T>() {
@@ -44,24 +54,29 @@ function setup() {
 const confirmed = async () => true
 
 describe('page writes', () => {
-  it('retains successful title saves and retries the remaining publication steps', async () => {
+  it('saves properties atomically and retries publication without resaving them', async () => {
     const writes = setup()
-    api.savePage.mockResolvedValue({ data: page(2, 'page', 'New') })
-    api.updatePageSlug.mockRejectedValueOnce(new Error('Path taken'))
     const metadata = { title: 'New', slug: 'new-path' }
+    api.updatePageProperties.mockRejectedValueOnce(new Error('Path taken'))
     await expect(writes.publish(metadata, confirmed)).rejects.toThrow('Path taken')
-    expect(writes.detail.value?.page.version).toBe(2)
+    expect(writes.detail.value?.page.version).toBe(1)
     expect(api.publishPage).not.toHaveBeenCalled()
-    api.updatePageSlug.mockResolvedValue({ data: page(3, 'page', 'New', 'new-path') })
-    api.publishPage.mockResolvedValue({ data: page(4, 'page', 'New', 'new-path') })
+    api.updatePageProperties.mockResolvedValue({ data: page(2, 'page', 'New', 'new-path') })
+    api.publishPage.mockRejectedValueOnce(new Error('Publish failed'))
+    await expect(writes.publish(metadata, confirmed)).rejects.toThrow('Publish failed')
+    expect(writes.detail.value?.page.version).toBe(2)
+    api.publishPage.mockResolvedValue({ data: page(3, 'page', 'New', 'new-path') })
     await writes.publish(metadata, confirmed)
-    expect(api.savePage).toHaveBeenCalledTimes(1)
-    expect(api.updatePageSlug).toHaveBeenLastCalledWith({
+    expect(api.savePage).not.toHaveBeenCalled()
+    expect(api.updatePageProperties).toHaveBeenCalledTimes(2)
+    expect(api.updatePageProperties).toHaveBeenLastCalledWith({
       name: 'page',
-      updatePageSlugRequest: { version: 2, slug: 'new-path' },
+      updatePagePropertiesRequest: { version: 1, ...metadata },
     })
-    expect(api.publishPage).toHaveBeenCalledWith({ name: 'page', mutationRequest: { version: 3 } })
-    expect(writes.detail.value?.page.version).toBe(4)
+    expect(api.publishPage).toHaveBeenLastCalledWith({
+      name: 'page',
+      mutationRequest: { version: 2 },
+    })
   })
 
   it('holds the write lock through script verification and all publication steps', async () => {
@@ -100,14 +115,14 @@ describe('page writes', () => {
   it('caches an old operation result but stops its remaining publication steps', async () => {
     const writes = setup()
     const titleSave = deferred<{ data: PageDetail }>()
-    api.savePage.mockReturnValue(titleSave.promise)
+    api.updatePageProperties.mockReturnValue(titleSave.promise)
     const operation = writes.publish({ title: 'New', slug: 'new-path' }, confirmed)
-    await vi.waitFor(() => expect(api.savePage).toHaveBeenCalled())
+    await vi.waitFor(() => expect(api.updatePageProperties).toHaveBeenCalled())
     writes.reset(page(1, 'other'))
     titleSave.resolve({ data: page(2, 'page', 'New') })
     expect(await operation).toBeUndefined()
     expect(writes.detail.value?.page.name).toBe('other')
-    expect(api.updatePageSlug).not.toHaveBeenCalled()
+    expect(api.updatePageProperties).toHaveBeenCalledTimes(1)
     expect(api.publishPage).not.toHaveBeenCalled()
     expect(queryClient.getQueryData(pageKeys.detail('page'))).toMatchObject({
       page: { version: 2 },
@@ -117,15 +132,15 @@ describe('page writes', () => {
   it('stops remaining writes if a refresh overtakes an intermediate publication save', async () => {
     const writes = setup()
     const titleSave = deferred<{ data: PageDetail }>()
-    api.savePage.mockReturnValue(titleSave.promise)
+    api.updatePageProperties.mockReturnValue(titleSave.promise)
     const operation = writes.publish({ title: 'New', slug: 'new-path' }, confirmed)
-    await vi.waitFor(() => expect(api.savePage).toHaveBeenCalled())
+    await vi.waitFor(() => expect(api.updatePageProperties).toHaveBeenCalled())
     api.getPage.mockResolvedValue({ data: page(3, 'page', 'Concurrent') })
     await writes.refresh()
     titleSave.resolve({ data: page(2, 'page', 'New') })
     await expect(operation).rejects.toThrow('页面已更新')
     expect(writes.detail.value?.page.version).toBe(3)
-    expect(api.updatePageSlug).not.toHaveBeenCalled()
+    expect(api.updatePageProperties).toHaveBeenCalledTimes(1)
     expect(api.publishPage).not.toHaveBeenCalled()
   })
 
@@ -218,15 +233,14 @@ describe('page writes', () => {
     expect(writes.detail.value?.page.version).toBe(3)
   })
 
-  it('does not replace the publication version with a newer prop while loading title content', async () => {
+  it('rejects a changed version during verification without fetching content', async () => {
     const writes = setup()
-    const read = deferred<{ data: PageDetail }>()
-    api.getPage.mockReturnValue(read.promise)
-    const operation = writes.publish({ title: 'New', slug: 'path' }, confirmed)
-    await vi.waitFor(() => expect(api.getPage).toHaveBeenCalled())
+    const verification = deferred<boolean>()
+    const operation = writes.publish({ title: 'New', slug: 'path' }, () => verification.promise)
     writes.sync(page(2).page)
-    read.resolve({ data: page() })
+    verification.resolve(true)
     await expect(operation).rejects.toThrow('页面已更新')
-    expect(api.savePage).not.toHaveBeenCalled()
+    expect(api.getPage).not.toHaveBeenCalled()
+    expect(api.updatePageProperties).not.toHaveBeenCalled()
   })
 })

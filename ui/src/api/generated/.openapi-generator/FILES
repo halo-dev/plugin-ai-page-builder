@@ -58,6 +58,5 @@ models/test-operation.ts
 models/theme-color-mode.ts
 models/theme-root-state.ts
 models/theme-style-context.ts
-models/update-page-layout-request.ts
-models/update-page-slug-request.ts
+models/update-page-properties-request.ts
 models/validate-page-content-request.ts

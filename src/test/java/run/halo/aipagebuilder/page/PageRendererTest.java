@@ -41,7 +41,7 @@ class PageRendererTest {
         MockServerWebExchange.from(MockServerHttpRequest.get("http://localhost/p/about")),
         HandlerStrategies.withDefaults().messageReaders());
     private final PageDocument document = new PageDocument(1, "code", "", Map.of(),
-        "<p>About</p>", "p { color: red }", "About", "Description");
+        "<p>About</p>", "p { color: red }");
 
     @org.junit.jupiter.api.BeforeEach
     void defaultCompiledContent() {
@@ -56,7 +56,7 @@ class PageRendererTest {
         when(policy.renderCss(document.css(), "ai-page-builder-about"))
             .thenReturn("#ai-page-builder-about p { color: red }");
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
-        var response = (RenderingResponse) renderer.render(request, "about", "about/company", true, document).block();
+        var response = (RenderingResponse) renderer.render(request, "about", "about/company", true, document, "About", "Description").block();
         assertThat(response.name()).isEqualTo("plugin:ai-page-builder:ai-page-builder");
         assertThat(response.headers().getCacheControl()).isEqualTo("no-store");
         assertThat(response.model()).containsOnlyKeys("aiPageBuilder", "_templateId");
@@ -73,11 +73,11 @@ class PageRendererTest {
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("theme:custom-ai-page-builder"));
         var interactive = new PageDocument(2, "code", null, null, "<p>Interactive</p>",
-            "p {color: red} html.dark p {color: white}", "Title", null,
+            "p {color: red} html.dark p {color: white}",
             "document.querySelector('#ai-page-builder-about p').textContent = 'Ready';");
         var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy(),
             externalUrlSupplier)
-            .render(request, "about", "about/company", true, interactive).block();
+            .render(request, "about", "about/company", true, interactive, "About", "Description").block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(response.name()).isEqualTo("theme:custom-ai-page-builder");
         assertThat(response.model()).containsOnlyKeys("aiPageBuilder", "_templateId");
@@ -93,13 +93,12 @@ class PageRendererTest {
     void scriptEndTagsRemainEncodedAndPreserveUtf8Source() {
         var js = "const text = '</script><script>window.compromised = true</script>';\r\n"
             + "document.body.dataset.text = '中文 < & > </ScRiPt> <!--';";
-        var interactive = new PageDocument(2, "code", null, null, "<p>Body</p>", "",
-            "Title", null, js);
+        var interactive = new PageDocument(2, "code", null, null, "<p>Body</p>", "", js);
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy(),
             externalUrlSupplier)
-            .render(request, "about", "about/company", true, interactive).block();
+            .render(request, "about", "about/company", true, interactive, "About", "Description").block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         var body = Jsoup.parseBodyFragment(view.html()).body();
         assertThat(body.children().stream().map(element -> element.normalName()).toList()).containsExactly("p", "script");
@@ -122,7 +121,7 @@ class PageRendererTest {
             .thenReturn("#ai-page-builder-about p { color: red }");
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
         var response = (RenderingResponse) renderer.render(request, "about", "about/company",
-            false, document).block();
+            false, document, "About", "Description").block();
         assertThat(response.name()).isEqualTo("plugin:ai-page-builder:ai-page-builder-standalone");
         assertThat(response.model().get("_templateId"))
             .isEqualTo("plugin:ai-page-builder:ai-page-builder-standalone");
@@ -132,20 +131,20 @@ class PageRendererTest {
     void superAdministratorViewsStripScriptsAndFlagTheTemplate() {
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
-        var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "", "Title", null,
+        var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "",
             "document.querySelector('p').textContent = 'Ready';");
         when(policy.sanitizeHtml(scripted.html())).thenReturn(scripted.html());
         var response = (RenderingResponse) renderer.render(request, "about", "about", true,
-            scripted, true).block();
+            scripted, "About", "Description", true).block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(view.scriptBlocked()).isTrue();
         assertThat(view.html()).isEqualTo(scripted.html()).doesNotContain("<script");
 
-        var staticPage = new PageDocument(2, "code", null, null, "<p>Body</p>", "", "Title", null,
+        var staticPage = new PageDocument(2, "code", null, null, "<p>Body</p>", "",
             "");
         when(policy.sanitizeHtml(staticPage.html())).thenReturn(staticPage.html());
         var staticResponse = (RenderingResponse) renderer.render(request, "about", "about", true,
-            staticPage, true).block();
+            staticPage, "About", "Description", true).block();
         var staticView = (PageRenderer.PageView) staticResponse.model().get("aiPageBuilder");
         assertThat(staticView.scriptBlocked()).isFalse();
     }
@@ -155,10 +154,9 @@ class PageRendererTest {
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         var unclosed = new PageDocument(1, "code", null, null,
-            "<DIV class=hero><a href=\"https://example.com\" target=_blank>go</a><p>Body", "",
-            "Title", null);
+            "<DIV class=hero><a href=\"https://example.com\" target=_blank>go</a><p>Body", "");
         var response = (RenderingResponse) new PageRenderer(resolver, new ContentPolicy(),
-            externalUrlSupplier).render(request, "about", "about", true, unclosed)
+            externalUrlSupplier).render(request, "about", "about", true, unclosed, "About", "Description")
             .block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(view.html())
@@ -171,7 +169,7 @@ class PageRendererTest {
     void invalidPersistedContentIsRejectedBeforeTemplateRendering() {
         doThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsafe content"))
             .when(policy).validate(document);
-        assertThatThrownBy(() -> renderer.render(request, "about", "about/company", true, document).block())
+        assertThatThrownBy(() -> renderer.render(request, "about", "about/company", true, document, "About", "Description").block())
             .isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(resolver);
     }

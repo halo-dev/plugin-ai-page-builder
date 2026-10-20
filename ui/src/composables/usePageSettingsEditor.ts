@@ -1,19 +1,14 @@
 import { Toast } from '@halo-dev/components'
 import { aiPageBuilderApi } from '../api/clients'
-import type { PageDocument, PageSummary } from '../api/generated'
+import type { PageSummary } from '../api/generated'
 import { pageKeys, queryClient } from '../lib/query-client'
 import { errorMessage } from '../utils/error'
-import { usePageWrites } from './usePageWrites'
-
-export type SettingsPatch = Partial<Pick<PageDocument, 'title' | 'description'>> & {
-  themeLayout?: boolean
-}
+import { usePageWrites, type PagePropertiesPatch } from './usePageWrites'
 
 export function usePageSettingsEditor(options: {
   confirm: (title: string, description: string) => Promise<boolean>
 }) {
-  // Settings modal edits the saved page directly: the slug applies immediately,
-  // title/description/layout are persisted as a saved draft on 应用.
+  // All page properties take effect immediately without changing the content draft.
   const writes = usePageWrites()
   let generation = 0
 
@@ -44,28 +39,15 @@ export function usePageSettingsEditor(options: {
     if (isConflict(e)) void writes.refresh().catch(() => {})
   }
 
-  async function saveSlug(slug: string) {
-    try {
-      return await writes.updateSlug(slug)
-    } catch (e) {
-      refreshAfterConflict(e)
-      throw e
-    }
-  }
-
-  async function apply(patch: SettingsPatch) {
+  async function apply(patch: PagePropertiesPatch) {
     const current = writes.detail.value
     if (!current) return
     if (!Object.keys(patch).length) {
       close()
       return
     }
-    const { themeLayout, ...documentPatch } = patch
     try {
-      const result = await writes.save({
-        document: { ...current.document, ...documentPatch },
-        ...(themeLayout === undefined ? {} : { themeLayout }),
-      })
+      const result = await writes.updateProperties(patch)
       if (result) {
         close()
         Toast.success('设置已保存')
@@ -94,7 +76,6 @@ export function usePageSettingsEditor(options: {
     saving: writes.pending,
     open,
     close,
-    saveSlug,
     apply,
     unpublish,
   }

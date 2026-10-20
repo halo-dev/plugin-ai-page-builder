@@ -71,9 +71,7 @@ const {
   applySettings,
   move,
   save,
-  updateSlug,
   prepareAgent,
-  layout,
   restore: restoreDraft,
   resetSession,
   writes,
@@ -210,7 +208,7 @@ async function restore(revision: string) {
     const result = await restoreDraft(revision, () =>
       confirmDialog(
         '恢复选中版本？',
-        '当前修改会先保存，选中版本将复制为新草稿。线上发布版本不会改变。',
+        '当前修改会先保存，选中版本将复制为新草稿。线上发布内容和当前页面属性不会改变。',
       ),
     )
     if (result) {
@@ -221,9 +219,19 @@ async function restore(revision: string) {
     Toast.error(errorMessage(e))
   }
 }
-function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
-  applySettings(value)
-  settingsOpen.value = false
+async function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
+  try {
+    const result = await applySettings(value)
+    if (result) {
+      settingsOpen.value = false
+      Toast.success('页面属性已保存')
+    }
+  } catch (e) {
+    Toast.error(errorMessage(e))
+    if ((e as { response?: { status?: number } }).response?.status === 409) {
+      error.value = '页面已在别处修改，请载入最新版本后重试。当前未保存的内容仍保留。'
+    }
+  }
 }
 </script>
 
@@ -239,7 +247,7 @@ function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
   >
     <EditorHeader
       :page="detail?.page"
-      :title="working?.title || '页面工作台'"
+      :title="detail?.page.title || '页面工作台'"
       :busy="busy"
       :locked="locked"
       :dirty="dirty"
@@ -355,13 +363,13 @@ function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
                 :src="pagePreviewUrl(detail.page.name)"
                 :document="detail.document"
                 :device="device"
-                :theme-layout="detail.page.themeLayout"
+                :page-version="detail.page.version"
               />
               <VisualEditor
                 v-show="view === 'visual' && !streamPreview"
                 :name="detail.page.name"
                 :document="working"
-                :theme-layout="detail.page.themeLayout"
+                :page-version="detail.page.version"
                 :validated="valid"
                 :disabled="locked || !valid"
                 :device="device"
@@ -382,10 +390,7 @@ function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
       </div>
       <PageSettings
         v-if="settingsOpen"
-        :document="working"
-        :slug="detail.page.slug"
-        :theme-layout="layout"
-        :save-slug="updateSlug"
+        :page="detail.page"
         :disabled="locked"
         :published="!!detail.page.publishedRevision"
         @close="settingsOpen = false"

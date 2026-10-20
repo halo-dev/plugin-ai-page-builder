@@ -20,7 +20,7 @@ export function codeDocument(
 
 export function updateDocument(
   document: PageDocument,
-  patch: Partial<Pick<PageDocument, 'html' | 'css' | 'js' | 'title' | 'description'>>,
+  patch: Partial<Pick<PageDocument, 'html' | 'css' | 'js'>>,
 ): PageDocument {
   if (Object.entries(patch).every(([key, value]) => document[key as keyof PageDocument] === value))
     return document

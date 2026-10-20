@@ -238,13 +238,13 @@ class PageEndpointTest {
         var pageRenderer = new PageRenderer(resolver, new ContentPolicy(), EXTERNAL_URLS);
         var renderingEndpoint = new PageEndpoint(service, pageRenderer,
             new PagePreview(pageRenderer, mock(PublicApiCatalog.class), EXTERNAL_URLS), reviewService);
-        var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
+        var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "");
         var candidate = new PageDocument(2, "code", null, null, "<p>Unsaved</p>", """
             :root {color: red}
             html.dark p {color: white}
             @media (min-width: 600px) {p {margin: 1rem}}
             @supports (display: grid) {p {display: grid}}
-            """, "Unsaved title", "Unsaved description", "console.log('preview');");
+            """, "console.log('preview');");
         when(service.get("about")).thenReturn(Mono.just(detail(stored)))
             .thenReturn(Mono.just(detail(candidate)));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
@@ -265,8 +265,8 @@ class PageEndpointTest {
         assertThat(getResponse.headers().getFirst("Content-Security-Policy"))
             .isEqualTo(response.headers().getFirst("Content-Security-Policy"));
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
-        assertThat(view.title()).isEqualTo(candidate.title());
-        assertThat(view.description()).isEqualTo(candidate.description());
+        assertThat(view.title()).isEqualTo("About");
+        assertThat(view.description()).isEqualTo("");
         assertThat(view.html()).startsWith(candidate.html()).doesNotContain(stored.html());
         assertThat(view.css()).contains("#ai-page-builder-about", "html.dark #ai-page-builder-about p",
             "@media", "@supports");
@@ -276,52 +276,51 @@ class PageEndpointTest {
 
     @Test
     void slugUpdateUsesStableIdentifierAndVersionedBody() {
-        var input = new PageApi.UpdatePageSlugRequest(4L, "company/about-us");
-        var document = new PageDocument(1, "code", null, null, "", "", "About", "");
-        when(service.updateSlug("about", input)).thenReturn(Mono.just(detail(document)));
+        var input = new PageApi.UpdatePagePropertiesRequest(4L, null, null, "company/about-us", null);
+        var document = new PageDocument(1, "code", null, null, "", "");
+        when(service.updateProperties("about", input)).thenReturn(Mono.just(detail(document)));
         var request = ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest
-                .put("/pages/about/slug").contentType(MediaType.APPLICATION_JSON)
+                .put("/pages/about/properties").contentType(MediaType.APPLICATION_JSON)
                 .body(Json.toJson(input))), HandlerStrategies.withDefaults().messageReaders());
         assertThat(asAdmin(endpoint, request).block().statusCode()).isEqualTo(HttpStatus.OK);
-        verify(service).updateSlug("about", input);
+        verify(service).updateProperties("about", input);
         verifyNoMoreInteractions(service);
     }
 
     @Test
     void previewsPassStableNameAndSeparateSlugToPreview() {
-        var document = new PageDocument(1, "code", null, null, "", "", "About", "");
+        var document = new PageDocument(1, "code", null, null, "", "");
         when(service.get("about")).thenReturn(Mono.just(detail(document)));
-        when(preview.render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document)))
+        when(preview.render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document), any(), any()))
             .thenReturn(ServerResponse.ok().build());
         assertThat(asAdmin(endpoint, request("/pages/about/preview")).block().statusCode())
             .isEqualTo(HttpStatus.OK);
         assertThat(asAdmin(endpoint, previewRequest(Json.toJson(document))).block().statusCode())
             .isEqualTo(HttpStatus.OK);
-        verify(preview, times(2)).render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
+        verify(preview, times(2)).render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document), any(), any());
     }
 
     @Test
     void revisionPreviewRendersRevisionDocumentWithPageTheme() {
-        var document = new PageDocument(1, "code", null, null, "", "", "About", "");
-        var revisionDocument = new PageDocument(2, "code", null, null, "<p>Old</p>", "", "Old title", "");
+        var document = new PageDocument(1, "code", null, null, "", "");
+        var revisionDocument = new PageDocument(2, "code", null, null, "<p>Old</p>", "");
         when(service.get("about")).thenReturn(Mono.just(detail(document)));
         when(service.revisionDetail("about", "rev-1"))
             .thenReturn(Mono.just(new PageApi.RevisionDetail(
-                new PageApi.RevisionSummary("rev-1", java.time.Instant.now(), "admin", "ai",
-                    "Old title", null),
+                new PageApi.RevisionSummary("rev-1", java.time.Instant.now(), "admin", "ai", null),
                 revisionDocument)));
         when(preview.render(any(), eq("about"), eq("company/about-us"), eq(true),
-            eq(revisionDocument))).thenReturn(ServerResponse.ok().build());
+            eq(revisionDocument), any(), any())).thenReturn(ServerResponse.ok().build());
 
         assertThat(asAdmin(endpoint, request("/pages/about/revisions/rev-1/preview")).block()
             .statusCode()).isEqualTo(HttpStatus.OK);
         verify(preview).render(any(), eq("about"), eq("company/about-us"), eq(true),
-            eq(revisionDocument));
+            eq(revisionDocument), any(), any());
     }
 
     @Test
     void candidatePreviewRequiresExistingPage() {
-        var candidate = new PageDocument(1, "code", null, null, "<p>Unsaved</p>", "", "Title", null);
+        var candidate = new PageDocument(1, "code", null, null, "<p>Unsaved</p>", "");
         when(service.get("about")).thenReturn(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND)));
         var result = asAdmin(endpoint, previewRequest(Json.toJson(candidate)));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
@@ -338,11 +337,10 @@ class PageEndpointTest {
         var pageRenderer = new PageRenderer(resolver, new ContentPolicy(), EXTERNAL_URLS);
         var renderingEndpoint = new PageEndpoint(service, pageRenderer,
             new PagePreview(pageRenderer, mock(PublicApiCatalog.class), EXTERNAL_URLS), reviewService);
-        var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
+        var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "");
         var candidate = new PageDocument("schema".equals(invalidField) ? 99 : 1, "code", null, null,
             "html".equals(invalidField) ? "<script>alert(1)</script>" : "<p>Unsaved</p>",
-            "css".equals(invalidField) ? "@import url('https://example.com/style.css');" : "",
-            "Title", null);
+            "css".equals(invalidField) ? "@import url('https://example.com/style.css');" : "");
         when(service.get("about")).thenReturn(Mono.just(detail(stored)));
         var result = asAdmin(renderingEndpoint, previewRequest(Json.toJson(candidate)));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
@@ -385,7 +383,7 @@ class PageEndpointTest {
     @Test
     void superAdministratorCanReadDraft() {
         var request = request("/pages/about");
-        var document = new PageDocument(1, "code", "", Map.of(), "", "", "About", "");
+        var document = new PageDocument(1, "code", "", Map.of(), "", "");
         when(service.get("about")).thenReturn(Mono.just(new PageDetail(null, document)));
         var authentication = new UsernamePasswordAuthenticationToken("admin", "",
             List.of(new SimpleGrantedAuthority("ROLE_super-role")));

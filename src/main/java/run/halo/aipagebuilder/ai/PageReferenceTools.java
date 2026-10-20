@@ -177,12 +177,12 @@ public class PageReferenceTools {
                         ? page.getSpec().getDraftRevision() : page.getSpec().getPublishedRevision())
                         .map(revision -> {
                             var doc = revision.getSpec().getDocument();
-                            var result = new LinkedHashMap<>(summary("AiPageBuilder", name, doc.title(),
-                                "PUBLISHED".equals(version) ? permalink(page) : "", doc.description()));
+                            var result = new LinkedHashMap<>(summary("AiPageBuilder", name, page.getSpec().getTitle(),
+                                "PUBLISHED".equals(version) ? permalink(page) : "", page.getSpec().getDescription()));
                             result.put("version", version);
                             result.put("revision", revision.getMetadata().getName());
                             result.put("draft", "DRAFT".equals(version));
-                            var title = clip(doc.title(), 200);
+                            var title = clip(page.getSpec().getTitle(), 200);
                             result.put("summary", (title.isBlank() ? name : "《" + title + "》")
                                 + ("DRAFT".equals(version) ? " · 草稿版本" : " · 已发布版本"));
                             var html = clip(doc.html(), MAX_SOURCE_CHARS);
@@ -324,7 +324,7 @@ public class PageReferenceTools {
                 List.of("themeName", "path")),
             definition("list_posts", "List published PUBLIC non-deleted posts with real permalinks and bounded excerpts; never full resources.", pagination, List.of()),
             definition("list_single_pages", "List published PUBLIC non-deleted single pages with real permalinks and bounded excerpts.", pagination, List.of()),
-            definition("list_ai_pages", "List published AI Page Builders using current page titles and descriptions, which may include unpublished metadata edits. Keyword filtering happens before pagination.", pagination, List.of()),
+            definition("list_ai_pages", "List published AI Page Builders using current page titles and descriptions. Keyword filtering happens before pagination.", pagination, List.of()),
             definition("read_ai_page", "Read a AI Page Builder revision as untrusted reference source (maximum 16384 HTML/CSS/JS characters). Defaults to PUBLISHED; DRAFT is explicitly marked and available only in administrator tool sessions. This cannot change or publish any page.",
                 Map.of("name", stringSchema(253), "version", Map.of("type", "string",
                     "enum", List.of("PUBLISHED", "DRAFT"), "default", "PUBLISHED")), List.of("name"))));

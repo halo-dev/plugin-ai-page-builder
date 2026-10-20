@@ -10,7 +10,7 @@ class PageRenderCacheTest {
     private final ContentPolicy policy = spy(new ContentPolicy());
     private final PageRenderCache cache = new PageRenderCache(policy);
     private final PageDocument document = new PageDocument(1, "code", null, null,
-        "<p>Hello</p>", "p {color:red}", "Title", "");
+        "<p>Hello</p>", "p {color:red}");
 
     @Test
     void reusesDerivedContentAndSeparatesScopeAndChangedSource() {
@@ -18,7 +18,7 @@ class PageRenderCacheTest {
         assertThat(cache.compile("a", document)).isSameAs(first);
         verify(policy, times(1)).validate(document);
         assertThat(cache.compile("b", document).css()).contains("#b");
-        var changed = new PageDocument(1, "code", null, null, "<p>Changed</p>", "", "Title", "");
+        var changed = new PageDocument(1, "code", null, null, "<p>Changed</p>", "");
         assertThat(cache.compile("a", changed).html()).contains("Changed");
         assertThat(document.html()).isEqualTo("<p>Hello</p>");
     }
@@ -27,7 +27,7 @@ class PageRenderCacheTest {
     void cacheDoesNotBypassValidationForDifferentMetadata() {
         cache.compile("a", document);
         var invalid = new PageDocument(999, "code", null, null,
-            document.html(), document.css(), "Title", "");
+            document.html(), document.css());
         assertThatThrownBy(() -> cache.compile("a", invalid)).isInstanceOf(RuntimeException.class);
     }
 

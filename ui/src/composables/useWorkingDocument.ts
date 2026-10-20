@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, shallowRef } from 'vue'
 import { aiPageBuilderChatApi } from '../api/clients'
-import { usePageWrites } from './usePageWrites'
+import { usePageWrites, type PagePropertiesPatch } from './usePageWrites'
 import { errorMessage } from '../utils/error'
 import type { PageDetail, PageDocument } from '../api/generated'
 import {
@@ -12,7 +12,6 @@ import {
 
 export function useWorkingDocument() {
   const document = shallowRef<PageDocument>()
-  const layout = shallowRef(false)
   const saving = shallowRef(false)
   const agentRunning = shallowRef(false)
   const preparing = shallowRef(false)
@@ -31,10 +30,7 @@ export function useWorkingDocument() {
   const { detail, pending: busy } = writes
   const dirty = computed(
     () =>
-      !!detail.value &&
-      !!document.value &&
-      (fingerprint(document.value) !== savedFingerprint.value ||
-        layout.value !== detail.value.page.themeLayout),
+      !!detail.value && !!document.value && fingerprint(document.value) !== savedFingerprint.value,
   )
   const locked = computed(() => busy.value || agentRunning.value || preparing.value)
   const valid = computed(() => validationState.value === 'valid')
@@ -85,7 +81,6 @@ export function useWorkingDocument() {
   }
   function applyDocument(result: PageDetail, reset = false) {
     cancelValidation()
-    layout.value = result.page.themeLayout
     if (!history || reset) history = createDocumentHistory(result.document)
     else history.push(result.document)
     document.value = cloneDocument(result.document)
@@ -115,18 +110,12 @@ export function useWorkingDocument() {
     historyVersion.value++
     if (contentChanged) validate()
   }
-  function patch(
-    value: Partial<Pick<PageDocument, 'html' | 'css' | 'js' | 'title' | 'description'>>,
-  ) {
+  function patch(value: Partial<Pick<PageDocument, 'html' | 'css' | 'js'>>) {
     if (document.value) change(updateDocument(document.value, value))
   }
-  function applySettings(
-    value: Partial<Pick<PageDocument, 'title' | 'description'>> & { themeLayout?: boolean },
-  ) {
-    if (locked.value) return
-    const { themeLayout, ...documentPatch } = value
-    if (themeLayout !== undefined) layout.value = themeLayout
-    if (Object.keys(documentPatch).length) patch(documentPatch)
+  async function applySettings(properties: PagePropertiesPatch) {
+    if (locked.value || !detail.value) return undefined
+    return writes.updateProperties(properties)
   }
   function move(direction: 'undo' | 'redo') {
     if (locked.value || !history || !(direction === 'undo' ? history.canUndo : history.canRedo))
@@ -149,14 +138,10 @@ export function useWorkingDocument() {
     saving.value = true
     error.value = ''
     try {
-      return await writes.save({ document: document.value, themeLayout: layout.value })
+      return await writes.save({ document: document.value })
     } finally {
       saving.value = false
     }
-  }
-  async function updateSlug(slug: string) {
-    if (locked.value || !detail.value) return undefined
-    return writes.updateSlug(slug)
   }
   async function restore(revision: string, confirm: () => Promise<boolean>) {
     if (locked.value || !detail.value || !valid.value) return undefined
@@ -165,9 +150,7 @@ export function useWorkingDocument() {
       () => {
         if (agentRunning.value || preparing.value) throw new Error('页面尚未就绪。')
         if (!valid.value) throw new Error('请先修正源码并等待校验通过。')
-        return dirty.value && document.value
-          ? { document: document.value, themeLayout: layout.value }
-          : undefined
+        return dirty.value && document.value ? { document: document.value } : undefined
       },
       confirm,
     )
@@ -189,7 +172,6 @@ export function useWorkingDocument() {
   return {
     detail,
     document,
-    layout,
     busy,
     saving,
     agentRunning,
@@ -208,7 +190,6 @@ export function useWorkingDocument() {
     applySettings,
     move,
     save,
-    updateSlug,
     prepareAgent,
     restore,
     resetSession,

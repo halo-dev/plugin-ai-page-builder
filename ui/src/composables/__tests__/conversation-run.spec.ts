@@ -19,7 +19,7 @@ const waiting: PageChatRun = {
   pendingQuestion: question,
 }
 const page = {
-  page: { name: 'page', draftRevision: 'revision' },
+  page: { name: 'page', version: 1, draftRevision: 'revision' },
   document: { html: '<p>saved</p>' },
 } as PageDetail
 const completed: PageChatRun = {
@@ -61,6 +61,16 @@ afterEach(() => {
 })
 
 describe('Conversation Turn observations', () => {
+  it('adopts property-only commits with the same content revision and deduplicates each version', () => {
+    const { run, committed } = setup()
+    run.committed(page)
+    const renamed = { ...page, page: { ...page.page, title: 'Renamed', version: 2 } }
+    run.committed(renamed)
+    run.committed(renamed)
+    expect(committed).toHaveBeenCalledTimes(2)
+    expect(committed).toHaveBeenLastCalledWith(renamed)
+  })
+
   it('ignores a waiting poll captured before an answer and polls the advanced run', async () => {
     const { run, transport } = setup()
     const poll = deferred<PageChatRun>()

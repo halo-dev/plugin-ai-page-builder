@@ -219,18 +219,18 @@ class ContentPolicyTest {
 
     @Test
     void supportsLegacyDocumentsAndVersionTwoScripts() {
-        var legacy = new PageDocument(1, "code", null, null, "<p>Hi</p>", "", "Title", null);
-        var nullable = new PageDocument(1, "code", null, null, "", "", "Title", null, null);
+        var legacy = new PageDocument(1, "code", null, null, "<p>Hi</p>", "");
+        var nullable = new PageDocument(1, "code", null, null, "", "", null);
         assertThat(legacy.js()).isEmpty();
         assertThat(nullable.js()).isEmpty();
         assertThatCode(() -> policy.validate(legacy)).doesNotThrowAnyException();
         assertThatCode(() -> policy.validate(new PageDocument(2, "code", null, null,
-            "<button>Run</button>", "", "Title", null, "document.body.dataset.ready = 'yes';")))
+            "<button>Run</button>", "", "document.body.dataset.ready = 'yes';")))
             .doesNotThrowAnyException();
         assertThatThrownBy(() -> policy.validate(new PageDocument(1, "code", null, null,
-            "", "", "Title", null, "void 0;"))).isInstanceOf(ResponseStatusException.class);
+            "", "", "void 0;"))).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> policy.validate(new PageDocument(3, "code", null, null,
-            "", "", "Title", null))).isInstanceOf(ResponseStatusException.class);
+            "", ""))).isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
@@ -245,13 +245,13 @@ class ContentPolicyTest {
             .isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> policy.validateJs(null)).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> policy.validate(new PageDocument(2, "code", null, null,
-            "<script>void 0</script>", "", "Title", null, "void 0")))
+            "<script>void 0</script>", "", "void 0")))
             .isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
     void sourceModeDoesNotRequireEditorData() {
-        var document = new PageDocument(1, "code", null, null, "<h1>Hello</h1>", "", "Title", null);
+        var document = new PageDocument(1, "code", null, null, "<h1>Hello</h1>", "");
         assertThatCode(() -> policy.validate(document)).doesNotThrowAnyException();
     }
 
@@ -262,7 +262,7 @@ class ContentPolicyTest {
                 "head", Map.of("type", "head"), "docEl", Map.of("tagName", "html"),
                 "components", List.of(Map.of("tagName", "h1", "content", "Hello"))))))));
         var document = new PageDocument(1, "visual", "0.22.16", project,
-            "<div><h1>Hello</h1></div>", "", "Title", "");
+            "<div><h1>Hello</h1></div>", "");
         assertThatCode(() -> policy.validate(document)).doesNotThrowAnyException();
     }
 
@@ -270,7 +270,7 @@ class ContentPolicyTest {
     void rejectsScriptsHiddenOnlyInEditorData() {
         var document = new PageDocument(1, "visual", "1", Map.of("pages", List.of(
             Map.of("component", Map.of("script", "alert(1)", "tagName", "div")))),
-            "<div>safe export</div>", "", "Title", "");
+            "<div>safe export</div>", "");
         assertThatThrownBy(() -> policy.validate(document))
             .isInstanceOf(ResponseStatusException.class).hasMessageContaining("脚本");
     }
@@ -280,7 +280,7 @@ class ContentPolicyTest {
         var document = new PageDocument(1, "visual", "1", Map.of("pages", List.of(
             Map.of("component", Map.of("tagName", "img", "attributes",
                 Map.of("src", "/x.png", "onerror", "alert(1)"))))),
-            "<img src='/x.png'>", "", "Title", "");
+            "<img src='/x.png'>", "");
         assertThatThrownBy(() -> policy.validate(document))
             .isInstanceOf(ResponseStatusException.class).hasMessageContaining("属性");
     }
