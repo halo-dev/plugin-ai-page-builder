@@ -2,6 +2,7 @@ package run.halo.aipagebuilder.page;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -40,11 +41,23 @@ class PreviewAssetCorsFilterTest {
     }
 
     @Test
-    void doesNotVaryByOriginSoSharedCachesCannotServeANoCorsCopy() {
+    void allowsRequestsWithoutAnOriginHeader() {
+        // A same-origin request is what a shared cache is likely to store, so it must also
+        // carry the CORS header.
+        for (var path : List.of("/themes/theme-earth/assets/layout.js",
+            "/plugins/example/assets/icon.svg")) {
+            var exchange = MockServerWebExchange.from(MockServerHttpRequest.get(path));
+            filter.filter(exchange, chain).block();
+            assertThat(allowOrigin(exchange)).as(path).isEqualTo("*");
+        }
+    }
+
+    @Test
+    void allowsRegularOriginsAndDoesNotVaryByOrigin() {
         var exchange = exchange("/themes/theme-earth/assets/layout.js", "https://example.com");
         filter.filter(exchange, chain).block();
-        assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.VARY))
-            .isNotEqualTo(HttpHeaders.ORIGIN);
+        assertThat(allowOrigin(exchange)).isEqualTo("*");
+        assertThat(exchange.getResponse().getHeaders().get(HttpHeaders.VARY)).isNullOrEmpty();
     }
 
     @Test
