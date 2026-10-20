@@ -83,6 +83,9 @@ const {
   send,
   stop,
   reconcile,
+  refreshError,
+  refreshing,
+  retryRefresh,
 } = usePageChat({
   name: props.pageName,
   prepare: props.prepare,
@@ -300,6 +303,21 @@ watch(blankPage, () => (activePresetGroup.value = 0))
             重新生成
           </button>
         </div>
+      </div>
+      <div
+        v-if="refreshError"
+        class="mb-2 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
+        role="alert"
+      >
+        <p class="min-w-0 flex-1">{{ refreshError }}</p>
+        <button
+          type="button"
+          class="shrink-0 font-medium underline"
+          :disabled="refreshing || sessionBusy"
+          @click="retryRefresh"
+        >
+          刷新会话
+        </button>
       </div>
       <div
         v-if="error && (!recovery || running)"

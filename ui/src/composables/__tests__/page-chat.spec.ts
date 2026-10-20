@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, shallowRef } from 'vue'
-import { upsertQuestion, usePageChat } from '../usePageChat'
+import { usePageChat } from '../usePageChat'
 import type { UIMessage } from '@halo-dev/ai-foundation-sdk'
 import type { PageDetail, PageChatQuestion } from '../../api/generated'
 const api = vi.hoisted(() => ({
@@ -237,27 +237,7 @@ describe('persistent page chat', () => {
     expect(api.chat.createPageChatSession).not.toHaveBeenCalled()
     expect(state.messages.value?.[1]?.metadata).toMatchObject({ questions: [question] })
   })
-  it('ignores an older waiting poll that arrives after the answer resumed generation', async () => {
-    waitingConversation()
-    const state = setup()
-    await state.recover()
-    let finishPoll!: (value: unknown) => void
-    api.chat.getPageChatRun.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishPoll = resolve
-        }),
-    )
-    const poll = state.reconcile()
-    api.chat.answerPageChatQuestion.mockResolvedValue({
-      data: { runId: 'waiting', status: 'running' },
-    })
-    await state.answerQuestion(question.id, [{ questionId: 'style', text: '简洁' }])
-    finishPoll({ data: waitingRun })
-    await poll
-    expect(state.waitingForUser.value).toBe(false)
-    expect(state.activeRun.value?.status).toBe('running')
-  })
+
   it('refreshes the session list after every completed rename, not only the first', async () => {
     waitingConversation()
     const state = setup()
@@ -372,6 +352,53 @@ describe('persistent page chat', () => {
     expect(state.running.value).toBe(false)
     expect(state.pendingQuestion.value).toBeUndefined()
     expect(sdk.stop).toHaveBeenCalledTimes(1)
+  })
+  it('keeps a newer streamed question when the previous answer response arrives late', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    let answer!: (value: unknown) => void
+    api.chat.answerPageChatQuestion.mockImplementationOnce(
+      () => new Promise((resolve) => (answer = resolve)),
+    )
+    const pending = state.answerQuestion(question.id, [{ questionId: 'style', text: '简洁' }])
+    const next = { ...question, id: 'next-question' }
+    sdk.options.onData({ type: 'data-user-question', data: { runId: 'waiting', question: next } })
+    answer({ data: { runId: 'waiting', status: 'running' } })
+    await pending
+    expect(state.pendingQuestion.value?.id).toBe('next-question')
+    expect(state.waitingForUser.value).toBe(true)
+  })
+  it('does not apply terminal history arriving after a new generation starts', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    let history!: (value: unknown) => void
+    api.chat.getPageChat.mockImplementationOnce(() => new Promise((resolve) => (history = resolve)))
+    api.chat.getPageChatRun.mockResolvedValueOnce({
+      data: { runId: 'waiting', status: 'completed', page },
+    })
+    const settling = state.reconcile()
+    await vi.advanceTimersByTimeAsync(0)
+    let finish!: () => void
+    sdk.send.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    const sending = state.send('Next generation')
+    await vi.advanceTimersByTimeAsync(0)
+    const nextRunId = state.activeRun.value?.runId
+    expect(nextRunId).toBeTruthy()
+    expect(nextRunId).not.toBe('waiting')
+    history({
+      data: {
+        sessionId: 'busy',
+        turns: [{ runId: 'stale', prompt: 'Old', text: 'Old', tools: [], status: 'completed' }],
+      },
+    })
+    await settling
+    expect(state.activeRun.value?.runId).toBe(nextRunId)
+    expect(state.messages.value.some((message) => message.id === 'stale-assistant')).toBe(false)
+    api.chat.getPageChatRun.mockResolvedValue({ data: { runId: nextRunId, status: 'running' } })
+    finish()
+    await sending
   })
   it('loads server history and sends only the bound prompt/version without automatic tool loops', async () => {
     const state = setup()
@@ -684,36 +711,33 @@ describe('persistent page chat', () => {
     expect(state.lastPrompt.value).toBe('Keep this prompt')
     expect(state.error.value).toBe('Model unavailable')
   })
-  it('deduplicates final stream commits and run reconciliation', async () => {
-    const state = setup()
-    await state.recover()
-    sdk.send.mockImplementation(async () =>
-      sdk.options.onData({ type: 'data-page-committed', data: page }),
-    )
-    await state.send('Change')
-    expect(committed).toHaveBeenCalledTimes(1)
-  })
-  it('does not report cancelled when the server is already committing', async () => {
-    api.chat.getPageChat.mockResolvedValueOnce({
-      data: { turns: [], activeRun: { runId: 'pending', status: 'running' } },
-    })
-    api.chat.getPageChatRun.mockResolvedValue({ data: { runId: 'pending', status: 'running' } })
-    const state = setup()
-    await state.recover()
-    api.chat.cancelPageChatRun.mockResolvedValue({
-      data: { runId: 'pending', status: 'committing' },
-    })
-    await state.stop()
-    expect(state.running.value).toBe(true)
-    expect(state.notice.value).toContain('保存')
-    expect(sdk.stop).not.toHaveBeenCalled()
-    api.chat.getPageChatRun.mockResolvedValue({
-      data: { runId: 'pending', status: 'completed', page },
-    })
-    await vi.advanceTimersByTimeAsync(1500)
-    expect(committed).toHaveBeenCalledWith(page)
-    expect(state.running.value).toBe(false)
-  })
+
+  it.each(['history', 'sessions'])(
+    'keeps a confirmed commit successful when refreshing %s fails and retries without generating',
+    async (target) => {
+      const completed = vi.fn()
+      const state = setup({ completed })
+      await state.recover()
+      const refresh = target === 'history' ? api.chat.getPageChat : api.chat.listPageChatSessions
+      refresh.mockRejectedValueOnce(new Error('Refresh offline'))
+
+      expect(await state.send('Change')).toBe(true)
+      expect(state.running.value).toBe(false)
+      expect(state.canSend.value).toBe(true)
+      expect(state.error.value).toBe('')
+      expect(state.refreshError.value).toContain('Refresh offline')
+      expect(state.notice.value).toContain('已更新并保存')
+      expect(committed).toHaveBeenCalledTimes(1)
+      expect(completed).toHaveBeenCalledTimes(1)
+
+      await state.retryRefresh()
+      expect(state.refreshError.value).toBe('')
+      expect(sdk.send).toHaveBeenCalledTimes(1)
+      expect(committed).toHaveBeenCalledTimes(1)
+      expect(completed).toHaveBeenCalledTimes(1)
+    },
+  )
+
   it('preserves a frozen state on unknown commit outcome and does not resubmit', async () => {
     const state = setup()
     await state.recover()
@@ -886,23 +910,5 @@ describe('checkpoint recovery', () => {
     await pending
     expect(state.preview.value).toBeUndefined()
     expect(committed).not.toHaveBeenCalled()
-  })
-})
-
-describe('upsertQuestion', () => {
-  const batch = (id: string): PageChatQuestion => ({
-    id,
-    createdAt: '2026-01-01T00:00:00Z',
-    questions: [{ id: 'style', title: '风格？', options: [], allowCustomAnswer: true }],
-  })
-  it('updates an existing question in place so pairing order survives a late answer response', () => {
-    const answered = { ...batch('q1'), answers: [{ questionId: 'style', optionId: 'minimal' }] }
-    const result = upsertQuestion([batch('q1'), batch('q2')], answered)
-    expect(result.map((item) => item.id)).toEqual(['q1', 'q2'])
-    expect(result[0]?.answers).toHaveLength(1)
-  })
-  it('appends genuinely new questions in arrival order', () => {
-    const result = upsertQuestion([batch('q1')], batch('q2'))
-    expect(result.map((item) => item.id)).toEqual(['q1', 'q2'])
   })
 })

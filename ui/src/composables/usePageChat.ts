@@ -6,7 +6,6 @@ import {
   prepareChatRequest,
   aiPageBuilderAiApi,
   aiPageBuilderChatApi,
-  type ChatRun,
 } from '../api/clients'
 import { errorMessage } from '../utils/error'
 import type {
@@ -14,7 +13,6 @@ import type {
   PageChatRequest,
   PageChatSessionSummary,
   PageChatQuestion,
-  PageChatAnswerItem,
   PageChatRecovery,
 } from '../api/generated'
 
@@ -23,18 +21,7 @@ import type { PreparedPage } from '../editor/annotations'
 import { restoreConversation } from '../editor/chat-display'
 import { useStreamingPreview, type StreamingPreview } from './useStreamingPreview'
 
-const activeStatuses = ['running', 'committing', 'waiting_for_user']
-
-// Update in place: questions pair with ask_user tool parts by array order, so a
-// late answer response must not move its question to the end of the list.
-export function upsertQuestion(
-  list: PageChatQuestion[],
-  question: PageChatQuestion,
-): PageChatQuestion[] {
-  return list.some((item) => item.id === question.id)
-    ? list.map((item) => (item.id === question.id ? question : item))
-    : [...list, question]
-}
+import { activeRunStatuses as activeStatuses, useConversationRun } from './useConversationRun'
 
 export function usePageChat(options: {
   name: string
@@ -55,37 +42,61 @@ export function usePageChat(options: {
   const preparing = shallowRef(false)
   const available = shallowRef(false)
   const statusMessage = shallowRef('')
-  const error = shallowRef('')
-  const notice = shallowRef('')
+  const localError = shallowRef('')
   const recovery = shallowRef<PageChatRecovery>()
   const checkpointPreview = shallowRef<StreamingPreview>()
   const previewLoading = shallowRef(false)
   // Last used model survives reloads and is shared across pages.
   const modelName = useLocalStorage('ai-page-builder:model-name', '')
-  const activeRun = shallowRef<ChatRun>()
-  const answering = shallowRef(false)
-  const answerError = shallowRef('')
-  const waitingForUser = computed(() => activeRun.value?.status === 'waiting_for_user')
-  const pendingQuestion = computed(() => activeRun.value?.pendingQuestion)
-  const questions = shallowRef<PageChatQuestion[]>([])
-  function rememberQuestion(question: PageChatQuestion) {
-    questions.value = upsertQuestion(questions.value, question)
-  }
   const lastPrompt = shallowRef('')
   const recovered = shallowRef(false)
   let disposed = false
-  let polling: ReturnType<typeof setTimeout> | undefined
   let request: PageChatRequest | undefined
   let historicalAnnotations = false
   let sessionRefresh = 0
   let sessionsApplied = 0
-  const applied = new Set<string>()
-  function apply(page: PageDetail) {
-    const revision = page.page.draftRevision
-    if (applied.has(revision)) return
-    applied.add(revision)
-    options.committed(page)
-  }
+  const run = useConversationRun({
+    transport: {
+      get: async (runId) =>
+        (await aiPageBuilderChatApi.getPageChatRun({ name: options.name, runId })).data,
+      answer: async (runId, questionId, answers) =>
+        (
+          await aiPageBuilderChatApi.answerPageChatQuestion({
+            name: options.name,
+            runId,
+            questionId,
+            pageChatAnswerRequest: { answers },
+          })
+        ).data,
+      cancel: async (runId) =>
+        (await aiPageBuilderChatApi.cancelPageChatRun({ name: options.name, runId })).data,
+    },
+    streaming: () => chat.isLoading.value,
+    stopStream: () => chat.stop(),
+    discardPreview: () => streamPreview.discard(),
+    refresh: async (current) => {
+      await loadConversation(sessionId.value, false, current)
+      if (current() && !activeRun.value) await refreshSessions(current)
+    },
+    committed: options.committed,
+    completed: options.completed,
+  })
+  const {
+    activeRun,
+    questions,
+    waitingForUser,
+    pendingQuestion,
+    answering,
+    answerError,
+    reconcile,
+    answerQuestion,
+    stop,
+    refreshError,
+    refreshing,
+    retryRefresh,
+  } = run
+  const error = computed(() => localError.value || run.error.value)
+  const notice = run.notice
   const chat = useChat({
     id: `ai-page-builder-${options.name}`,
     transport: new DefaultChatTransport({
@@ -99,11 +110,11 @@ export function usePageChat(options: {
     sendAutomaticallyWhen: () => false,
     onData(part) {
       if (disposed || !activeRun.value) return
-      if (part.type === 'data-page-committed') apply(part.data as PageDetail)
+      if (part.type === 'data-page-committed') run.committed(part.data as PageDetail)
       if (part.type === 'data-page-staged') streamPreview.accept(part.data)
       if (part.type === 'data-generation-recovery') {
         const data = part.data as { message: string }
-        notice.value = data.message
+        run.recovering(data.message)
         streamPreview.restartAttempt()
       }
       if (part.type === 'data-steer') {
@@ -114,20 +125,11 @@ export function usePageChat(options: {
       if (part.type === 'data-user-question' || part.type === 'data-user-answer') {
         const data = part.data as { runId: string; question: PageChatQuestion }
         if (data.runId !== activeRun.value.runId) return
-        rememberQuestion(data.question)
-        activeRun.value = {
-          ...activeRun.value,
-          status: part.type === 'data-user-question' ? 'waiting_for_user' : 'running',
-          pendingQuestion: part.type === 'data-user-question' ? data.question : undefined,
-        }
-        answerError.value = ''
-        clearTimeout(polling)
-        polling = setTimeout(() => void reconcile(), 1500)
+        run.questionEvent(data.runId, data.question, part.type === 'data-user-answer')
       }
     },
     onError(e) {
-      streamPreview.discard()
-      error.value = errorMessage(e)
+      run.streamFailed(e)
     },
   })
   // The agent names the conversation on every turn; refresh the session list as soon
@@ -198,14 +200,19 @@ export function usePageChat(options: {
       statusMessage.value = errorMessage(e)
     }
   }
-  async function loadConversation(id = sessionId.value, refreshRun = true) {
+  async function loadConversation(
+    id = sessionId.value,
+    refreshRun = true,
+    current: () => boolean = () => !disposed,
+  ) {
     const conversation = (
       await aiPageBuilderChatApi.getPageChat({ name: options.name, sessionId: id, size: 20 })
     ).data
-    if (disposed) return
+    if (!current()) return
     const switched = sessionId.value !== conversation.sessionId
     if (switched || recovery.value?.checkpointVersion !== conversation.recovery?.checkpointVersion)
       checkpointPreview.value = undefined
+    if (switched) run.reset()
     recovery.value = conversation.recovery ?? undefined
     sessionId.value = conversation.sessionId
     lastSessionId.value = conversation.sessionId
@@ -214,33 +221,27 @@ export function usePageChat(options: {
     const restored = restoreConversation(conversation.turns)
     chat.setMessages(restored.messages)
     recovered.value = true
-    const active = conversation.activeRun
-    if (refreshRun)
-      activeRun.value = active && activeStatuses.includes(active.status) ? active : undefined
+    const active = activeRun.value || conversation.activeRun || undefined
+    run.restore(
+      conversation.activeRun ?? undefined,
+      restored.questionsByRunId.get(active?.runId ?? '') || [],
+    )
     const last = conversation.turns[conversation.turns.length - 1]
-    const activeTurnQuestions = restored.questionsByRunId.get(activeRun.value?.runId ?? '') || []
-    if (refreshRun) questions.value = activeTurnQuestions
-    else
-      for (const question of activeTurnQuestions) {
-        const known = questions.value.find((item) => item.id === question.id)
-        if (!known?.answers?.length || question.answers?.length) rememberQuestion(question)
-      }
-    if (activeRun.value?.pendingQuestion) rememberQuestion(activeRun.value.pendingQuestion)
     if (last || switched) lastPrompt.value = last?.prompt || ''
     historicalAnnotations = !!last?.annotations?.length
-    if (last && ['failed', 'interrupted', 'incomplete'].includes(last.status))
-      error.value = last.error || '上次运行中断，可以继续生成。'
+    if (refreshRun && last && ['failed', 'interrupted', 'incomplete'].includes(last.status))
+      localError.value = last.error || '上次运行中断，可以继续生成。'
   }
   const sessionBusy = computed(
     () => running.value || preparing.value || loading.value || loadingEarlier.value,
   )
-  async function refreshSessions() {
+  async function refreshSessions(current: () => boolean = () => !disposed) {
     const seq = ++sessionRefresh
     const items =
       (await aiPageBuilderChatApi.listPageChatSessions({ name: options.name })).data.items || []
     // A refresh started earlier can resolve later. Apply the newest successful response;
     // a newer refresh that fails must not discard an older one that succeeded.
-    if (seq > sessionsApplied) {
+    if (current() && seq > sessionsApplied) {
       sessionsApplied = seq
       sessions.value = items
     }
@@ -248,15 +249,14 @@ export function usePageChat(options: {
   async function selectSession(id: string) {
     if (sessionBusy.value || id === sessionId.value) return
     loading.value = true
-    error.value = ''
-    notice.value = ''
+    localError.value = ''
     request = undefined
     streamPreview.discard()
     try {
       await loadConversation(id)
       if (activeRun.value) await reconcile()
     } catch (e) {
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
     } finally {
       loading.value = false
     }
@@ -264,7 +264,7 @@ export function usePageChat(options: {
   async function createSession() {
     if (sessionBusy.value) return
     loading.value = true
-    error.value = ''
+    localError.value = ''
     request = undefined
     streamPreview.discard()
     try {
@@ -276,9 +276,8 @@ export function usePageChat(options: {
       ).data
       await refreshSessions()
       await loadConversation(created.sessionId)
-      notice.value = ''
     } catch (e) {
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
     } finally {
       loading.value = false
     }
@@ -298,9 +297,8 @@ export function usePageChat(options: {
       historicalAnnotations = false
       await refreshSessions()
       await loadConversation(sessions.value[0]?.sessionId)
-      notice.value = ''
     } catch (e) {
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
     } finally {
       loading.value = false
     }
@@ -328,7 +326,7 @@ export function usePageChat(options: {
       hasMore.value = earlier.hasMore
       nextBefore = earlier.nextBefore ?? undefined
     } catch (e) {
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
     } finally {
       loadingEarlier.value = false
     }
@@ -337,7 +335,7 @@ export function usePageChat(options: {
     if (preparing.value || loadingEarlier.value) return
     recovered.value = false
     loading.value = true
-    error.value = ''
+    localError.value = ''
     try {
       await Promise.all([checkStatus(), refreshSessions()])
       const active = sessions.value.find((item) =>
@@ -364,80 +362,21 @@ export function usePageChat(options: {
       }
       if (activeRun.value) await reconcile()
     } catch (e) {
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
     } finally {
       loading.value = false
-    }
-  }
-  async function settle(result: ChatRun) {
-    if (disposed) return
-    activeRun.value = result
-    if (activeStatuses.includes(result.status)) {
-      error.value = ''
-      if (result.pendingQuestion) rememberQuestion(result.pendingQuestion)
-      notice.value =
-        result.status === 'waiting_for_user'
-          ? '等待你的回答，提交后助手将继续。'
-          : result.status === 'committing'
-            ? '正在保存本轮草稿…'
-            : '助手正在处理页面…'
-      // A recovered run has no stream; refresh its text and answered questions while polling.
-      if (!chat.isLoading.value) await loadConversation(sessionId.value, false)
-      clearTimeout(polling)
-      polling = setTimeout(() => void reconcile(), 1500)
-      return
-    }
-    clearTimeout(polling)
-    answerError.value = ''
-    streamPreview.discard()
-    if (result.page) apply(result.page)
-    if (result.status === 'completed') options.completed?.()
-    notice.value =
-      result.status === 'cancelled'
-        ? '本轮已停止，未提交页面修改。'
-        : result.status === 'completed'
-          ? result.revision
-            ? '页面已更新并保存为草稿。'
-            : '本轮对话已完成。'
-          : ''
-    error.value = result.error || (result.status === 'interrupted' ? '运行已中断，请重试。' : '')
-    activeRun.value = undefined
-    await loadConversation()
-    await refreshSessions()
-  }
-  async function reconcile() {
-    const run = activeRun.value
-    if (!run || disposed) return
-    let accepted = false
-    try {
-      const result = (
-        await aiPageBuilderChatApi.getPageChatRun({ name: options.name, runId: run.runId })
-      ).data
-      // An answer or stream event may have advanced the run while this query was in flight.
-      if (activeRun.value !== run) return
-      accepted = true
-      await settle(result)
-    } catch (e) {
-      if (!accepted && activeRun.value !== run) return
-      if ((e as { response?: { status?: number } }).response?.status === 404) {
-        activeRun.value = undefined
-        await loadConversation()
-        return
-      }
-      // Keep editing frozen until the authoritative commit outcome is known.
-      error.value = `${errorMessage(e)} 请重新检查运行结果。`
     }
   }
   async function send(prompt: string, retry = false) {
     const text = prompt.trim()
     if (!canSend.value || !text || text.length > 8000) return false
     preparing.value = true
-    error.value = ''
-    notice.value = ''
+    localError.value = ''
     try {
       if (retry && historicalAnnotations && !request?.annotations?.length)
         throw new Error('历史批注只保留说明，请重新选择目标后发送。')
       const prepared = await options.prepare()
+      if (disposed) return false
       if (retry && request?.annotations?.length) {
         if (typeof prepared === 'number' || prepared.baseHash !== request.baseHash)
           throw new Error('原批注对应的内容已变化，请重新选择目标并发送。')
@@ -455,7 +394,7 @@ export function usePageChat(options: {
       }
       checkpointPreview.value = undefined
       recovery.value = undefined
-      activeRun.value = { runId: request.runId, status: 'running' }
+      run.begin(request.runId)
       lastPrompt.value = text
       chat.clearError()
       await chat.sendMessage({ text })
@@ -463,7 +402,7 @@ export function usePageChat(options: {
       return !error.value
     } catch (e) {
       streamPreview.discard()
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
       if (activeRun.value) await reconcile()
       return false
     } finally {
@@ -515,7 +454,7 @@ export function usePageChat(options: {
         status: 'checkpoint',
       }
     } catch (e) {
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
     } finally {
       previewLoading.value = false
     }
@@ -523,8 +462,7 @@ export function usePageChat(options: {
   async function resume() {
     if (!canResume.value) return false
     preparing.value = true
-    error.value = ''
-    notice.value = ''
+    localError.value = ''
     try {
       const saved = await loadCheckpoint()
       if (resumeBlocked.value || !saved.recovery.canResume || options.dirty?.())
@@ -541,7 +479,7 @@ export function usePageChat(options: {
       }
       checkpointPreview.value = undefined
       recovery.value = undefined
-      activeRun.value = { runId: request.runId, status: 'running' }
+      run.begin(request.runId)
       streamPreview.seedBaseline(saved.document)
       lastPrompt.value = request.prompt
       chat.clearError()
@@ -549,59 +487,11 @@ export function usePageChat(options: {
       await reconcile()
       return !error.value
     } catch (e) {
-      error.value = errorMessage(e)
+      localError.value = errorMessage(e)
       if (activeRun.value) await reconcile()
       return false
     } finally {
       preparing.value = false
-    }
-  }
-  async function answerQuestion(questionId: string, answers: PageChatAnswerItem[]) {
-    const run = activeRun.value
-    const question = pendingQuestion.value
-    if (answering.value || !waitingForUser.value || !run || question?.id !== questionId)
-      return false
-    answering.value = true
-    answerError.value = ''
-    clearTimeout(polling)
-    try {
-      const result = (
-        await aiPageBuilderChatApi.answerPageChatQuestion({
-          name: options.name,
-          runId: run.runId,
-          questionId,
-          pageChatAnswerRequest: { answers },
-        })
-      ).data
-      if (disposed) return false
-      rememberQuestion({ ...question, answers })
-      await settle(result)
-      return true
-    } catch (e) {
-      if (disposed) return false
-      answerError.value = errorMessage(e)
-      // A lost response may already have resumed the run. Query before permitting a retry.
-      await reconcile()
-      if (!waitingForUser.value || pendingQuestion.value?.id !== questionId) answerError.value = ''
-      return false
-    } finally {
-      answering.value = false
-    }
-  }
-  async function stop() {
-    if (!activeRun.value) return
-    streamPreview.discard()
-    try {
-      const result = (
-        await aiPageBuilderChatApi.cancelPageChatRun({
-          name: options.name,
-          runId: activeRun.value.runId,
-        })
-      ).data
-      if (result.status !== 'running' && result.status !== 'committing') chat.stop()
-      await settle(result)
-    } catch (e) {
-      error.value = errorMessage(e)
     }
   }
   const steering = shallowRef(false)
@@ -642,7 +532,7 @@ export function usePageChat(options: {
       if (!disposed) appendSteerMessage(run.runId, value)
       return true
     } catch (e) {
-      if (!disposed) error.value = errorMessage(e)
+      if (!disposed) localError.value = errorMessage(e)
       return false
     } finally {
       steering.value = false
@@ -650,8 +540,6 @@ export function usePageChat(options: {
   }
   onScopeDispose(() => {
     disposed = true
-    clearTimeout(polling)
-    chat.stop()
   })
   return {
     sessions,
@@ -688,6 +576,9 @@ export function usePageChat(options: {
     answering,
     answerError,
     answerQuestion,
+    refreshError,
+    refreshing,
+    retryRefresh,
     canSend,
     canSteer,
     steering,
