@@ -122,7 +122,7 @@ class PageWorkingCopyTest {
         var copy = copy("<p>old</p>", "");
         copy.memory(memory);
         var input = PageMemoryToolsTest.input(1, "run/prompt", "0571-12345678");
-        copy.consume("x".repeat(PageWorkingCopy.MAX_BYTES
+        copy.consume("x".repeat(RunBudget.MAX_BYTES
             - Json.toJson(input).getBytes(java.nio.charset.StandardCharsets.UTF_8).length - 1));
         assertThatThrownBy(() -> copy.updateMemory("memory", input).block())
             .hasMessageContaining("预算");
@@ -422,7 +422,7 @@ class PageWorkingCopyTest {
     @Test
     void patchReusesCallAndByteBudgetsWithoutPartialStaging() {
         var copy = copy("<p>old</p>", "");
-        for (int i = 0; i < PageWorkingCopy.MAX_CALLS; i++) {
+        for (int i = 0; i < RunBudget.MAX_CALLS; i++) {
             copy.patch(Map.of()).block();
         }
         assertThatThrownBy(() -> copy.patch(Map.of("baseHash", hash(copy), "patches",
@@ -431,7 +431,7 @@ class PageWorkingCopyTest {
         assertThat(copy.exhausted()).isTrue();
         assertThat(copy.document().html()).isEqualTo("<p>old</p>");
         var bytes = copy("<p>old</p>", "");
-        bytes.consume("x".repeat(PageWorkingCopy.MAX_BYTES));
+        bytes.consume("x".repeat(RunBudget.MAX_BYTES));
         assertThatThrownBy(() -> bytes.patch(Map.of("baseHash", hash(bytes), "patches",
             List.of(patch("html", "old", "new")))).block())
             .isInstanceOf(IllegalStateException.class);
@@ -486,7 +486,7 @@ class PageWorkingCopyTest {
     void editsPrepareThemeOnceWithoutChargingItsContentOrAnExtraToolCall() {
         var reads = new AtomicInteger();
         var context = new ThemeStyleContext("sample", "Sample", "SUPPORTED", List.of(), List.of(),
-            "x".repeat(PageWorkingCopy.MAX_BYTES),
+            "x".repeat(RunBudget.MAX_BYTES),
             new ThemeStyleContext.ColorMode("explicit", List.of(), List.of()));
         var copy = new PageWorkingCopy(
             new PageDocument(1, "code", null, null, "<p>old</p>", "p{color:red}", "Title", ""),
@@ -498,12 +498,12 @@ class PageWorkingCopyTest {
             patch("css", "p{color:red}", "@media(prefers-color-scheme:dark){p{color:blue}}")))).block())
             .containsEntry("valid", false);
         assertThat(copy.document().css()).isEqualTo("p{color:red}");
-        for (int i = 1; i < PageWorkingCopy.MAX_CALLS; i++) {
+        for (int i = 1; i < RunBudget.MAX_CALLS; i++) {
             assertThat(copy.update(Map.of("html", "<p>new</p>")).block())
                 .containsEntry("valid", true);
         }
         assertThat(reads).hasValue(1);
-        assertThat(copy.summaries()).hasSize(PageWorkingCopy.MAX_CALLS)
+        assertThat(copy.summaries()).hasSize(RunBudget.MAX_CALLS)
             .extracting(ChatApi.Tool::name).doesNotContain("get_theme_context");
         assertThat(copy.exhausted()).isFalse();
         assertThatThrownBy(() -> copy.update(Map.of("html", "<p>late</p>")).block())
@@ -614,12 +614,12 @@ class PageWorkingCopyTest {
             return context;
         }));
         assertThat(reads).hasValue(0);
-        for (int i = 0; i < PageWorkingCopy.MAX_CALLS; i++) {
+        for (int i = 0; i < RunBudget.MAX_CALLS; i++) {
             assertThat(copy.readTheme().block()).isSameAs(context);
         }
         assertThat(reads).hasValue(1);
         assertThat(copy.document()).isSameAs(document);
-        assertThat(copy.summaries()).hasSize(PageWorkingCopy.MAX_CALLS);
+        assertThat(copy.summaries()).hasSize(RunBudget.MAX_CALLS);
         assertThat(Json.toJson(copy.summaries())).contains("get_theme_context")
             .doesNotContain("theme-source-marker", "--accent");
         assertThatThrownBy(() -> copy.readTheme().block()).isInstanceOf(IllegalStateException.class);
@@ -630,7 +630,7 @@ class PageWorkingCopyTest {
     void themeOutputCountsTowardsExistingByteBudget() {
         var copy = new PageWorkingCopy(new PageDocument(1, "code", null, null, "", "", "Title", ""),
             new ContentPolicy());
-        copy.consume("x".repeat(PageWorkingCopy.MAX_BYTES));
+        copy.consume("x".repeat(RunBudget.MAX_BYTES));
         assertThatThrownBy(() -> copy.readTheme().block()).isInstanceOf(IllegalStateException.class);
         assertThat(copy.exhausted()).isTrue();
         assertThat(copy.summaries()).isEmpty();

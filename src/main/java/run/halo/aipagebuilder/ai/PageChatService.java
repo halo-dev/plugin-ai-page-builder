@@ -41,7 +41,6 @@ import run.halo.aipagebuilder.page.PageService;
 public class PageChatService {
     static final int MAX_TURNS = 20;
     static final int MAX_BYTES = 256 * 1024;
-    static final int MAX_CONTINUATIONS = 3;
     static final Duration RUN_TIMEOUT = Duration.ofMinutes(10);
     private final ReactiveExtensionClient client;
     private final PageService pages;
@@ -487,10 +486,8 @@ public class PageChatService {
                     return Mono.defer(() -> run.finish(null));
                 }
                 // A steer that missed the last model step gets a bounded continuation call.
-                steers = run.continuations < MAX_CONTINUATIONS && !run.copy.exhausted()
-                    ? run.copy.drainSteers() : List.of();
-                if (!steers.isEmpty()) run.continuations++;
-                else run.markCommitting();
+                steers = run.copy.drainContinuationSteers();
+                if (steers.isEmpty()) run.markCommitting();
                 if (!steers.isEmpty()) {
                     var missed = steers;
                     return Mono.defer(() -> converse(name, run,
@@ -557,7 +554,8 @@ public class PageChatService {
     }
 
     static AiGenerationException.Reason failureReason(Throwable error, PageWorkingCopy copy) {
-        if (copy.exhausted()) return copy.budgetReason();
+        var budgetReason = copy.budget.exhaustionReason();
+        if (budgetReason != null) return budgetReason;
         for (var cause = error; cause != null; cause = cause.getCause()) {
             if (cause instanceof AiGenerationException known) return known.reason();
             if (cause instanceof java.util.concurrent.TimeoutException) return AiGenerationException.Reason.TIMEOUT;

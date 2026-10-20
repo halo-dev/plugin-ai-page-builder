@@ -477,13 +477,13 @@ class FoundationBridgeTest {
     void toolBudgetsAreStickyEvenWhenAnExecutorExceptionIsHandledByFoundation() {
         var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
             null, null, "", "", "Title", ""), new ContentPolicy());
-        for (int i = 0; i < PageWorkingCopy.MAX_CALLS; i++) { copy.read(); }
+        for (int i = 0; i < RunBudget.MAX_CALLS; i++) { copy.read(); }
         assertThatThrownBy(copy::read).isInstanceOf(IllegalStateException.class);
         setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
         assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy).blockLast())
             .isInstanceOf(AiGenerationException.class);
         var large = new PageWorkingCopy(copy.document(), new ContentPolicy());
-        assertThatThrownBy(() -> large.consume("a".repeat(PageWorkingCopy.MAX_BYTES + 1)))
+        assertThatThrownBy(() -> large.consume("a".repeat(RunBudget.MAX_BYTES + 1)))
             .isInstanceOf(IllegalStateException.class);
         assertThat(large.exhausted()).isTrue();
     }
@@ -617,6 +617,31 @@ class FoundationBridgeTest {
         });
         bridge.chat("model", java.util.List.of(), "build a page", copy).blockLast();
         assertThat(attempts).hasSize(2);
+    }
+
+    @Test
+    void boundsInitialAndPreparedModelContextsAndRecordsTheirPeak() {
+        var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var initial = copy();
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(),
+            "x".repeat(RunBudget.MAX_CONTEXT_BYTES), initial).blockLast())
+            .isInstanceOfSatisfying(AiGenerationException.class,
+                error -> assertThat(error.reason())
+                    .isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
+        assertThat(initial.usage().maxContextBytes()).isGreaterThan(RunBudget.MAX_CONTEXT_BYTES);
+        org.mockito.Mockito.verify(model, never()).streamText(any());
+
+        var stepped = copy();
+        bridge.chat("model", java.util.List.of(), "task", stepped).blockLast();
+        assertThat(stepped.usage().maxContextBytes()).isPositive();
+        var context = run.halo.aifoundation.chat.StepContext.builder()
+            .messages(java.util.List.of(run.halo.aifoundation.message.ModelMessage.user(
+                "x".repeat(RunBudget.MAX_CONTEXT_BYTES)))).build();
+        assertThatThrownBy(() -> captured.get().getPrepareStep().prepare(context))
+            .isInstanceOfSatisfying(AiGenerationException.class,
+                error -> assertThat(error.reason())
+                    .isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
+        assertThat(stepped.usage().maxContextBytes()).isGreaterThan(RunBudget.MAX_CONTEXT_BYTES);
     }
 
     @Test

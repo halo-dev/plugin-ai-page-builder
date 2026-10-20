@@ -158,7 +158,7 @@ public final class FoundationBridge implements AiGateway {
         return attempt(modelName, history, prompt + (recovering ? "\n" + copy.recoveryContext() : ""), copy)
             .onErrorResume(error -> {
             if (error instanceof AiGenerationException known && known.reason() == Reason.TRUNCATED
-                && !copy.exhausted() && !copy.checkpointFailed() && copy.budget.recover()) {
+                && !copy.checkpointFailed() && copy.budget.recover()) {
                 var recovery = java.util.Map.<String, Object>of("type", "data-generation-recovery",
                     "name", "generation-recovery", "id", "recovery-" + copy.budget.recoveries(), "data", java.util.Map.of("attempt", copy.budget.recoveries(),
                         "message", "输出暂时中断，正在从已完成的进度继续生成…"));
@@ -272,7 +272,8 @@ public final class FoundationBridge implements AiGateway {
                         "Only " + (RunBudget.MAX_STEPS - step + 1) + " model steps remain. "
                         + "Do not read optional new references. Finish the requested edits and repair "
                         + "validation errors, then summarize. Never claim unfinished work is complete."));
-                    ModelContextBudget.requireFits(SYSTEM_PROMPT, stepped, context.getTools(), copy);
+                    copy.budget.requireContextFits(
+                        ModelContextBudget.bytes(SYSTEM_PROMPT, stepped, context.getTools()));
                     return run.halo.aifoundation.chat.PreparedStep.builder().messages(stepped).build();
                 })
                 .lifecycle(new run.halo.aifoundation.lifecycle.GenerationLifecycle() {
@@ -298,7 +299,8 @@ public final class FoundationBridge implements AiGateway {
                 })
                 .maxOutputTokens(16384).maxRetries(0)
                 .cancellationToken(cancellation.token()).build();
-            ModelContextBudget.requireFits(SYSTEM_PROMPT, request.getMessages(), request.getTools(), copy);
+            copy.budget.requireContextFits(
+                ModelContextBudget.bytes(SYSTEM_PROMPT, request.getMessages(), request.getTools()));
             var stream = Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class))
                 .switchIfEmpty(Mono.error(new AiGenerationException(Reason.MODEL_UNAVAILABLE)))
                 .flatMap(service -> service.languageModel(modelName))
@@ -317,10 +319,11 @@ public final class FoundationBridge implements AiGateway {
                         copy.consume(part.getDelta());
                     }
                     if (part.getType() == PartType.FINISH) {
+                        var budgetReason = copy.budget.exhaustionReason();
                         if (copy.checkpointFailed()) {
                             sink.error(new AiGenerationException(Reason.CHECKPOINT_FAILED));
-                        } else if (copy.exhausted()) {
-                            sink.error(new AiGenerationException(copy.budgetReason()));
+                        } else if (budgetReason != null) {
+                            sink.error(new AiGenerationException(budgetReason));
                         } else if (part.getFinishReason() != FinishReason.STOP) {
                             var reason = part.getFinishReason() == FinishReason.LENGTH
                                 ? (copy.budget.hasSteps() ? Reason.TRUNCATED : Reason.STEP_LIMIT)

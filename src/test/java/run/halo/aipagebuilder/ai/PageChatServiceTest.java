@@ -745,6 +745,9 @@ class PageChatServiceTest {
         var turn = service.session("page").block().turns().getFirst();
         assertThat(turn.parts()).extracting(ChatApi.DisplayPart::type).containsExactly("reasoning", "tool");
         assertThat(Json.toJson(turn)).contains("provider explanation").doesNotContain("<p>new</p>");
+        assertThat(turn.usage().toolBytes()).isPositive();
+        assertThat(turn.usage().previewBytes()).isEqualTo(Json.toJson(events.get(3).get("data"))
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
     }
 
     @Test
@@ -1125,6 +1128,41 @@ class PageChatServiceTest {
         verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any());
         assertThat(service.session("page").block().turns().getFirst().steers())
             .containsExactly("标题再短一点");
+    }
+
+    @Test
+    void fourthLeftoverSteerCommitsWithoutAnotherContinuationOrBudgetFailure() {
+        var prompts = new CopyOnWriteArrayList<String>();
+        var gates = new CopyOnWriteArrayList<Sinks.One<Map<String, Object>>>();
+        var copies = new CopyOnWriteArrayList<PageWorkingCopy>();
+        when(gateway.chat(anyString(), any(), anyString(), any()))
+            .thenAnswer(i -> Flux.defer(() -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                copies.add(copy);
+                prompts.add(i.getArgument(2));
+                var gate = Sinks.<Map<String, Object>>one();
+                gates.add(gate);
+                return prompts.size() == 1
+                    ? copy.update(Map.of("html", "<p>new</p>", "css", "")).thenMany(gate.asMono())
+                    : gate.asMono().flux();
+            }));
+        var events = service.start("page", request(), "admin").block().collectList();
+        for (int i = 0; i < 4; i++) {
+            assertThat(gates).hasSize(i + 1);
+            service.steer("page", runId, new ChatApi.SteerRequest("补充 " + i), "admin").block();
+            gates.get(i).tryEmitValue(Map.of("type", "text-delta", "id", "t" + i,
+                "delta", "完成"));
+        }
+        assertThat(events.block()).extracting(value -> value.get("type"))
+            .endsWith("data-page-committed", "finish").doesNotContain("error");
+        assertThat(prompts).hasSize(4);
+        for (int i = 1; i < prompts.size(); i++) {
+            assertThat(prompts.get(i)).contains("补充 " + (i - 1)).doesNotContain("补充 3");
+        }
+        assertThat(copies).allSatisfy(copy -> assertThat(copy).isSameAs(copies.getFirst()));
+        assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
+        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), any());
     }
 
     @Test
@@ -1607,6 +1645,14 @@ class PageChatServiceTest {
     void persistsValidatedEditsAndResumesWithFreshBudgetsWithoutCommittingPartialWork() {
         org.mockito.Mockito.doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
+            copy.budget.nextStep();
+            copy.budget.usage(100, 20);
+            copy.budget.recover();
+            copy.preview("preview");
+            copy.budget.requireContextFits(128);
+            for (int continuation = 0; continuation < 3; continuation++) {
+                assertThat(copy.budget.tryContinuation(true)).isTrue();
+            }
             return copy.update(Map.of("html", "<p>saved progress</p>"))
                 .thenMany(Flux.error(new AiGenerationException(AiGenerationException.Reason.STEP_LIMIT)));
         }).when(gateway).chat(anyString(), any(), anyString(), any());
@@ -1626,6 +1672,17 @@ class PageChatServiceTest {
             assertThat(copy.document().html()).isEqualTo("<p>saved progress</p>");
             assertThat(copy.calls()).isZero();
             assertThat(copy.budget.steps()).isZero();
+            assertThat(copy.budget.recoveries()).isZero();
+            var usage = copy.usage();
+            assertThat(usage.inputTokens()).isNull();
+            assertThat(usage.outputTokens()).isNull();
+            assertThat(usage.toolBytes()).isZero();
+            assertThat(usage.previewBytes()).isZero();
+            assertThat(usage.maxContextBytes()).isZero();
+            for (int continuation = 0; continuation < 3; continuation++) {
+                assertThat(copy.budget.tryContinuation(true)).isTrue();
+            }
+            assertThat(copy.budget.tryContinuation(true)).isFalse();
             assertThat(i.<String>getArgument(2)).isEqualTo(request().prompt());
             assertThat(copy.restored()).isTrue();
             assertThat(copy.recoveryContext()).contains("Original request", "saved progress");

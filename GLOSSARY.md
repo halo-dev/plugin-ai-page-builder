@@ -15,6 +15,11 @@ _Avoid_: Saved draft (when referring to an uncommitted working copy)
 Persisted progress used to explicitly resume an interrupted run, including its working copy
 and the context needed to continue generation.
 
+**Run Budget**:
+The resource allowances and recorded usage for one page-generation run, shared across its
+automatic recovery attempts and follow-up instructions.
+Explicitly resuming a Checkpoint starts a new run with fresh allowances.
+
 **Draft**:
 The page's currently saved, editable content version, independent of the published version
 shown to visitors.

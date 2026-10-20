@@ -71,7 +71,6 @@ final class PageRun {
     private boolean eventsClosed;
     final List<ChatApi.Question> questions = new ArrayList<>();
     final List<String> steers = new ArrayList<>();
-    int continuations;
     private Sinks.One<ChatApi.Question> answer;
     private State state = State.RUNNING;
     private Mono<Void> transition;

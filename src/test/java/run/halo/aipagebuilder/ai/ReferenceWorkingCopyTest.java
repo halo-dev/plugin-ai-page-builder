@@ -68,15 +68,15 @@ class ReferenceWorkingCopyTest {
         var copy = copy(session, ThemeStyleContext.unavailable());
         when(session.execute(anyString(), any())).thenReturn(Mono.error(new IllegalArgumentException("Invalid size")));
         copy.read();
-        for (int i = 1; i < PageWorkingCopy.MAX_CALLS; i++) {
+        for (int i = 1; i < RunBudget.MAX_CALLS; i++) {
             assertThat(copy.reference("list_posts", Map.of("size", 0)).block()).containsKey("error");
         }
         assertThat(copy.exhausted()).isFalse();
         assertThatThrownBy(() -> copy.reference("list_posts", Map.of()).block())
             .isInstanceOf(IllegalStateException.class).hasMessageContaining("调用预算");
         assertThat(copy.exhausted()).isTrue();
-        assertThat(copy.summaries()).hasSize(PageWorkingCopy.MAX_CALLS);
-        verify(session, times(PageWorkingCopy.MAX_CALLS - 1)).execute(anyString(), any());
+        assertThat(copy.summaries()).hasSize(RunBudget.MAX_CALLS);
+        verify(session, times(RunBudget.MAX_CALLS - 1)).execute(anyString(), any());
     }
 
     @Test
@@ -84,7 +84,7 @@ class ReferenceWorkingCopyTest {
         var session = mock(PageReferenceTools.Session.class);
         var copy = copy(session, ThemeStyleContext.unavailable());
         assertThatThrownBy(() -> copy.reference("list_posts",
-            Map.of("keyword", "x".repeat(PageWorkingCopy.MAX_BYTES))).block())
+            Map.of("keyword", "x".repeat(RunBudget.MAX_BYTES))).block())
             .isInstanceOf(IllegalStateException.class).hasMessageContaining("输出预算");
         assertThat(copy.exhausted()).isTrue();
         assertThat(copy.summaries()).isEmpty();
@@ -96,7 +96,7 @@ class ReferenceWorkingCopyTest {
         var session = mock(PageReferenceTools.Session.class);
         var copy = copy(session, ThemeStyleContext.unavailable());
         when(session.execute(anyString(), any())).thenReturn(Mono.just(
-            Map.of("content", "x".repeat(PageWorkingCopy.MAX_BYTES))));
+            Map.of("content", "x".repeat(RunBudget.MAX_BYTES))));
         assertThatThrownBy(() -> copy.reference("read_theme_file", Map.of()).block())
             .isInstanceOf(IllegalStateException.class).hasMessageContaining("输出预算");
         assertThat(copy.exhausted()).isTrue();
@@ -110,7 +110,7 @@ class ReferenceWorkingCopyTest {
     void recoveredErrorOutputAlsoConsumesTheSharedByteBudget() {
         var session = mock(PageReferenceTools.Session.class);
         var copy = copy(session, ThemeStyleContext.unavailable());
-        copy.consume("x".repeat(PageWorkingCopy.MAX_BYTES - 2));
+        copy.consume("x".repeat(RunBudget.MAX_BYTES - 2));
         when(session.execute(anyString(), any())).thenReturn(Mono.error(new IllegalArgumentException("Invalid size")));
         assertThatThrownBy(() -> copy.reference("list_posts", Map.of()).block())
             .isInstanceOf(IllegalStateException.class).hasMessageContaining("输出预算");
@@ -129,11 +129,11 @@ class ReferenceWorkingCopyTest {
         verify(session).bindTheme("theme-a");
         assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
             .containsExactly("update_current_page");
-        for (int i = 1; i < PageWorkingCopy.MAX_CALLS; i++) {
+        for (int i = 1; i < RunBudget.MAX_CALLS; i++) {
             copy.reference("list_theme_files", Map.of()).block();
         }
         assertThat(copy.exhausted()).isFalse();
-        verify(session, times(PageWorkingCopy.MAX_CALLS - 1)).execute("list_theme_files", Map.of());
+        verify(session, times(RunBudget.MAX_CALLS - 1)).execute("list_theme_files", Map.of());
     }
 
     @Test

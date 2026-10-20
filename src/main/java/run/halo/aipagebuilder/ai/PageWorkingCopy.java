@@ -1,6 +1,5 @@
 package run.halo.aipagebuilder.ai;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,9 +16,6 @@ import run.halo.aipagebuilder.page.PagePaths;
 
 /** One run, one page. Tools never receive a client or a page identifier. */
 public final class PageWorkingCopy {
-    static final int MAX_CALLS = 40;
-    static final int MAX_BYTES = 2 * 1024 * 1024;
-    static final int MAX_PREVIEW_BYTES = 16 * 1024 * 1024;
     final RunBudget budget = new RunBudget();
     final String assistantMessageId = java.util.UUID.randomUUID().toString();
     private boolean restored;
@@ -28,8 +24,6 @@ public final class PageWorkingCopy {
     private Mono<Void> edits = Mono.empty();
     private boolean closed;
     private boolean checkpointFailed;
-    private long previewBytes;
-    private int contextBytes;
     private final long startedNanos = System.nanoTime();
     private String modelName;
     private String trace;
@@ -41,19 +35,13 @@ public final class PageWorkingCopy {
 
     String trace() { return trace; }
 
-    synchronized void contextBytes(int value) { contextBytes = Math.max(contextBytes, value); }
-
     synchronized ChatApi.Usage usage() {
-        return budget.snapshot(modelName, (System.nanoTime() - startedNanos) / 1_000_000,
-            bytes, previewBytes, contextBytes);
+        return budget.snapshot(modelName, (System.nanoTime() - startedNanos) / 1_000_000);
     }
 
     /** Preview is disposable presentation data: throttling it must not fail a valid edit. */
     synchronized boolean preview(String value) {
-        var size = value.getBytes(StandardCharsets.UTF_8).length;
-        if (size > MAX_BYTES || previewBytes + size > MAX_PREVIEW_BYTES) return false;
-        previewBytes += size;
-        return true;
+        return budget.preview(value);
     }
 
     void checkpoint(java.util.function.Supplier<Mono<Void>> checkpoint) {
@@ -105,7 +93,7 @@ public final class PageWorkingCopy {
 
     synchronized boolean checkpointFailed() { return checkpointFailed; }
     synchronized void markCheckpointFailed() { checkpointFailed = true; }
-    synchronized int calls() { return calls; }
+    synchronized int calls() { return budget.calls(); }
 
     synchronized boolean restored() { return restored; }
 
@@ -130,10 +118,6 @@ public final class PageWorkingCopy {
     private String slug;
     private final boolean canSetSlug;
     private boolean invalidSlugUpdate;
-    private int calls;
-    private int bytes;
-    private boolean exhausted;
-    private AiGenerationException.Reason budgetReason;
     private boolean invalidUpdate;
     private ThemeStyleContext themeSnapshot;
     private PageReferenceTools.Session references;
@@ -353,6 +337,10 @@ public final class PageWorkingCopy {
         return drained;
     }
 
+    synchronized List<String> drainContinuationSteers() {
+        return budget.tryContinuation(!pendingSteers.isEmpty()) ? drainSteers() : List.of();
+    }
+
     public synchronized Map<String, Object> read() {
         call();
         var result = Map.<String, Object>of("html", document.html(), "css", document.css(), "js", document.js(),
@@ -490,26 +478,14 @@ public final class PageWorkingCopy {
     }
 
     private void call() {
-        if (++calls > MAX_CALLS || exhausted) {
-            exhausted = true;
-            if (budgetReason == null) budgetReason = AiGenerationException.Reason.TOOL_LIMIT;
-            throw new IllegalStateException("工具调用预算已耗尽");
-        }
+        budget.call();
     }
 
     public synchronized void consume(String value) {
-        bytes += value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length;
-        if (bytes > MAX_BYTES) {
-            exhausted = true;
-            if (budgetReason == null) budgetReason = AiGenerationException.Reason.DATA_LIMIT;
-            throw new IllegalStateException("本轮输出预算已耗尽");
-        }
+        budget.consume(value);
     }
 
-    public synchronized boolean exhausted() { return exhausted || budget.tokenLimitReached(); }
-    synchronized AiGenerationException.Reason budgetReason() {
-        return budget.tokenLimitReached() ? AiGenerationException.Reason.TOKEN_LIMIT : budgetReason;
-    }
+    public synchronized boolean exhausted() { return budget.exhausted(); }
     synchronized boolean hasInvalidContentUpdate() { return invalidUpdate; }
     synchronized boolean hasInvalidSlugUpdate() { return invalidSlugUpdate; }
     public synchronized boolean hasInvalidUpdate() { return invalidUpdate || invalidSlugUpdate; }
