@@ -28,7 +28,7 @@ final class PageArchive {
     record Metadata(String format, int version, String title, String description,
                     boolean themeLayout) { }
 
-    record ImportedPage(PageDocument document, boolean themeLayout) { }
+    record ImportedPage(PageDocument document, String title, String description, boolean themeLayout) { }
 
     static ImportedPage read(byte[] bytes) {
         if (bytes.length > MAX_BYTES) {
@@ -59,9 +59,11 @@ final class PageArchive {
             throw invalid("page.json 的页面信息无效");
         }
         var document = new PageDocument(2, "code", null, null,
-            files.get("page.html"), files.get("styles.css"), metadata.get("title").stringValue(),
-            metadata.path("description").asString(null), files.get("script.js"));
-        return new ImportedPage(document, metadata.get("themeLayout").booleanValue());
+            files.get("page.html"), files.get("styles.css"), files.get("script.js"));
+        var title = metadata.get("title").stringValue();
+        var description = metadata.path("description").asString(null);
+        PageService.validateProperties(title, description);
+        return new ImportedPage(document, title, description, metadata.get("themeLayout").booleanValue());
     }
 
     private static Map<String, String> readEntries(byte[] bytes) {

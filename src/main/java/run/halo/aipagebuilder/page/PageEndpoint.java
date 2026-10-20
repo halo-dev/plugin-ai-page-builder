@@ -123,16 +123,11 @@ public class PageEndpoint implements CustomEndpoint {
                 builder -> named(builder, "savePage", PageDetail.class)
                     .requestBody(requestBodyBuilder().required(true)
                         .implementation(SavePageRequest.class)))
-            .PUT("/pages/{name}/slug", request -> body(request, PageApi.UpdatePageSlugRequest.class)
-                    .flatMap(input -> json(service.updateSlug(name(request), input))),
-                builder -> named(builder, "updatePageSlug", PageDetail.class)
+            .PUT("/pages/{name}/properties", request -> body(request, PageApi.UpdatePagePropertiesRequest.class)
+                    .flatMap(input -> json(service.updateProperties(name(request), input))),
+                builder -> named(builder, "updatePageProperties", PageDetail.class)
                     .requestBody(requestBodyBuilder().required(true)
-                        .implementation(PageApi.UpdatePageSlugRequest.class)))
-            .PUT("/pages/{name}/layout", request -> body(request, PageApi.UpdatePageLayoutRequest.class)
-                    .flatMap(input -> json(service.updateLayout(name(request), input))),
-                builder -> named(builder, "updatePageLayout", PageDetail.class)
-                    .requestBody(requestBodyBuilder().required(true)
-                        .implementation(PageApi.UpdatePageLayoutRequest.class)))
+                        .implementation(PageApi.UpdatePagePropertiesRequest.class)))
             .POST("/pages/{name}/clone", request -> body(request, PageApi.ClonePageRequest.class)
                     .flatMap(input -> actor().flatMap(actor -> json(service.clonePage(name(request), input, actor)))),
                 builder -> named(builder, "clonePage", PageDetail.class)
@@ -180,7 +175,7 @@ public class PageEndpoint implements CustomEndpoint {
                             .flatMap(revision -> preview.render(request, detail.page().name(),
                                 detail.page().slug() != null ? detail.page().slug()
                                     : detail.page().name(),
-                                detail.page().themeLayout(), revision.document()))),
+                                detail.page().themeLayout(), revision.document(), detail.page().title(), detail.page().description()))),
                 builder -> builder.operationId("previewPageRevision").tag("AiPageBuilder")
                     .parameter(nameParameter())
                     .parameter(parameterBuilder().name("revision").in(ParameterIn.PATH)
@@ -197,7 +192,7 @@ public class PageEndpoint implements CustomEndpoint {
             .GET("/pages/{name}/preview", request -> service.get(name(request))
                     .flatMap(detail -> preview.render(request, detail.page().name(),
                         detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
-                        detail.page().themeLayout(), detail.document())),
+                        detail.page().themeLayout(), detail.document(), detail.page().title(), detail.page().description())),
                 builder -> builder.operationId("previewPage").tag("AiPageBuilder")
                     .parameter(nameParameter())
                     .response(responseBuilder().responseCode("200")
@@ -207,7 +202,7 @@ public class PageEndpoint implements CustomEndpoint {
                     .flatMap(document -> service.get(name(request))
                         .flatMap(detail -> preview.render(request, detail.page().name(),
                             detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
-                            detail.page().themeLayout(), document))),
+                            detail.page().themeLayout(), document, detail.page().title(), detail.page().description()))),
                 builder -> builder.operationId("previewPageDocument").tag("AiPageBuilder")
                     .parameter(nameParameter())
                     .requestBody(requestBodyBuilder().required(true)

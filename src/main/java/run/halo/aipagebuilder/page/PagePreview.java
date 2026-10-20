@@ -26,18 +26,18 @@ public class PagePreview {
     }
 
     public Mono<ServerResponse> render(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document) {
-        return renderer.render(request, name, slug, themeLayout, document)
+        boolean themeLayout, PageDocument document, String title, String description) {
+        return renderer.render(request, name, slug, themeLayout, document, title, description)
             .flatMap(response -> RenderingResponse.from(response)
                 .header("Content-Security-Policy", policy(request).document()).build())
             .cast(ServerResponse.class);
     }
 
     public Mono<ServerResponse> token(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document) {
+        boolean themeLayout, PageDocument document, String title, String description) {
         return Mono.defer(() -> {
             var safeRequest = PagePreviewResponse.withoutCredential(request);
-            return renderer.render(safeRequest, name, slug, themeLayout, document)
+            return renderer.render(safeRequest, name, slug, themeLayout, document, title, description)
                 .flatMap(response -> {
                     var policy = policy(safeRequest);
                     var uri = safeRequest.uri();

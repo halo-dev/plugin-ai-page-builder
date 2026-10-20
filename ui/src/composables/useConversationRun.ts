@@ -94,8 +94,8 @@ export function useConversationRun(options: {
     if (activeRun.value?.pendingQuestion) remember(activeRun.value.pendingQuestion)
   }
   function committed(page: PageDetail) {
-    if (!activeRun.value || disposed || applied.has(page.page.draftRevision)) return
-    applied.add(page.page.draftRevision)
+    if (!activeRun.value || disposed || applied.has(String(page.page.version))) return
+    applied.add(String(page.page.version))
     options.committed(page)
   }
   function questionEvent(runId: string, question: PageChatQuestion, answered: boolean) {
@@ -148,7 +148,7 @@ export function useConversationRun(options: {
         result.status === 'waiting_for_user'
           ? '等待你的回答，提交后助手将继续。'
           : result.status === 'committing'
-            ? '正在保存本轮草稿…'
+            ? '正在保存本轮修改…'
             : '助手正在处理页面…'
       // Arm before refreshing: a late history response cannot revive a terminal timer.
       schedule()

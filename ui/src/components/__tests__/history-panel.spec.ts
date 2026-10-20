@@ -10,7 +10,6 @@ const revisions: RevisionSummary[] = [
     createdAt: '2026-10-16T10:15:09Z',
     createdBy: 'admin',
     source: 'ai',
-    title: '图库',
     parentRevision: 'rev-1',
   },
   {
@@ -18,7 +17,6 @@ const revisions: RevisionSummary[] = [
     createdAt: '2026-10-16T10:10:39Z',
     createdBy: 'admin',
     source: 'manual',
-    title: '未命名页面',
     parentRevision: 'rev-0',
   },
   {
@@ -26,31 +24,24 @@ const revisions: RevisionSummary[] = [
     createdAt: '2026-10-16T10:05:00Z',
     createdBy: 'admin',
     source: 'restore',
-    title: '恢复的版本',
   },
 ]
 const documents: Record<string, PageDocument> = {
   'rev-2': {
     schemaVersion: 2,
     mode: 'code',
-    title: '图库',
-    description: '',
     html: '<p>newer</p>',
     css: '.new{color:red}',
   },
   'rev-1': {
     schemaVersion: 2,
     mode: 'code',
-    title: '未命名页面',
-    description: '',
     html: '<p>older</p>',
     css: '',
   },
   'rev-0': {
     schemaVersion: 2,
     mode: 'code',
-    title: '恢复的版本',
-    description: '',
     html: '<p>oldest</p>',
     css: '',
   },
@@ -107,8 +98,6 @@ vi.mock('../SourceComparison.vue', () => ({
 const current: PageDocument = {
   schemaVersion: 2,
   mode: 'code',
-  title: '当前标题',
-  description: '',
   html: '<p>new</p>',
   css: '',
 }
@@ -157,7 +146,8 @@ describe('HistoryPanel', () => {
     )
     expect(iframe.attributes('srcdoc')).toBeUndefined()
     expect(iframe.attributes('sandbox')).toBe('allow-scripts')
-    expect(wrapper.text()).toContain('图库')
+    expect(wrapper.text()).toContain('历史只记录页面内容')
+    expect(wrapper.text()).toContain('timeAgo:2026-10-16T10:15:09Z')
   })
 
   it('switches the preview iframe when another revision is selected', async () => {

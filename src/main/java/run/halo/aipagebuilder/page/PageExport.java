@@ -15,11 +15,11 @@ final class PageExport {
 
     static byte[] zip(PageDetail detail) {
         var document = detail.document();
-        var metadata = new PageArchive.Metadata(PageArchive.FORMAT, 1, document.title(),
-            document.description(), detail.page().themeLayout());
+        var metadata = new PageArchive.Metadata(PageArchive.FORMAT, 1, detail.page().title(),
+            detail.page().description(), detail.page().themeLayout());
         var html = "<!doctype html>\n<html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            + "<title>" + Entities.escape(document.title()) + "</title>"
+            + "<title>" + Entities.escape(detail.page().title()) + "</title>"
             + "<link rel=\"stylesheet\" href=\"styles.css\"></head><body>\n"
             + document.html() + (document.js().isEmpty() ? "" : "\n<script src=\"script.js\"></script>")
             + "\n</body></html>\n";

@@ -1,94 +1,56 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, useTemplateRef, watch } from 'vue'
-import { Toast, VButton, VModal, VSpace } from '@halo-dev/components'
-import type { PageDetail, PageDocument } from '../api/generated'
-import { errorMessage } from '../utils/error'
+import { reactive, useTemplateRef, watch } from 'vue'
+import { VButton, VModal, VSpace } from '@halo-dev/components'
+import type { PageSummary } from '../api/generated'
+import type { PagePropertiesPatch } from '../composables/usePageWrites'
 import { slugOptionalValidation, slugValidation } from '../utils/slug'
 const props = defineProps<{
-  document: PageDocument
-  slug?: string | null
-  themeLayout: boolean
+  page: PageSummary
   disabled: boolean
   published: boolean
-  saveSlug: (slug: string) => Promise<PageDetail | undefined>
 }>()
-type SettingsPatch = Partial<Pick<PageDocument, 'title' | 'description'>> & {
-  themeLayout?: boolean
-}
 const emit = defineEmits<{
   close: []
-  apply: [value: SettingsPatch]
+  apply: [value: PagePropertiesPatch]
   unpublish: []
 }>()
 const buffer = reactive({
-  title: props.document.title,
-  description: props.document.description || '',
-  slug: props.slug ?? '',
-  themeLayout: props.themeLayout,
+  title: props.page.title,
+  description: props.page.description || '',
+  slug: props.page.slug ?? '',
+  themeLayout: props.page.themeLayout,
 })
 const form = useTemplateRef<{ node: { submit: () => void } }>('form')
 const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
-const saving = ref(false)
-// The modal's writes (slug save and the parent's apply) share the page's
-// optimistic-lock version, so no two of them may be in flight at once. Closing
-// stays allowed even while busy: VModal hides itself before emitting close, so
-// the event cannot be vetoed — parents must tolerate late results instead.
-const busy = computed(() => saving.value || props.disabled)
-// A parent refresh (e.g. after a version conflict) swaps the document under
-// the form: fields the user never touched follow the fresh values, while
-// edited fields (buffer diverged from the old props) keep the user's input.
+// Keep edited inputs on conflict while untouched fields follow the refreshed page.
 watch(
-  () => [props.document, props.slug, props.themeLayout] as const,
-  ([doc, slug, themeLayout], [prevDoc, prevSlug, prevThemeLayout]) => {
-    if (buffer.title === prevDoc.title) buffer.title = doc.title
-    if (buffer.description === (prevDoc.description || ''))
-      buffer.description = doc.description || ''
-    if (buffer.slug === (prevSlug ?? '')) buffer.slug = slug ?? ''
-    if (buffer.themeLayout === prevThemeLayout) buffer.themeLayout = themeLayout
+  () => props.page,
+  (page, previous) => {
+    if (buffer.title === previous.title) buffer.title = page.title
+    if (buffer.description === (previous.description || ''))
+      buffer.description = page.description || ''
+    if (buffer.slug === (previous.slug ?? '')) buffer.slug = page.slug ?? ''
+    if (buffer.themeLayout === previous.themeLayout) buffer.themeLayout = page.themeLayout
   },
 )
-async function submit() {
-  if (busy.value) return
-  const patch: SettingsPatch = {}
-  if (buffer.title !== props.document.title) patch.title = buffer.title
-  if (buffer.description !== (props.document.description || ''))
-    patch.description = buffer.description
-  if (buffer.themeLayout !== props.themeLayout) patch.themeLayout = buffer.themeLayout
-  // The slug saves through its own API and takes effect immediately, unlike
-  // title/description which the parent applies to the working document.
-  if (buffer.slug !== (props.slug ?? '')) {
-    saving.value = true
-    try {
-      if (!(await props.saveSlug(buffer.slug))) return
-      Toast.success('访问路径已保存')
-    } catch (e) {
-      Toast.error(errorMessage(e))
-      return
-    } finally {
-      saving.value = false
-    }
-  }
-  // The modal may have closed while the slug save was in flight; a dead
-  // instance must not emit into whatever modal session is open now.
-  if (!alive) return
+function submit() {
+  if (props.disabled) return
+  const patch: PagePropertiesPatch = {}
+  if (buffer.title !== props.page.title) patch.title = buffer.title
+  if (buffer.description !== (props.page.description || '')) patch.description = buffer.description
+  if (buffer.slug !== (props.page.slug ?? '')) patch.slug = buffer.slug
+  if (buffer.themeLayout !== props.page.themeLayout) patch.themeLayout = buffer.themeLayout
   emit('apply', patch)
 }
-let alive = true
-onBeforeUnmount(() => {
-  alive = false
-})
 </script>
 <template>
   <VModal title="页面设置" :width="560" @close="emit('close')" ref="modal">
     <!-- Wrap conditional content in a stable container for VModal's default slot. -->
     <div>
-      <FormKit
-        ref="form"
-        type="form"
-        :actions="false"
-        :disabled="disabled || saving"
-        @submit="submit"
-      >
+      <p class="mb-4 text-sm text-gray-500">
+        属性保存后立即生效，历史版本只记录页面内容，不包含这些属性。
+      </p>
+      <FormKit ref="form" type="form" :actions="false" :disabled="disabled" @submit="submit">
         <FormKit
           v-model="buffer.title"
           type="text"
@@ -112,7 +74,7 @@ onBeforeUnmount(() => {
           label="页面路径"
           placeholder="company/about"
           help="使用小写字母、数字和连字符，支持 / 分隔的多级路径，不含首尾斜线。保存后立即生效。"
-          :validation="slug ? slugValidation : slugOptionalValidation"
+          :validation="page.slug ? slugValidation : slugOptionalValidation"
           :maxlength="200"
         />
         <FormKit
@@ -129,14 +91,14 @@ onBeforeUnmount(() => {
         <VSpace>
           <VButton
             type="secondary"
-            :loading="saving || disabled"
-            :disabled="busy"
+            :loading="disabled"
+            :disabled="disabled"
             @click="form?.node.submit()"
-            >应用</VButton
+            >保存</VButton
           >
           <VButton @click="modal?.close()">取消</VButton>
         </VSpace>
-        <VButton v-if="published" ghost :disabled="busy" @click="emit('unpublish')"
+        <VButton v-if="published" ghost :disabled="disabled" @click="emit('unpublish')"
           >取消发布</VButton
         >
       </div>

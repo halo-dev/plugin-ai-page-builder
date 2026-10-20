@@ -66,7 +66,6 @@ describe('new session presets', () => {
     const wrapper = await panel({
       schemaVersion: 2,
       mode: 'code',
-      title: '未命名页面',
       html: '',
       css: '',
     })
@@ -89,7 +88,6 @@ describe('new session presets', () => {
     const wrapper = await panel({
       schemaVersion: 2,
       mode: 'code',
-      title: '已有内容',
       html: '<h1>已经存在的页面</h1>',
       css: '',
     })
@@ -109,7 +107,6 @@ describe('new session presets', () => {
     const wrapper = await panel({
       schemaVersion: 2,
       mode: 'code',
-      title: '未命名页面',
       html: '',
       css: '',
     })

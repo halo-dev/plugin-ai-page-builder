@@ -27,7 +27,7 @@ public class PageRouter {
             return service.findPublished(slug)
                 .map(detail -> incoming -> isSuperAdmin()
                     .flatMap(superAdmin -> renderer.render(incoming, detail.page().name(),
-                        detail.page().slug(), detail.page().themeLayout(), detail.document(),
+                        detail.page().slug(), detail.page().themeLayout(), detail.document(), detail.page().title(), detail.page().description(),
                         superAdmin)));
         };
     }

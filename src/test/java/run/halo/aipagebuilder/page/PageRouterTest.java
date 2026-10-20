@@ -33,17 +33,17 @@ class PageRouterTest {
 
     @Test
     void matchesOnlyAnExistingFullPathAndRendersWithStableName() {
-        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "", "Company", "");
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
             "draft", "published", Instant.now(), true);
         when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document),
+        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document), any(), any(),
             eq(false))).thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
         assertThat(handler.handle(request).block().statusCode().value()).isEqualTo(200);
-        verify(renderer).render(request, "stable-id", "about/company", true, document, false);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false);
         when(service.findPublished("about")).thenReturn(Mono.empty());
         when(service.findPublished("about/company/child")).thenReturn(Mono.empty());
         assertThat(router.route(request("/about")).block()).isNull();
@@ -67,13 +67,12 @@ class PageRouterTest {
 
     @Test
     void onlySuperAdministratorsGetPageScriptsDisabled() {
-        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "",
-            "Company", "", "document.title = 'changed';");
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "", "document.title = 'changed';");
         var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
             "draft", "published", Instant.now(), true);
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document),
+        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document), any(), any(),
             anyBoolean())).thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
@@ -83,7 +82,7 @@ class PageRouterTest {
             AuthorityUtils.createAuthorityList("ROLE_super-role"));
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block();
-        verify(renderer).render(request, "stable-id", "about/company", true, document, true);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", true);
 
         var impersonating = new UsernamePasswordAuthenticationToken("member", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated",
@@ -91,17 +90,17 @@ class PageRouterTest {
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating)).block();
         verify(renderer, times(2))
-            .render(request, "stable-id", "about/company", true, document, true);
+            .render(request, "stable-id", "about/company", true, document, "Company", "", true);
 
         var member = new UsernamePasswordAuthenticationToken("member", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated"));
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)).block();
-        verify(renderer).render(request, "stable-id", "about/company", true, document, false);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false);
 
         handler.handle(request).block();
         verify(renderer, times(2))
-            .render(request, "stable-id", "about/company", true, document, false);
+            .render(request, "stable-id", "about/company", true, document, "Company", "", false);
     }
 
     @Test

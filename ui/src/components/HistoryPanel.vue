@@ -154,7 +154,9 @@ function refetchDetails() {
             class="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-100 px-4 py-3"
           >
             <div class="min-w-0 flex-1 basis-40">
-              <h3 class="truncate text-sm font-semibold text-gray-900">{{ selected.title }}</h3>
+              <h3 class="truncate text-sm font-semibold text-gray-900">
+                {{ fullTime(selected.createdAt) }}
+              </h3>
               <p class="truncate text-xs text-gray-500" :title="fullTime(selected.createdAt)">
                 {{ timeAgo(selected.createdAt) }} · {{ sourceLabel(selected.source) }} ·
                 {{ selected.createdBy }}
@@ -190,6 +192,9 @@ function refetchDetails() {
               >
             </div>
           </header>
+          <p class="px-4 py-2 text-xs text-gray-500">
+            历史只记录页面内容，预览使用当前页面属性；恢复不会更改标题、描述、路径或布局。
+          </p>
           <div
             v-if="view === 'preview'"
             class="relative flex min-h-0 flex-1 flex-col bg-gray-100 p-4"
@@ -232,12 +237,6 @@ function refetchDetails() {
             <template v-else-if="document"
               ><p class="mb-3 text-xs text-gray-500">
                 {{ parentRevision ? '上一版本 → 选中版本' : '首个版本，修改前无内容' }}
-              </p>
-              <p class="mb-3 text-xs text-gray-500">
-                标题：{{ previousDocument?.title || '无' }} → {{ document.title }}<br />描述：{{
-                  previousDocument?.description || '无'
-                }}
-                → {{ document.description || '无' }}
               </p>
               <SourceComparison :before="previousDocument ?? EMPTY_DOCUMENT" :after="document"
             /></template>

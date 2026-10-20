@@ -29,6 +29,7 @@ import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageChatSession;
 import run.halo.aipagebuilder.model.PageDocument;
+import run.halo.aipagebuilder.model.ThemePage;
 import run.halo.aipagebuilder.page.PageApi;
 import run.halo.aipagebuilder.page.PageImportReviewService;
 import run.halo.aipagebuilder.page.PageService;
@@ -60,9 +61,9 @@ class PageChatServiceTest {
 
         storage.install();
         when(pages.get("page")).thenReturn(Mono.just(fixture.base));
-        when(pages.committedAiRevision(anyString(), anyString())).thenReturn(Mono.empty());
+        when(pages.committedAiRun(anyString(), anyString())).thenReturn(Mono.empty());
         when(gateway.available()).thenReturn(Mono.just(true));
-        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any()))
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any()))
             .thenReturn(Mono.just(fixture.changed));
     }
 
@@ -125,7 +126,7 @@ class PageChatServiceTest {
         }));
         assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
         assertThat(stored.get("page").getSpec().getActive()).isNull();
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -226,7 +227,7 @@ class PageChatServiceTest {
                 .containsEntry("errorText", "运行结果待确认，请查询运行状态"));
         assertThat(stored.get("page").getSpec().getActive().status()).isEqualTo("running");
         assertThat(checkpoints).hasSize(1);
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -320,7 +321,7 @@ class PageChatServiceTest {
             assertThat(service.result("page", runId).block().status()).isEqualTo("interrupted");
             assertThat(service.checkpoint("page", "page", "admin").block().recovery().canResume()).isTrue();
             assertThat(stored.get("page").getSpec().getActive()).isNull();
-            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
         } finally { reactor.test.scheduler.VirtualTimeScheduler.reset(); }
     }
 
@@ -399,6 +400,26 @@ class PageChatServiceTest {
     }
 
     @Test
+    void titleOnlyCommitEmitsUpdatedPageWithoutClaimingANewContentRevision() {
+        var base = fixture.base.page();
+        var renamed = new PageApi.PageDetail(new PageApi.PageSummary(base.name(), base.slug(),
+            "Renamed", base.description(), 2L, base.themeLayout(), base.draftRevision(),
+            base.publishedRevision(), Instant.now(), base.hasUnpublishedChanges()), fixture.base.document());
+        when(pages.saveAi(eq("page"), eq(1L), eq(fixture.base.document()), eq("admin"),
+            eq(runId), eq("old-revision"), isNull(), eq("Renamed")))
+            .thenReturn(Mono.just(renamed));
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setTitle(Map.of("title", "Renamed")).thenMany(Flux.empty());
+        });
+        var events = service.start("page", request(), "admin").block().collectList().block();
+        assertThat(events).extracting(event -> event.get("type"))
+            .containsExactly("data-page-committed", "finish");
+        assertThat(events.getFirst().get("data")).isEqualTo(renamed);
+        assertThat(turns.values().iterator().next().getSpec().getTurn().revision()).isNull();
+    }
+
+    @Test
     void initialGenerationCommitsSemanticPathWithTitleAndContent() {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
@@ -411,9 +432,8 @@ class PageChatServiceTest {
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         verify(pages).saveAi(eq("page"), eq(1L),
-            org.mockito.ArgumentMatchers.argThat(document -> document.title().equals("关于我们")
-                && document.html().equals("<p>About us</p>")),
-            eq("admin"), eq(runId), eq("old-revision"), eq("company/about"));
+            org.mockito.ArgumentMatchers.argThat(document -> document.html().equals("<p>About us</p>")),
+            eq("admin"), eq(runId), eq("old-revision"), eq("company/about"), eq("关于我们"));
         assertThat(events).extracting(event -> event.get("type")).contains("data-page-committed");
     }
 
@@ -492,7 +512,7 @@ class PageChatServiceTest {
         }));
         service.start("page", request(), "admin").block().blockLast();
         verify(pages).saveAi(eq("page"), eq(1L), eq(fixture.base.document()),
-            eq("admin"), eq(runId), eq("old-revision"), eq("about"));
+            eq("admin"), eq(runId), eq("old-revision"), eq("about"), any());
     }
 
     @Test
@@ -504,15 +524,16 @@ class PageChatServiceTest {
         }));
         service.start("page", request(), "admin").block();
         service.cancel("page", runId).block();
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
-    void restartAndResumePreserveTheStagedSemanticPath() {
+    void restartAndResumePreserveStagedTitleAndPath() {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
-            return copy.setSlug(Map.of("slug", "company/about"))
+            return copy.setTitle(Map.of("title", "Renamed"))
+                .then(copy.setSlug(Map.of("slug", "company/about")))
                 .thenMany(Flux.never());
         });
         service.start("page", request(), "admin").block();
@@ -521,17 +542,18 @@ class PageChatServiceTest {
         assertThat(restarted.result("page", runId).block().status()).isEqualTo("interrupted");
         var saved = restarted.checkpoint("page", "page", "admin").block();
         var next = UUID.randomUUID().toString();
-        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about")))
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"), eq("Renamed")))
             .thenReturn(Mono.just(fixture.changed));
         doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
             assertThat(copy.slug()).isEqualTo("company/about");
+            assertThat(copy.title()).isEqualTo("Renamed");
             assertThat(copy.recoveryContext()).contains("company/about");
             return Flux.empty();
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         restarted.start("page", resumeRequest(saved, next), "admin").block().blockLast();
         assertThat(restarted.result("page", next).block().status()).isEqualTo("completed");
-        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"));
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"), eq("Renamed"));
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -547,7 +569,7 @@ class PageChatServiceTest {
         service.start("page", request(), "admin").block().blockLast();
         var saved = service.checkpoint("page", "page", "admin").block();
         var next = UUID.randomUUID().toString();
-        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("about")))
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("about"), any()))
             .thenReturn(Mono.just(fixture.changed));
         doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
@@ -561,7 +583,7 @@ class PageChatServiceTest {
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         service.start("page", resumeRequest(saved, next), "admin").block().blockLast();
         assertThat(service.result("page", next).block().status()).isEqualTo("completed");
-        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("about"));
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("about"), any());
     }
 
     private void usePageWithoutPath() {
@@ -586,14 +608,14 @@ class PageChatServiceTest {
             service.start("page", request(), "admin").block().subscribe(events::add);
             clock.advanceTimeBy(java.time.Duration.ofSeconds(599));
             assertThat(service.result("page", runId).block().status()).isEqualTo("running");
-            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
             clock.advanceTimeBy(java.time.Duration.ofSeconds(1));
             var result = service.result("page", runId).block();
             assertThat(result.status()).isEqualTo("incomplete");
             assertThat(result.error()).isEqualTo(AiGenerationException.Reason.RUN_TIMEOUT.message);
             assertThat(service.session("page").block().turns().getFirst().error()).isEqualTo(result.error());
             assertThat(events).noneMatch(event -> "data-page-committed".equals(event.get("type")));
-            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
         } finally {
             reactor.test.scheduler.VirtualTimeScheduler.reset();
         }
@@ -609,7 +631,7 @@ class PageChatServiceTest {
         service.start("page", request(), "admin").block().blockLast();
         assertThat(service.result("page", runId).block().error())
             .isEqualTo(AiGenerationException.Reason.RESPONSE_TIMEOUT.message);
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -621,13 +643,13 @@ class PageChatServiceTest {
                 .doOnNext(result -> assertThat(result).containsEntry("valid", false))
                 .then(copy.update(Map.of("html", "<p>new</p>", "css", "")))
                 .doOnNext(ignored -> verify(pages, never()).saveAi(anyString(), any(), any(),
-                    anyString(), anyString(), anyString(), any()))
+                    anyString(), anyString(), anyString(), any(), any()))
                 .thenMany(Flux.just(Map.of("type", "text-delta", "id", "t", "delta", "完成")));
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type"))
             .containsExactly("text-delta", "data-page-committed", "finish");
-        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any());
+        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any());
         var session = service.session("page").block();
         assertThat(session.activeRun()).isNull();
         assertThat(session.turns()).hasSize(1);
@@ -650,7 +672,7 @@ class PageChatServiceTest {
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type")).containsExactly("reasoning-delta",
             "tool-input-start", "tool-output-available", "data-page-staged", "data-page-committed", "finish");
-        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any());
+        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any());
         assertThat(events.get(3)).containsEntry("name", "page-staged").containsEntry("id", "tool");
         assertThat(events.get(4)).containsEntry("name", "page-committed").containsEntry("id", runId);
         var turn = service.session("page").block().turns().getFirst();
@@ -765,7 +787,7 @@ class PageChatServiceTest {
         assertThat(result.status()).isEqualTo("cancelled");
         assertThat(result.recovery()).isNull();
         assertThat(checkpoints).isEmpty();
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -928,20 +950,20 @@ class PageChatServiceTest {
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type")).containsExactly("error");
         assertThat(events.toString()).doesNotContain("provider-secret");
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
 
         var nextId = UUID.randomUUID().toString();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
         var stream = service.start("page", new ChatApi.Request(nextId, 1L, "model", "修改"), "admin").block();
         assertThat(service.cancel("page", nextId).block().status()).isEqualTo("cancelled");
         assertThat(stream.collectList().block()).extracting(value -> value.get("type")).containsExactly("abort");
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
     void cancellationAfterCommitBoundaryCannotClaimCancelled() {
         var saved = Sinks.<PageApi.PageDetail>one();
-        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any())).thenReturn(saved.asMono());
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any())).thenReturn(saved.asMono());
         stagedSuccess();
         var stream = service.start("page", request(), "admin").block();
         assertThat(service.cancel("page", runId).block().status()).isEqualTo("committing");
@@ -1036,7 +1058,7 @@ class PageChatServiceTest {
         assertThat(prompts).hasSize(2);
         assertThat(prompts.get(0)).isEqualTo("修改页面");
         assertThat(prompts.get(1)).contains("标题再短一点");
-        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any());
+        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any());
         assertThat(service.session("page").block().turns().getFirst().steers())
             .containsExactly("标题再短一点");
     }
@@ -1073,7 +1095,7 @@ class PageChatServiceTest {
         assertThat(copies).allSatisfy(copy -> assertThat(copy).isSameAs(copies.getFirst()));
         assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
         verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
-            eq("old-revision"), any());
+            eq("old-revision"), any(), any());
     }
 
     @Test
@@ -1099,7 +1121,7 @@ class PageChatServiceTest {
         var turn = service.session("page").block().turns().getFirst();
         assertThat(turn.steers()).containsExactly("标题再短一点");
         assertThat(turn.questions().getFirst().answers()).isEqualTo(answerRequest().answers());
-        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any());
+        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any());
     }
 
     @Test
@@ -1128,7 +1150,7 @@ class PageChatServiceTest {
     void noEditDoesNotSaveAndVersionConflictDoesNotCommit() {
         when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.empty());
         service.start("page", request(), "admin").block().blockLast();
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
         assertThatThrownBy(() -> service.start("page", new ChatApi.Request(UUID.randomUUID().toString(),
             0L, "model", "修改"), "admin").block()).hasMessageContaining("409");
     }
@@ -1144,17 +1166,71 @@ class PageChatServiceTest {
     }
 
     @Test
+    void restartRecoversPropertyOnlyCommitWithoutCreatingARevision() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        service.start("page", request(), "admin").block();
+        when(pages.committedAiRun("page", runId))
+            .thenReturn(Mono.just(new ThemePage.AiCommit(runId, null)));
+        var restarted = new PageChatService(client, pages, gateway, policy, themes);
+
+        var session = restarted.session("page").block();
+        assertThat(session.activeRun()).isNull();
+        assertThat(session.turns()).singleElement().satisfies(turn -> {
+            assertThat(turn.status()).isEqualTo("completed");
+            assertThat(turn.revision()).isNull();
+        });
+        assertThat(restarted.result("page", runId).block().revision()).isNull();
+        verify(gateway, times(1)).chat(anyString(), any(), anyString(), any());
+        verify(pages, never()).saveAi(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void archivedRunRemainsQueryableAndCannotRepeatAfterPageReceiptIsReplaced() {
+        stagedSuccess();
+        service.start("page", request(), "admin").block().blockLast();
+        // The page only retains the latest receipt; this run now lives in conversation history.
+        when(pages.committedAiRun("page", runId)).thenReturn(Mono.empty());
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("completed");
+        assertThat(result.revision()).isEqualTo("new-revision");
+        assertThatThrownBy(() -> service.start("page", request(), "admin").block())
+            .hasMessageContaining("runId 已使用");
+        verify(pages, times(1)).saveAi(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void uncertainPropertyOnlySaveDoesNotReportThePreviousContentAsANewRevision() {
+        var reads = new AtomicInteger();
+        when(pages.committedAiRun("page", runId)).thenAnswer(i -> Mono.defer(() ->
+            reads.incrementAndGet() == 1 ? Mono.empty()
+                : Mono.just(new ThemePage.AiCommit(runId, null))));
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), isNull(), eq("Renamed")))
+            .thenReturn(Mono.error(new IllegalStateException("connection lost after update")));
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setTitle(Map.of("title", "Renamed")).thenMany(Flux.empty());
+        });
+        service.start("page", request(), "admin").block().blockLast();
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("completed");
+        assertThat(result.revision()).isNull();
+        verify(pages, times(1)).saveAi(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void uncertainSaveIsReconciledByRunIdAndNotRepeated() {
         var reads = new AtomicInteger();
-        when(pages.committedAiRevision("page", runId)).thenAnswer(i -> Mono.defer(() ->
-            reads.incrementAndGet() == 1 ? Mono.empty() : Mono.just("new-revision")));
-        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any()))
+        when(pages.committedAiRun("page", runId)).thenAnswer(i -> Mono.defer(() ->
+            reads.incrementAndGet() == 1 ? Mono.empty()
+                : Mono.just(new ThemePage.AiCommit(runId, "new-revision"))));
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any()))
             .thenReturn(Mono.error(new IllegalStateException("connection lost after update")));
         stagedSuccess();
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type"))
             .containsExactly("data-page-committed", "finish");
-        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any());
+        verify(pages, times(1)).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any());
     }
 
     @Test
@@ -1167,7 +1243,7 @@ class PageChatServiceTest {
         }));
         var events = service.start("page", request(), "admin").block().collectList().block();
         assertThat(events).extracting(value -> value.get("type")).containsExactly("error");
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1300,12 +1376,12 @@ class PageChatServiceTest {
             clock.advanceTimeBy(java.time.Duration.ofMinutes(20));
             assertThat(service.result("page", runId).block().status()).isEqualTo("waiting_for_user");
             assertThat(service.session("page").block().activeRun().pendingQuestion()).isEqualTo(pending);
-            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
             service.answer("page", runId, pending.id(), answerRequest(), "admin").block();
             assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
             var turn = service.session("page").block().turns().getFirst();
             assertThat(turn.questions().getFirst().answers()).isEqualTo(answerRequest().answers());
-            verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any());
+            verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any());
         } finally {
             reactor.test.scheduler.VirtualTimeScheduler.reset();
         }
@@ -1406,7 +1482,7 @@ class PageChatServiceTest {
         assertThat(service.session("page").block().turns().getFirst().questions()).hasSize(1);
         assertThatThrownBy(() -> service.answer("page", runId, question.id(), answerRequest(), "admin").block())
             .hasMessageContaining("409");
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1447,7 +1523,7 @@ class PageChatServiceTest {
         assertThatThrownBy(() -> restarted.answer("page", runId, pending.id(), answerRequest(), "admin").block())
             .hasMessageContaining("409");
         verify(gateway, times(1)).chat(anyString(), any(), anyString(), any());
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1471,7 +1547,7 @@ class PageChatServiceTest {
         service.start("page", request(), "admin").block();
         assertThat(service.result("page", runId).block().status()).isEqualTo("failed");
         assertThat(service.session("page").block().activeRun()).isNull();
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1492,7 +1568,7 @@ class PageChatServiceTest {
         assertThatThrownBy(() -> service.answer("page", runId, question.id(), answerRequest(), "admin").block())
             .hasMessageContaining("storage");
         assertThat(service.result("page", runId).block().status()).isEqualTo("failed");
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1534,9 +1610,9 @@ class PageChatServiceTest {
         assertThat(service.session("page").block().recovery()).isEqualTo(result.recovery());
         var checkpoint = service.checkpoint("page", "page", "admin").block();
         assertThat(checkpoint.document().html()).isEqualTo("<p>saved progress</p>");
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
         var next = UUID.randomUUID().toString();
-        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), any()))
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), any(), any()))
             .thenReturn(Mono.just(fixture.changed));
         org.mockito.Mockito.doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
@@ -1562,7 +1638,7 @@ class PageChatServiceTest {
         service.start("page", resumeRequest(checkpoint, next), "admin").block().collectList().block();
         assertThat(service.result("page", next).block().status()).isEqualTo("completed");
         assertThat(checkpoints).isEmpty();
-        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), any());
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), any(), any());
     }
 
     @Test
@@ -1576,7 +1652,7 @@ class PageChatServiceTest {
         assertThat(result.recovery()).isNull();
         assertThat(checkpoints).isEmpty();
         verify(gateway, never()).chat(anyString(), any(), anyString(), any());
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1599,7 +1675,7 @@ class PageChatServiceTest {
         assertThat(service.result("page", runId).block().status()).isEqualTo("failed");
         assertThat(service.checkpoint("page", "page", "admin").block().document().html())
             .isEqualTo("<p>persisted</p>");
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1641,7 +1717,7 @@ class PageChatServiceTest {
         service.start("page", resumeRequest(saved, next), "admin").block().collectList().block();
         assertThat(service.result("page", next).block().error())
             .isEqualTo(AiGenerationException.Reason.INVALID_UPDATE.message);
-        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any());
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(), anyString(), any(), any());
     }
 
     @Test
@@ -1765,7 +1841,7 @@ class PageChatServiceTest {
         private static PageApi.PageDetail page(String revision, Long version, String text) {
             return new PageApi.PageDetail(new PageApi.PageSummary("page", "page", "Title", "", version, true,
                 revision, null, Instant.now(), true), new PageDocument(1, "code", "", Map.of(),
-                "<p>" + text + "</p>", "", "Title", ""));
+                "<p>" + text + "</p>", ""));
         }
     }
 }

@@ -12,7 +12,7 @@ class ScriptWorkingCopyTest {
     @Test
     void scriptChangesParticipateInDigestAndAtomicPatch() {
         var copy = new PageWorkingCopy(new PageDocument(2, "code", null, null,
-            "<button>Next</button>", "", "Page", "", "let index = 0;"), new ContentPolicy());
+            "<button>Next</button>", "", "let index = 0;"), new ContentPolicy());
         var before = copy.read();
         assertThat(before.get("js")).isEqualTo("let index = 0;");
         assertThat(before.get("baseHash")).isNotEqualTo(DocumentHash.of(copy.document().html(), ""));

@@ -26,8 +26,7 @@ class PageSourceEditsTest {
         assertThat(prepared.sourceChanged()).isTrue();
         assertThat(prepared.cssChanged()).isEqualTo(field.equals("css"));
         assertThat(prepared.finish(null)).isEqualTo(new PageDocument(
-            js.isEmpty() ? 1 : 2, "code", null, null, html, css,
-            base.title(), base.description(), js));
+            js.isEmpty() ? 1 : 2, "code", null, null, html, css, js));
         assertThat(base.mode()).isEqualTo("visual");
         assertThat(base.projectData()).isNotNull();
     }
@@ -51,7 +50,7 @@ class PageSourceEditsTest {
     @Test
     void noOpStillValidatesWholeDocument() {
         var base = new PageDocument(1, "code", null, null,
-            "<script>bad</script>", "", "Title", "");
+            "<script>bad</script>", "");
         assertThatThrownBy(() -> edits.prepare(base, base.html(), base.css(), base.js()))
             .isInstanceOf(ResponseStatusException.class)
             .hasMessageContaining("不支持的 HTML 元素");
@@ -59,17 +58,17 @@ class PageSourceEditsTest {
 
     @Test
     void generalValidationRejectsCandidateBeforeThemeCompletion() {
-        var base = new PageDocument(1, "code", null, null, "<p>Old</p>", "", "", "");
-        assertThatThrownBy(() -> edits.prepare(base, "<p>New</p>",
+        var base = new PageDocument(1, "code", null, null, "<p>Old</p>", "");
+        assertThatThrownBy(() -> edits.prepare(base, "<script>alert(1)</script>",
             "@media(prefers-color-scheme:dark){p{color:red}}", ""))
             .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("页面标题");
+            .hasMessageContaining("script");
     }
 
     @Test
     void changedCssRequiresThemeValidationButUnchangedLegacyCssCanAccompanyTextEdits() {
         var css = "@media(prefers-color-scheme:dark){p{color:red}}";
-        var base = new PageDocument(1, "code", null, null, "<p>Old</p>", css, "Title", "");
+        var base = new PageDocument(1, "code", null, null, "<p>Old</p>", css);
         var textEdit = edits.prepare(base, "<p>New</p>", css, "");
         assertThat(textEdit.cssChanged()).isFalse();
         assertThat(textEdit.finish(explicitTheme()).html()).isEqualTo("<p>New</p>");
@@ -98,7 +97,7 @@ class PageSourceEditsTest {
 
     private static PageDocument visual(String js, int schema) {
         return new PageDocument(schema, "visual", "editor", Map.of("components", List.of()),
-            "<p>Old</p>", "p{color:red}", "Title", "Description", js);
+            "<p>Old</p>", "p{color:red}", js);
     }
 
     private static ThemeStyleContext explicitTheme() {

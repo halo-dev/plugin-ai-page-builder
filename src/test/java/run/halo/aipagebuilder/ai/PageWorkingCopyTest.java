@@ -18,6 +18,24 @@ import run.halo.aipagebuilder.theme.ThemeContextExtractor;
 import run.halo.aipagebuilder.theme.ThemeStyleContext;
 
 class PageWorkingCopyTest {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void repairingTitleOrContentDoesNotClearTheOtherValidationFailure(boolean invalidTitle) {
+        var copy = copy("<p>Original</p>", "");
+        if (invalidTitle) {
+            copy.setTitle(Map.of("title", " ")).block();
+            copy.update(Map.of("html", "<p>Changed</p>")).block();
+            assertThat(copy.hasInvalidUpdate()).isTrue();
+            copy.setTitle(Map.of("title", "Repaired")).block();
+        } else {
+            copy.update(Map.of("html", "<script>alert(1)</script>")).block();
+            copy.setTitle(Map.of("title", "Changed")).block();
+            assertThat(copy.hasInvalidUpdate()).isTrue();
+            copy.update(Map.of("html", "<p>Repaired</p>")).block();
+        }
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+    }
+
     @Test
     void partialUpdatesPreserveOmittedFieldsAndEmptyInputDoesNotClearInvalidState() {
         var copy = copy("<p>old</p>", "p{color:red}");
@@ -90,21 +108,23 @@ class PageWorkingCopyTest {
         var copy = copy("<p>old</p>", "");
         var write = reactor.core.publisher.Sinks.<Void>empty();
         var snapshots = new ArrayList<PageDocument>();
+        var titles = new ArrayList<String>();
         copy.checkpoint(() -> {
             snapshots.add(copy.document());
+            titles.add(copy.title());
             return snapshots.size() == 1 ? write.asMono() : Mono.empty();
         });
         var first = copy.update(Map.of("html", "<p>new</p>")).toFuture();
         var second = copy.setTitle(Map.of("title", "New title")).toFuture();
         assertThat(snapshots).hasSize(1);
-        assertThat(copy.document().title()).isEqualTo("Title");
+        assertThat(copy.title()).isEqualTo("Title");
         assertThat(second).isNotDone();
 
         write.tryEmitEmpty();
 
         assertThat(first.join()).containsEntry("valid", true);
         assertThat(second.join()).containsEntry("valid", true);
-        assertThat(snapshots).extracting(PageDocument::title).containsExactly("Title", "New title");
+        assertThat(titles).containsExactly("Title", "New title");
         assertThat(snapshots).allSatisfy(document ->
             assertThat(document.html()).isEqualTo("<p>new</p>"));
         assertThat(copy.calls()).isEqualTo(2);
@@ -210,12 +230,12 @@ class PageWorkingCopyTest {
         var copy = copy("<p>old</p>", "");
         assertThat(copy.setTitle(Map.of("title", "  新标题  ")).block())
             .containsEntry("valid", true).containsEntry("staged", true);
-        assertThat(copy.document().title()).isEqualTo("新标题");
+        assertThat(copy.title()).isEqualTo("新标题");
         assertThat(copy.document().html()).isEqualTo("<p>old</p>");
         assertThat(copy.hasInvalidUpdate()).isFalse();
         assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")).block())
             .containsEntry("valid", true);
-        assertThat(copy.document().title()).isEqualTo("新标题");
+        assertThat(copy.title()).isEqualTo("新标题");
         assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
             .containsExactly("update_page_title", "update_current_page");
     }
@@ -240,7 +260,7 @@ class PageWorkingCopyTest {
         assertThat(copy.hasInvalidUpdate()).isFalse();
         assertThat(copy.setTitle(Map.of("title", "恢复")).block())
             .containsEntry("valid", true).containsEntry("staged", false);
-        assertThat(copy.document().title()).isEqualTo("恢复");
+        assertThat(copy.title()).isEqualTo("恢复");
     }
 
     @Test
@@ -405,7 +425,7 @@ class PageWorkingCopyTest {
 
     @Test
     void noOpDoesNotNormalizeLegacyDocumentAndCanClearInvalidState() {
-        var document = new PageDocument(1, "visual", "legacy", Map.of(), "<p>old</p>", "", "Title", "desc");
+        var document = new PageDocument(1, "visual", "legacy", Map.of(), "<p>old</p>", "");
         var copy = new PageWorkingCopy(document, new ContentPolicy());
         copy.update(Map.of("html", "<script>bad</script>", "css", "")).block();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
@@ -460,7 +480,7 @@ class PageWorkingCopyTest {
         var context = new ThemeStyleContext("sample", "Sample", "SUPPORTED", List.of(), List.of(), "",
             new ThemeStyleContext.ColorMode("explicit", List.of(), List.of()));
         var copy = new PageWorkingCopy(
-            new PageDocument(1, "code", null, null, "<p>old</p>", css, "Title", ""),
+            new PageDocument(1, "code", null, null, "<p>old</p>", css),
             new ContentPolicy(), Mono.just(context));
         var original = copy.document();
         assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches", List.of(
@@ -489,7 +509,7 @@ class PageWorkingCopyTest {
             "x".repeat(RunBudget.MAX_BYTES),
             new ThemeStyleContext.ColorMode("explicit", List.of(), List.of()));
         var copy = new PageWorkingCopy(
-            new PageDocument(1, "code", null, null, "<p>old</p>", "p{color:red}", "Title", ""),
+            new PageDocument(1, "code", null, null, "<p>old</p>", "p{color:red}"),
             new ContentPolicy(), Mono.fromSupplier(() -> {
                 reads.incrementAndGet();
                 return context;
@@ -515,7 +535,7 @@ class PageWorkingCopyTest {
     void themeFailureDoesNotMutateOrPreventIndependentTitleAndPathEdits(String operation) {
         var reads = new AtomicInteger();
         var copy = new PageWorkingCopy(
-            new PageDocument(1, "code", null, null, "<p>old</p>", "p{color:red}", "Title", ""),
+            new PageDocument(1, "code", null, null, "<p>old</p>", "p{color:red}"),
             new ContentPolicy(), Mono.defer(() -> {
                 reads.incrementAndGet();
                 return Mono.error(new IllegalStateException("theme unavailable"));
@@ -532,7 +552,7 @@ class PageWorkingCopyTest {
         assertThat(writes).hasValue(0);
         copy.setTitle(Map.of("title", "After theme failure")).block();
         copy.setSlug(Map.of("slug", "after")).block();
-        assertThat(copy.document().title()).isEqualTo("After theme failure");
+        assertThat(copy.title()).isEqualTo("After theme failure");
         assertThat(copy.slug()).isEqualTo("after");
         assertThat(writes).hasValue(2);
         assertThatThrownBy(() -> edit(copy, operation).block()).hasMessage("theme unavailable");
@@ -543,7 +563,7 @@ class PageWorkingCopyTest {
     @Test
     void emptyThemeStillStagesSourceAndWaitsForCheckpoint() {
         var copy = new PageWorkingCopy(
-            new PageDocument(1, "code", null, null, "<p>old</p>", "", "Title", ""),
+            new PageDocument(1, "code", null, null, "<p>old</p>", ""),
             new ContentPolicy(), Mono.empty());
         var write = reactor.core.publisher.Sinks.<Void>empty();
         copy.checkpoint(write::asMono);
@@ -579,8 +599,10 @@ class PageWorkingCopyTest {
     }
 
     private static PageWorkingCopy copy(String html, String css) {
-        return new PageWorkingCopy(new PageDocument(1, "code", null, null, html, css, "Title", ""),
+        var copy = new PageWorkingCopy(new PageDocument(1, "code", null, null, html, css),
             new ContentPolicy());
+        copy.title("Title");
+        return copy;
     }
 
     private static Mono<Map<String, Object>> edit(PageWorkingCopy copy, String operation) {
@@ -608,7 +630,7 @@ class PageWorkingCopyTest {
         var context = new ThemeStyleContext("sample", "Sample", "SUPPORTED",
             List.of(new ThemeContextExtractor.Source("templates/layout.html", "layout", "theme-source-marker")),
             List.of(), ":root{--accent:red}");
-        var document = new PageDocument(1, "code", null, null, "<p>old</p>", "", "Title", "");
+        var document = new PageDocument(1, "code", null, null, "<p>old</p>", "");
         var copy = new PageWorkingCopy(document, new ContentPolicy(), Mono.fromSupplier(() -> {
             reads.incrementAndGet();
             return context;
@@ -628,7 +650,7 @@ class PageWorkingCopyTest {
 
     @Test
     void themeOutputCountsTowardsExistingByteBudget() {
-        var copy = new PageWorkingCopy(new PageDocument(1, "code", null, null, "", "", "Title", ""),
+        var copy = new PageWorkingCopy(new PageDocument(1, "code", null, null, "", ""),
             new ContentPolicy());
         copy.consume("x".repeat(RunBudget.MAX_BYTES));
         assertThatThrownBy(() -> copy.readTheme().block()).isInstanceOf(IllegalStateException.class);

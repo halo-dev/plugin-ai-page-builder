@@ -8,7 +8,7 @@ const api = vi.hoisted(() => ({
   updateSlug: vi.fn<(...args: unknown[]) => unknown>(),
 }))
 vi.mock('../../api/clients', () => ({
-  aiPageBuilderApi: { savePage: api.save, updatePageSlug: api.updateSlug },
+  aiPageBuilderApi: { savePage: api.save, updatePageProperties: api.updateSlug },
   aiPageBuilderChatApi: { validatePageContent: api.validate },
 }))
 vi.mock('../../utils/error', () => ({
@@ -17,7 +17,6 @@ vi.mock('../../utils/error', () => ({
 const legacy: PageDocument = {
   schemaVersion: 1,
   mode: 'visual',
-  title: '旧页面',
   html: '<p>Hello</p>',
   css: ':root { --color: red; }',
   projectData: { old: true },
@@ -99,7 +98,8 @@ describe('working document', () => {
   })
   it('locks preparation while allowing its internal save and snapshot to finish', async () => {
     const state = setup()
-    state.patch({ title: 'Before send' })
+    state.patch({ html: 'Before send' })
+    await vi.advanceTimersByTimeAsync(400)
     let finish!: () => void
     api.save.mockImplementationOnce(async (args) => {
       await new Promise<void>((resolve) => {
@@ -114,8 +114,8 @@ describe('working document', () => {
     })
     const prepared = state.prepareAgent(async (saved) => ({ version: saved.page.version }))
     expect(state.locked.value).toBe(true)
-    state.patch({ title: 'Blocked' })
-    expect(state.document.value?.title).toBe('Before send')
+    state.patch({ html: 'Blocked' })
+    expect(state.document.value?.html).toBe('Before send')
     expect(await state.save()).toBeUndefined()
     finish()
     expect(await prepared).toEqual({ version: 2 })
@@ -156,18 +156,16 @@ describe('working document', () => {
     const state = setup()
     state.patch({
       html: '<p>Unsaved</p>',
-      title: 'Unsaved title',
-      description: 'Unsaved description',
     })
     const working = state.document.value
     const saved = state.detail.value!.document
     const result = page(legacy, 2)
     result.page.slug = 'company/about'
     api.updateSlug.mockResolvedValue({ data: result })
-    await state.updateSlug('company/about')
+    await state.applySettings({ slug: 'company/about' })
     expect(api.updateSlug).toHaveBeenCalledWith({
       name: 'page',
-      updatePageSlugRequest: { version: 1, slug: 'company/about' },
+      updatePagePropertiesRequest: { version: 1, slug: 'company/about' },
     })
     expect(state.detail.value?.page).toEqual(result.page)
     expect(state.detail.value?.document).toBe(saved)
@@ -193,7 +191,7 @@ describe('working document', () => {
   it('keeps a clean document clean and uses the new version for agent preparation', async () => {
     const state = setup()
     api.updateSlug.mockResolvedValue({ data: page(legacy, 2) })
-    await state.updateSlug('company/about')
+    await state.applySettings({ slug: 'company/about' })
     expect(state.dirty.value).toBe(false)
     expect(state.canUndo.value).toBe(false)
     expect(await state.prepareAgent()).toBe(2)
@@ -201,7 +199,7 @@ describe('working document', () => {
   })
   it('locks slug updates and preserves state on conflict', async () => {
     const state = setup()
-    state.patch({ title: 'Unsaved' })
+    state.patch({ html: 'Unsaved' })
     const before = state.detail.value
     let fail!: (error: Error) => void
     api.updateSlug.mockReturnValue(
@@ -209,30 +207,30 @@ describe('working document', () => {
         fail = reject
       }),
     )
-    const request = state.updateSlug('company/about')
+    const request = state.applySettings({ slug: 'company/about' })
     expect(state.locked.value).toBe(true)
-    expect(await state.updateSlug('another')).toBeUndefined()
+    expect(await state.applySettings({ slug: 'another' })).toBeUndefined()
     expect(await state.save()).toBeUndefined()
     fail(new Error('Conflict'))
     await expect(request).rejects.toThrow('Conflict')
     expect(state.locked.value).toBe(false)
     expect(state.detail.value).toBe(before)
-    expect(state.document.value?.title).toBe('Unsaved')
+    expect(state.document.value?.html).toBe('Unsaved')
     expect(state.dirty.value).toBe(true)
     expect(api.updateSlug).toHaveBeenCalledTimes(1)
   })
   it.each(['agentRunning', 'preparing'] as const)('blocks slug updates while %s', async (lock) => {
     const state = setup()
     state[lock].value = true
-    expect(await state.updateSlug('company/about')).toBeUndefined()
+    expect(await state.applySettings({ slug: 'company/about' })).toBeUndefined()
     expect(api.updateSlug).not.toHaveBeenCalled()
   })
   it('freezes manual changes and undo while an agent is running', () => {
     const state = setup()
-    state.patch({ title: 'Changed' })
+    state.patch({ html: 'Changed' })
     state.agentRunning.value = true
-    state.patch({ title: 'Dropped' })
+    state.patch({ html: 'Dropped' })
     state.move('undo')
-    expect(state.document.value?.title).toBe('Changed')
+    expect(state.document.value?.html).toBe('Changed')
   })
 })

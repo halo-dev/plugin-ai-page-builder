@@ -80,10 +80,6 @@ public class ContentPolicy {
         require(document.js().isEmpty() || document.schemaVersion() == 2,
             "包含 JavaScript 的页面须使用格式版本 2");
         require("visual".equals(document.mode()) || "code".equals(document.mode()), "不支持的编辑模式");
-        require(document.title() != null && !document.title().isBlank()
-            && document.title().length() <= 200, "页面标题须为 1–200 个字符");
-        require(document.description() == null || document.description().length() <= 1000,
-            "页面描述不能超过 1000 个字符");
         validateHtml(document.html());
         validateCss(document.css());
         validateJs(document.js());

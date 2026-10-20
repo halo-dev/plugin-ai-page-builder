@@ -139,7 +139,6 @@ const {
   saving: settingsSaving,
   open: openSettings,
   close: closeSettings,
-  saveSlug: saveSettingsSlug,
   apply: applySettings,
   unpublish: unpublishFromSettings,
 } = usePageSettingsEditor({ confirm: confirmDialog })
@@ -214,10 +213,7 @@ const {
   <PageSettings
     v-if="settingsDetail"
     :key="settingsDetail.page.name"
-    :document="settingsDetail.document"
-    :slug="settingsDetail.page.slug"
-    :theme-layout="settingsDetail.page.themeLayout"
-    :save-slug="saveSettingsSlug"
+    :page="settingsDetail.page"
     :disabled="settingsSaving"
     :published="!!settingsDetail.page.publishedRevision"
     @close="closeSettings"

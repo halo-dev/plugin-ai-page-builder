@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -104,6 +105,7 @@ final class PageRun {
         this.scheduler = scheduler;
         this.copy = new PageWorkingCopy(base.document(), policy, themeContext,
             base.page().slug(), base.page().publishedRevision() != null);
+        this.copy.title(base.page().title());
         this.copy.identify(base.page().name(), sessionId, request.runId(), request.modelName());
         this.copy.annotations(request.annotations() == null ? List.of() : request.annotations());
     }
@@ -485,7 +487,8 @@ final class PageRun {
         synchronized (this) {
             var terminalEvents = new ArrayList<Map<String, Object>>();
             if (state == State.COMPLETED) {
-                if (revision != null && page != null) {
+                if (page != null && (revision != null
+                    || !Objects.equals(page.page().version(), base.page().version()))) {
                     terminalEvents.add(Map.of("type", "data-page-committed",
                         "name", "page-committed", "id", request.runId(), "data", page));
                 }

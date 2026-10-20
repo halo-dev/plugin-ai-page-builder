@@ -434,7 +434,7 @@ class PageRunTest {
         return new PageApi.PageDetail(
             new PageApi.PageSummary("page", "page", "Title", "", version, true, revision, null,
                 Instant.now(), true),
-            new PageDocument(1, "code", "", Map.of(), "<p>" + text + "</p>", "", "Title", ""));
+            new PageDocument(1, "code", "", Map.of(), "<p>" + text + "</p>", ""));
     }
 
     private static final class RecordingPersistence implements RunPersistence {

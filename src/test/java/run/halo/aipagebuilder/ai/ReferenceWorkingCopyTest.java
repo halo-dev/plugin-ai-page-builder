@@ -151,7 +151,7 @@ class ReferenceWorkingCopyTest {
         copy.setTitle(Map.of("title", "Independent title")).block();
         assertThat(copy.update(Map.of("html", "<p>Edited</p>")).block()).containsEntry("valid", true);
         verify(session, times(2)).bindTheme("theme-a");
-        assertThat(copy.document().title()).isEqualTo("Independent title");
+        assertThat(copy.title()).isEqualTo("Independent title");
         var unavailableSession = mock(PageReferenceTools.Session.class);
         copy(unavailableSession, ThemeStyleContext.unavailable())
             .update(Map.of("html", "<p>Edited</p>")).block();
@@ -160,7 +160,7 @@ class ReferenceWorkingCopyTest {
 
     private static PageWorkingCopy copy(PageReferenceTools.Session session, ThemeStyleContext context) {
         var copy = new PageWorkingCopy(
-            new PageDocument(1, "code", null, null, "<p>Original</p>", "", "Title", ""),
+            new PageDocument(1, "code", null, null, "<p>Original</p>", ""),
             new ContentPolicy(), Mono.just(context));
         copy.references(session);
         return copy;

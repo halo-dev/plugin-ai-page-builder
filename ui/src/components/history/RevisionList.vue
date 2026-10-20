@@ -38,7 +38,7 @@ const sourceIcon = (source: string) =>
         />
         <span class="flex items-center gap-1.5">
           <strong class="min-w-0 flex-1 truncate text-[13px] font-medium text-gray-900">{{
-            revision.title
+            fullTime(revision.createdAt)
           }}</strong>
           <span
             v-if="revision.name === draftRevision"

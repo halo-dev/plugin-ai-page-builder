@@ -85,10 +85,10 @@ class PagePreviewTest {
 
     @Test
     void validPreviewUsesSavedContentAndIsolationHeaders() {
-        var document = new PageDocument(1, "code", null, null, "<p>Saved</p>", "", "Title", "");
+        var document = new PageDocument(1, "code", null, null, "<p>Saved</p>", "");
         var ticket = store.issue(page("a", 1L), "alice");
         when(pages.get("a")).thenReturn(Mono.just(new PageApi.PageDetail(page("a", 1L), document)));
-        when(renderer.render(any(), eq("a"), eq("about"), eq(true), eq(document)))
+        when(renderer.render(any(), eq("a"), eq("about"), eq(true), eq(document), any(), any()))
             .thenReturn(RenderingResponse.create("test").header("Content-Type", MediaType.TEXT_HTML_VALUE)
                 .modelAttribute("html", "saved").build());
         client.get().uri(PagePreviewStore.PATH + ticket.token()).exchange().expectStatus().isOk()
@@ -200,9 +200,9 @@ class PagePreviewTest {
     @Test
     void credentialUrlNeverReachesThemeOrExecutableDocument() {
         var ticket = store.issue(page("a", 1L), "alice");
-        var document = new PageDocument(1, "code", null, null, "<p>Saved</p>", "", "Title", "");
+        var document = new PageDocument(1, "code", null, null, "<p>Saved</p>", "");
         when(pages.get("a")).thenReturn(Mono.just(new PageApi.PageDetail(page("a", 1L), document)));
-        when(renderer.render(any(), any(), any(), anyBoolean(), any())).thenAnswer(call -> {
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any())).thenAnswer(call -> {
             var request = call.<org.springframework.web.reactive.function.server.ServerRequest>
                 getArgument(0);
             assertThat(request.uri().toString()).isEqualTo("https://example.test/");

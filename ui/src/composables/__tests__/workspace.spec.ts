@@ -23,7 +23,7 @@ vi.mock('../../api/clients', () => ({
   aiPageBuilderApi: {
     getPage: mocks.get,
     savePage: mocks.save,
-    updatePageSlug: mocks.updateSlug,
+    updatePageProperties: mocks.updateSlug,
     publishPage: mocks.publish,
     restorePageRevision: mocks.restore,
   },
@@ -101,16 +101,19 @@ const page = {
     slug: 'one',
     version: 1,
     themeLayout: true,
+    description: '',
+    updatedAt: '',
+    hasUnpublishedChanges: false,
     draftRevision: 'r1',
   },
-  document: { mode: 'visual', title: 'Original', html: '<p>Hello</p>', css: '', schemaVersion: 1 },
+  document: { mode: 'visual', html: '<p>Hello</p>', css: '', schemaVersion: 1 },
 } as PageDetail
 const globals = {
   directives: { tooltip: {} },
   stubs: {
     VisualEditor: defineComponent({
       name: 'VisualEditor',
-      props: ['name', 'document', 'themeLayout', 'validated', 'disabled', 'device'],
+      props: ['name', 'document', 'pageVersion', 'validated', 'disabled', 'device'],
       emits: ['update:document'],
       setup: () => () => h('visual-editor-stub'),
     }),
@@ -144,12 +147,50 @@ beforeEach(() => {
     },
   })
 })
+async function validated(wrapper: ReturnType<typeof mount>) {
+  await vi.waitFor(() =>
+    expect(wrapper.findComponent({ name: 'VisualEditor' }).props('validated')).toBe(true),
+  )
+}
 async function editor() {
   const wrapper = mount(EditorView, { global: globals })
   await flushPromises()
   return wrapper
 }
 describe('workspace integration', () => {
+  it('keeps the content version pinned after a settings conflict instead of accepting unseen content', async () => {
+    const wrapper = await editor()
+    const working = { ...page.document, html: '<p>Local unsaved content</p>' }
+    wrapper.getComponent({ name: 'VisualEditor' }).vm.$emit('update:document', working)
+    await flushPromises()
+    await validated(wrapper)
+    mocks.updateSlug.mockRejectedValue({ response: { status: 409 }, message: 'Page changed' })
+    mocks.get.mockResolvedValue({
+      data: {
+        page: { ...page.page, version: 2, draftRevision: 'remote' },
+        document: { ...page.document, html: '<p>Remote changes</p>' },
+      },
+    })
+    await wrapper.get('[aria-label="页面设置"]').trigger('click')
+    wrapper.getComponent(PageSettings).vm.$emit('apply', { title: 'New title' })
+    await flushPromises()
+    expect(mocks.get).toHaveBeenCalledTimes(1)
+    expect(wrapper.getComponent({ name: 'VisualEditor' }).props('document')).toEqual(working)
+    expect(wrapper.text()).toContain('载入最新版本')
+    wrapper.getComponent(PageSettings).vm.$emit('close')
+    await flushPromises()
+    mocks.save.mockRejectedValue({ response: { status: 409 }, message: 'Page changed' })
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === '保存')!
+      .trigger('click')
+    await flushPromises()
+    expect(mocks.save).toHaveBeenCalledWith({
+      name: 'one',
+      savePageRequest: { version: 1, document: working, source: 'manual' },
+    })
+    wrapper.unmount()
+  })
   it('does not warn about unsaved changes while loading another page from a clean editor', async () => {
     const wrapper = await editor()
     try {
@@ -172,9 +213,9 @@ describe('workspace integration', () => {
     const canvas = wrapper.findComponent({ name: 'VisualEditor' })
     const updated = {
       page: { ...page.page, title: 'Published title', version: 2, draftRevision: 'r2' },
-      document: { ...page.document, title: 'Published title' },
+      document: page.document,
     }
-    mocks.save.mockResolvedValue({ data: updated })
+    mocks.updateSlug.mockResolvedValue({ data: updated })
     let finish!: (result: { data: PageDetail }) => void
     mocks.publish.mockReturnValue(
       new Promise((resolve) => {
@@ -186,7 +227,7 @@ describe('workspace integration', () => {
       .publish({ title: 'Published title', slug: 'one' }, async () => true)
     await flushPromises()
     expect(canvas.props('disabled')).toBe(true)
-    canvas.vm.$emit('update:document', { ...page.document, title: 'Concurrent edit' })
+    canvas.vm.$emit('update:document', { ...page.document, html: '<p>Concurrent edit</p>' })
     expect(wrapper.find('h1').text()).toBe('Published title')
     expect(canvas.props('document')).toEqual(updated.document)
     finish({ data: { ...updated, page: { ...updated.page, version: 3, publishedRevision: 'r2' } } })
@@ -211,8 +252,8 @@ describe('workspace integration', () => {
     mocks.get.mockResolvedValue({
       data: {
         ...page,
-        page: { ...page.page, name: 'two' },
-        document: { ...page.document, title: 'Second' },
+        page: { ...page.page, name: 'two', title: 'Second' },
+        document: page.document,
       },
     })
     mocks.route.params.name = 'two'
@@ -228,23 +269,24 @@ describe('workspace integration', () => {
     const wrapper = await editor()
     wrapper.getComponent({ name: 'VisualEditor' }).vm.$emit('update:document', {
       ...page.document,
-      title: 'Unsaved title',
+      html: '<p>Unsaved title</p>',
     })
     await flushPromises()
+    await validated(wrapper)
     await wrapper.get('[aria-label="历史版本"]').trigger('click')
     await flushPromises()
     mocks.save.mockResolvedValue({
       data: {
         ...page,
         page: { ...page.page, version: 2 },
-        document: { ...page.document, title: 'Unsaved title' },
+        document: { ...page.document, html: '<p>Unsaved title</p>' },
       },
     })
     mocks.restore.mockResolvedValue({
       data: {
         ...page,
         page: { ...page.page, version: 3 },
-        document: { ...page.document, title: 'Restored' },
+        document: { ...page.document, html: '<p>Restored</p>' },
       },
     })
     mocks.warning.mockImplementation(({ onConfirm }) => onConfirm())
@@ -254,7 +296,10 @@ describe('workspace integration', () => {
       name: 'one',
       restoreRequest: { version: 2, revision: 'old-one' },
     })
-    expect(wrapper.get('h1').text()).toBe('Restored')
+    expect(wrapper.get('h1').text()).toBe('Original')
+    expect(wrapper.getComponent({ name: 'VisualEditor' }).props('document').html).toBe(
+      '<p>Restored</p>',
+    )
     expect(wrapper.findComponent({ name: 'HistoryPanel' }).exists()).toBe(false)
     wrapper.unmount()
   })
@@ -348,9 +393,10 @@ describe('workspace integration', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     const canvas = wrapper.findComponent({ name: 'VisualEditor' })
     expect(canvas.props('disabled')).toBe(false)
-    const edited = { ...page.document, title: 'Manually edited' }
+    const edited = { ...page.document, html: '<p>Manually edited</p>' }
     canvas.vm.$emit('update:document', edited)
     await flushPromises()
+    await validated(wrapper)
     mocks.save.mockResolvedValue({ data: { ...page, document: edited } })
     await wrapper
       .findAll('button')
@@ -359,7 +405,7 @@ describe('workspace integration', () => {
     await flushPromises()
     expect(mocks.save).toHaveBeenCalledWith({
       name: 'one',
-      savePageRequest: { version: 1, document: edited, source: 'manual', themeLayout: true },
+      savePageRequest: { version: 1, document: edited, source: 'manual' },
     })
     expect(mocks.themeContext).toHaveBeenCalledTimes(1)
     wrapper.unmount()
@@ -391,12 +437,11 @@ describe('workspace integration', () => {
   })
   it('reports save failures with a toast and keeps the dirty draft', async () => {
     const wrapper = await editor()
-    await wrapper
-      .findAll('button')
-      .find((b) => b.attributes('aria-label') === '页面设置')!
-      .trigger('click')
-    wrapper.findComponent(PageSettings).vm.$emit('apply', { title: 'Unsaved', description: '' })
+    wrapper
+      .getComponent({ name: 'VisualEditor' })
+      .vm.$emit('update:document', { ...page.document, html: '<p>Unsaved</p>' })
     await flushPromises()
+    await validated(wrapper)
     mocks.save.mockRejectedValue(new Error('Conflict'))
     await wrapper
       .findAll('button')
@@ -405,7 +450,9 @@ describe('workspace integration', () => {
     await flushPromises()
     expect(mocks.toastError).toHaveBeenCalledWith('Conflict')
     expect(wrapper.findAll('button').some((b) => b.text() === '载入最新版本')).toBe(false)
-    expect(wrapper.find('h1').text()).toBe('Unsaved')
+    expect(wrapper.getComponent({ name: 'VisualEditor' }).props('document').html).toBe(
+      '<p>Unsaved</p>',
+    )
     wrapper.unmount()
   })
   it('saves the path independently and keeps both working edits and settings inputs', async () => {
@@ -415,13 +462,20 @@ describe('workspace integration', () => {
     mocks.updateSlug.mockResolvedValue({
       data: {
         ...page,
-        page: { ...page.page, slug: 'company/about', version: 2, publishedRevision: 'r1' },
+        page: {
+          ...page.page,
+          slug: 'company/about',
+          title: 'Buffered title',
+          version: 2,
+          publishedRevision: 'r1',
+        },
       },
     })
     const wrapper = await editor()
     const canvas = wrapper.findComponent({ name: 'VisualEditor' })
-    canvas.vm.$emit('update:document', { ...page.document, title: 'Working title' })
+    canvas.vm.$emit('update:document', { ...page.document, html: '<p>Working title</p>' })
     await flushPromises()
+    await validated(wrapper)
     await wrapper.find('[aria-label="页面设置"]').trigger('click')
     const settings = wrapper.findComponent(PageSettings)
     const fields = settings.findAllComponents({ name: 'FormKit' })
@@ -436,7 +490,7 @@ describe('workspace integration', () => {
     await flushPromises()
     expect(mocks.updateSlug).toHaveBeenCalledWith({
       name: 'one',
-      updatePageSlugRequest: { version: 1, slug: 'company/about' },
+      updatePagePropertiesRequest: { version: 1, title: 'Buffered title', slug: 'company/about' },
     })
     expect(wrapper.find('h1').text()).toBe('Buffered title')
     expect(canvas.props('name')).toBe('one')
@@ -445,7 +499,7 @@ describe('workspace integration', () => {
       data: {
         ...page,
         page: { ...page.page, version: 3 },
-        document: { ...page.document, title: 'Buffered title' },
+        document: { ...page.document, html: '<p>Working title</p>' },
       },
     })
     await wrapper
@@ -457,62 +511,49 @@ describe('workspace integration', () => {
       name: 'one',
       savePageRequest: {
         version: 2,
-        document: expect.objectContaining({ title: 'Buffered title' }),
+        document: expect.objectContaining({ html: '<p>Working title</p>' }),
         source: 'manual',
-        themeLayout: true,
       },
     })
     wrapper.unmount()
   })
-  it('applies the layout to the working state and saves it with the draft', async () => {
+  it('saves layout as a property and refreshes preview without creating a content edit', async () => {
+    mocks.updateSlug.mockResolvedValue({
+      data: { ...page, page: { ...page.page, version: 2, themeLayout: false } },
+    })
     const wrapper = await editor()
     const canvas = wrapper.findComponent({ name: 'VisualEditor' })
-    expect(canvas.props('themeLayout')).toBe(true)
     await wrapper.find('[aria-label="页面设置"]').trigger('click')
     const settings = wrapper.findComponent(PageSettings)
-    expect(settings.props('themeLayout')).toBe(true)
     settings
       .findAllComponents({ name: 'FormKit' })
       .find((field) => field.attributes('name') === 'themeLayout')!
       .vm.$emit('update:modelValue', false)
     await flushPromises()
+    expect(mocks.updateSlug).not.toHaveBeenCalled()
     settings.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
-    // Applying only changes the working state; the canvas keeps rendering the
-    // saved layout until the draft is saved.
-    expect(mocks.save).not.toHaveBeenCalled()
-    expect(canvas.props('themeLayout')).toBe(true)
-    mocks.save.mockResolvedValue({
-      data: { ...page, page: { ...page.page, version: 2, themeLayout: false } },
-    })
-    await wrapper
-      .findAll('button')
-      .find((button) => button.text() === '保存')!
-      .trigger('click')
-    await flushPromises()
-    expect(mocks.save).toHaveBeenCalledWith({
+    expect(mocks.updateSlug).toHaveBeenCalledWith({
       name: 'one',
-      savePageRequest: {
-        version: 1,
-        document: expect.objectContaining({ title: 'Original' }),
-        source: 'manual',
-        themeLayout: false,
-      },
+      updatePagePropertiesRequest: { version: 1, themeLayout: false },
     })
-    // The saved layout reaches the canvas, which refetches its server render.
-    expect(canvas.props('themeLayout')).toBe(false)
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(canvas.props('pageVersion')).toBe(2)
+    expect(
+      wrapper
+        .findAll('button')
+        .find((button) => button.text() === '保存')!
+        .attributes('disabled'),
+    ).toBeDefined()
     wrapper.unmount()
   })
   it('applies the layout with the form instead of saving on toggle', async () => {
     const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
     const wrapper = mount(PageSettings, {
       props: {
-        document: page.document,
-        slug: 'one',
-        themeLayout: true,
+        page: page.page,
         disabled: false,
         published: false,
-        saveSlug,
       },
       global: globals,
     })
@@ -529,85 +570,61 @@ describe('workspace integration', () => {
     expect(wrapper.emitted('apply')).toEqual([[{ themeLayout: false }]])
     wrapper.unmount()
   })
-  it('keeps the path input and reports the failure with a toast, then allows retry', async () => {
-    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>()
-    saveSlug.mockRejectedValueOnce(new Error('路径已存在')).mockResolvedValueOnce(page)
+  it('submits all edited properties together without mutating the page', async () => {
     const wrapper = mount(PageSettings, {
-      props: {
-        document: page.document,
-        slug: 'one',
-        themeLayout: true,
-        disabled: false,
-        published: false,
-        saveSlug,
-      },
+      props: { page: page.page, disabled: false, published: false },
+      global: globals,
+    })
+    const fields = wrapper.findAllComponents({ name: 'FormKit' })
+    for (const [name, value] of Object.entries({
+      title: 'New title',
+      slug: 'new-path',
+      description: 'New description',
+      themeLayout: false,
+    })) {
+      fields
+        .find((field) => field.attributes('name') === name)!
+        .vm.$emit('update:modelValue', value)
+    }
+    await flushPromises()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    expect(wrapper.emitted('apply')).toEqual([
+      [
+        {
+          title: 'New title',
+          slug: 'new-path',
+          description: 'New description',
+          themeLayout: false,
+        },
+      ],
+    ])
+    expect(page.page.title).toBe('Original')
+    wrapper.unmount()
+  })
+  it('preserves edited fields while adopting refreshed properties', async () => {
+    const wrapper = mount(PageSettings, {
+      props: { page: page.page, disabled: false, published: false },
       global: globals,
     })
     wrapper
       .findAllComponents({ name: 'FormKit' })
-      .find((field) => field.attributes('name') === 'slug')!
-      .vm.$emit('update:modelValue', 'company/about')
-    await flushPromises()
-    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
-    await flushPromises()
-    expect(mocks.toastError).toHaveBeenCalledWith('路径已存在')
-    expect(wrapper.emitted('apply')).toBeUndefined()
-    expect(wrapper.emitted('close')).toBeUndefined()
-    // The input keeps the edited value so the user can correct and retry.
-    const slug = wrapper
-      .findAllComponents({ name: 'FormKit' })
-      .find((field) => field.attributes('name') === 'slug')!
-    slug.vm.$emit('update:modelValue', 'company/new')
-    await flushPromises()
-    slug.vm.$emit('update:modelValue', 'company/about')
-    await flushPromises()
-    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
-    await flushPromises()
-    expect(saveSlug).toHaveBeenNthCalledWith(2, 'company/about')
-    expect(wrapper.emitted('apply')).toEqual([[{}]])
-    wrapper.unmount()
-  })
-  it('does not emit apply when unmounted while the slug save is in flight', async () => {
-    let resolveSlug!: (value: PageDetail) => void
-    const saveSlug = vi.fn<(slug: string) => Promise<PageDetail | undefined>>(
-      () => new Promise((resolve) => (resolveSlug = resolve)),
-    )
-    const wrapper = mount(PageSettings, {
-      props: {
-        document: page.document,
-        slug: 'one',
-        themeLayout: true,
-        disabled: false,
-        published: false,
-        saveSlug,
-      },
-      global: globals,
-    })
-    const fields = wrapper.findAllComponents({ name: 'FormKit' })
-    fields
       .find((field) => field.attributes('name') === 'title')!
-      .vm.$emit('update:modelValue', 'Buffered title')
-    fields
-      .find((field) => field.attributes('name') === 'slug')!
-      .vm.$emit('update:modelValue', 'two')
+      .vm.$emit('update:modelValue', 'Buffered')
     await flushPromises()
+    await wrapper.setProps({
+      page: { ...page.page, version: 2, slug: 'remote-path', description: 'Remote description' },
+    })
     wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
-    await flushPromises()
-    expect(saveSlug).toHaveBeenCalledWith('two')
+    expect(wrapper.emitted('apply')).toEqual([[{ title: 'Buffered' }]])
     wrapper.unmount()
-    resolveSlug(page)
-    await flushPromises()
-    expect(wrapper.emitted('apply')).toBeUndefined()
   })
   it('emits an empty settings patch when a legacy description is untouched', async () => {
     const wrapper = mount(PageSettings, {
       props: {
-        document: page.document,
-        slug: 'one',
-        themeLayout: true,
+        page: page.page,
         disabled: false,
         published: false,
-        saveSlug: vi.fn<(slug: string) => Promise<PageDetail | undefined>>(),
       },
       global: globals,
     })
@@ -618,12 +635,9 @@ describe('workspace integration', () => {
   it('does not mutate the document when cancelling settings', async () => {
     const wrapper = mount(PageSettings, {
       props: {
-        document: page.document,
-        slug: 'one',
-        themeLayout: true,
+        page: page.page,
         disabled: false,
         published: false,
-        saveSlug: vi.fn<(slug: string) => Promise<PageDetail | undefined>>(),
       },
       global: globals,
     })
@@ -636,7 +650,7 @@ describe('workspace integration', () => {
       .trigger('click')
     expect(wrapper.emitted('apply')).toBeUndefined()
     expect(wrapper.emitted('close')).toHaveLength(1)
-    expect(page.document.title).toBe('Original')
+    expect(page.page.title).toBe('Original')
     wrapper.unmount()
   })
 })

@@ -222,7 +222,7 @@ public class PageImportReviewService {
                     finding.category().name().toLowerCase(Locale.ROOT),
                     finding.file(), finding.evidence(), finding.explanation()))
                 .toList(),
-            document.title(), document.description(), imported.themeLayout(),
+            imported.title(), imported.description(), imported.themeLayout(),
             Instant.now().plus(REVIEW_TTL));
         store.put(actor, archiveHash, review);
         return review;
@@ -294,8 +294,8 @@ public class PageImportReviewService {
         var document = imported.document();
         var builder = new StringBuilder();
         builder.append("<<<").append(boundary).append(">>>\n");
-        builder.append("页面标题：").append(text(document.title())).append('\n');
-        builder.append("页面描述：").append(text(document.description())).append('\n');
+        builder.append("页面标题：").append(text(imported.title())).append('\n');
+        builder.append("页面描述：").append(text(imported.description())).append('\n');
         builder.append("使用主题布局：").append(imported.themeLayout()).append('\n');
         builder.append("页面包文件：page.json（元数据，已在上方给出）、")
             .append(manifest("page.html", document.html())).append('、')

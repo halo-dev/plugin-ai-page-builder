@@ -36,12 +36,6 @@ export interface SavePageRequest {
      */
     'source': SavePageRequestSourceEnum;
     /**
-     * Whether to reuse the theme layout; omitted keeps the current value
-     * @type {boolean}
-     * @memberof SavePageRequest
-     */
-    'themeLayout'?: boolean | null;
-    /**
      * 
      * @type {number}
      * @memberof SavePageRequest

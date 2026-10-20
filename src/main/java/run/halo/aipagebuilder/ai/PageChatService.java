@@ -172,8 +172,8 @@ public class PageChatService {
                     conversations.find(name, request.runId()).hasElement().flatMap(used -> {
                         if (session.getSpec().isDeleting()) return Mono.error(conflict("会话正在删除，请重试删除后再操作"));
                         if (used) return Mono.error(conflict("runId 已使用；请查询运行结果"));
-                        return pages.committedAiRevision(name, request.runId())
-                            .flatMap(revision -> Mono.<Flux<Map<String, Object>>>error(conflict("runId 已提交")))
+                        return pages.committedAiRun(name, request.runId())
+                            .flatMap(commit -> Mono.<Flux<Map<String, Object>>>error(conflict("runId 已提交")))
                             .switchIfEmpty(Mono.defer(() -> {
                                 var id = session.getMetadata().getName();
                                 if (request.resumeFromRunId() == null) {
@@ -221,6 +221,8 @@ public class PageChatService {
         run.copy.sessionRename(title -> renameSessionFromTool(run, title));
         if (checkpoint != null) {
             var spec = checkpoint.getSpec();
+            run.copy.title(spec.getTitle());
+            run.copy.invalidTitleUpdate(spec.isInvalidTitleUpdate());
             run.copy.restore(spec.getDocument(), spec.isInvalidUpdate(), spec.getSlug(),
                 spec.isInvalidSlugUpdate(), spec.getTurn().tools());
             run.questions.addAll(spec.getTurn().questions().stream()
@@ -378,12 +380,12 @@ public class PageChatService {
                     && !(error instanceof ResponseStatusException status
                     && status.getStatusCode().value() == 409)) {
                     // Do not claim failure when an update may have reached storage.
-                    return pages.committedAiRevision(name, run.request.runId()).flatMap(revision -> {
-                        run.complete(revision);
+                    return pages.committedAiRun(name, run.request.runId()).flatMap(commit -> {
+                        run.complete(commit.revision());
                         return pages.get(name).flatMap(page -> run.finish(page)).thenReturn(true);
                     }).switchIfEmpty(Mono.defer(() -> {
                         // A COMPLETED state already means saveAi returned successfully; only the
-                        // revision lookup is missing, so keep the success instead of reclassifying.
+                        // commit lookup is missing, so keep the success instead of reclassifying.
                         if (!run.is(PageRun.State.COMPLETED)) {
                             run.fail("保存未完成，已核对页面未关联本次运行，请重新载入后再试");
                         }
@@ -510,13 +512,14 @@ public class PageChatService {
             }
             return run.persistActive().then(Mono.defer(() -> {
                 var slugChanged = !Objects.equals(run.base.page().slug(), run.copy.slug());
-                if (Objects.equals(run.base.document(), run.copy.document()) && !slugChanged) {
+                var titleChanged = !Objects.equals(run.base.page().title(), run.copy.title());
+                if (Objects.equals(run.base.document(), run.copy.document()) && !slugChanged && !titleChanged) {
                     return Mono.just(run.base);
                 }
                 run.markSaveStarted();
                 return pages.saveAi(name, run.request.version(), run.copy.document(),
                     run.actor, run.request.runId(), run.base.page().draftRevision(),
-                    slugChanged ? run.copy.slug() : null);
+                    slugChanged ? run.copy.slug() : null, titleChanged ? run.copy.title() : null);
             })).flatMap(page -> {
                 run.complete(!Objects.equals(page.page().draftRevision(),
                     run.base.page().draftRevision()) ? page.page().draftRevision() : null);
@@ -562,6 +565,8 @@ public class PageChatService {
             snapshot.setDocument(run.copy.document());
             snapshot.setInvalidUpdate(run.copy.hasInvalidContentUpdate());
             snapshot.setSlug(run.copy.slug());
+            snapshot.setTitle(run.copy.title());
+            snapshot.setInvalidTitleUpdate(run.copy.hasInvalidTitleUpdate());
             snapshot.setInvalidSlugUpdate(run.copy.hasInvalidSlugUpdate());
             snapshot.setTurn(run.turn());
             snapshot.setSteps(run.copy.budget.steps());
@@ -584,8 +589,8 @@ public class PageChatService {
         return pages.get(name).flatMap(page -> load(name).flatMap(this::recover).flatMap(session -> {
             var current = session.getSpec().getActive();
             if (current != null && current.runId().equals(runId)) {
-                return pages.committedAiRevision(name, runId)
-                    .map(revision -> new ChatApi.Run(runId, "completed", revision, null, page))
+                return pages.committedAiRun(name, runId)
+                    .map(commit -> new ChatApi.Run(runId, "completed", commit.revision(), null, page))
                     .defaultIfEmpty(result(current, null));
             }
             return conversations.find(name, runId)
@@ -597,8 +602,8 @@ public class PageChatService {
                         .map(value -> result.withRecovery(PageCheckpoints.summary(value, page,
                             session.getSpec().getActive() != null))).defaultIfEmpty(result);
                 })
-                .switchIfEmpty(pages.committedAiRevision(name, runId)
-                    .map(revision -> new ChatApi.Run(runId, "completed", revision, null, page)))
+                .switchIfEmpty(pages.committedAiRun(name, runId)
+                    .map(commit -> new ChatApi.Run(runId, "completed", commit.revision(), null, page)))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND,
                     "运行记录不存在")));
         }));
@@ -700,9 +705,9 @@ public class PageChatService {
         }
         var terminal = List.of("completed", "cancelled", "interrupted", "incomplete", "failed")
             .contains(turn.status());
-        return (terminal ? Mono.just(turn) : pages.committedAiRevision(name, turn.runId()).map(revision -> new ChatApi.Turn(
+        return (terminal ? Mono.just(turn) : pages.committedAiRun(name, turn.runId()).map(commit -> new ChatApi.Turn(
                 turn.runId(), turn.actor(), turn.createdAt(), turn.prompt(), turn.text(), turn.tools(),
-                "completed", revision, null, turn.parts(), turn.annotations(), turn.questions(), turn.steers()).withUsage(turn.usage()))
+                "completed", commit.revision(), null, turn.parts(), turn.annotations(), turn.questions(), turn.steers()).withUsage(turn.usage()))
             .switchIfEmpty(Mono.defer(() -> {
                 if (runs.owner().equals(session.getSpec().getOwner()) && "committing".equals(turn.status())) {
                     return Mono.empty(); // An uncertain local write may still be in flight.

@@ -10,11 +10,11 @@ const props = defineProps<{
   src: string
   document: PageDocument
   device: PreviewDevice
-  themeLayout: boolean
+  pageVersion: number
 }>()
 const { loading, error, generation, reload } = usePreviewFrame(() => props.src)
 // The endpoint renders the saved draft and layout, so reload when either changes.
-watch(() => [props.document, props.themeLayout], reload)
+watch(() => [props.document, props.pageVersion], reload)
 defineExpose({ refresh: reload })
 </script>
 

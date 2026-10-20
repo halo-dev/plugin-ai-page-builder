@@ -150,7 +150,7 @@ class FoundationBridgeTest {
         var request = setup(Flux.just(TextStreamPart.textDelta("t", "done"),
             TextStreamPart.finish(FinishReason.STOP, "stop", null)));
         var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
-            null, null, "<p>old</p>", "", "Title", ""), new ContentPolicy());
+            null, null, "<p>old</p>", ""), new ContentPolicy());
         var chunks = bridge.chat("model", java.util.List.of(), "change", copy).collectList().block();
         assertThat(chunks).extracting(value -> value.get("type")).containsExactly("text-delta");
         assertThat(request.get().getTools()).extracting(tool -> tool.getName())
@@ -187,7 +187,7 @@ class FoundationBridgeTest {
             TextStreamPart.reasoningEnd("r"),
             TextStreamPart.finish(FinishReason.STOP, "stop", null)));
         var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
-            null, null, "<p>old</p>", "", "Title", ""), new ContentPolicy());
+            null, null, "<p>old</p>", ""), new ContentPolicy());
         var chunks = bridge.chat("model", java.util.List.of(), "change", copy).collectList().block();
         var textStarts = ids(chunks, "text-start");
         assertThat(textStarts).hasSize(3).doesNotHaveDuplicates();
@@ -476,7 +476,7 @@ class FoundationBridgeTest {
     @Test
     void toolBudgetsAreStickyEvenWhenAnExecutorExceptionIsHandledByFoundation() {
         var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
-            null, null, "", "", "Title", ""), new ContentPolicy());
+            null, null, "", ""), new ContentPolicy());
         for (int i = 0; i < RunBudget.MAX_CALLS; i++) { copy.read(); }
         assertThatThrownBy(copy::read).isInstanceOf(IllegalStateException.class);
         setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
@@ -596,7 +596,7 @@ class FoundationBridgeTest {
         setup(Flux.empty());
         var copy = copy();
         copy.restore(new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null,
-            "<p>old checkpoint</p>", "", "Title", ""), false, null, false, java.util.List.of());
+            "<p>old checkpoint</p>", ""), false, null, false, java.util.List.of());
         copy.taskContext(() -> "Original request: build a page");
         var attempts = new java.util.ArrayList<GenerateTextRequest>();
         when(model.streamText(any())).thenAnswer(invocation -> {
@@ -685,7 +685,7 @@ class FoundationBridgeTest {
 
     private PageWorkingCopy copy() {
         return new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null,
-            "", "", "Title", ""), new ContentPolicy());
+            "", ""), new ContentPolicy());
     }
 
     private AtomicReference<GenerateTextRequest> setup(Flux<TextStreamPart> source) {

@@ -26,26 +26,20 @@ public final class PageApi {
         @Schema(pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
             maxLength = 200) String slug, String title) { }
 
-    @Schema(name = "UpdatePageSlugRequest", requiredProperties = {"version", "slug"})
-    public record UpdatePageSlugRequest(Long version,
+    @Schema(name = "UpdatePagePropertiesRequest", requiredProperties = {"version"},
+        description = "Page properties take effect immediately. Omitted fields remain unchanged.")
+    public record UpdatePagePropertiesRequest(Long version,
+        @Schema(maxLength = 200) String title,
+        @Schema(maxLength = 1000) String description,
         @Schema(pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
-            maxLength = 200) String slug) { }
-
-    @Schema(name = "UpdatePageLayoutRequest", requiredProperties = {"version", "themeLayout"})
-    public record UpdatePageLayoutRequest(Long version, boolean themeLayout) { }
+            maxLength = 200) String slug, Boolean themeLayout) { }
 
     @Schema(name = "SiteUrlResponse", requiredProperties = {"baseUrl"})
     public record SiteUrlResponse(String baseUrl) { }
 
     @Schema(name = "SavePageRequest", requiredProperties = {"version", "document", "source"})
     public record SavePageRequest(Long version, PageDocument document,
-        @Schema(allowableValues = {"manual", "ai"}) String source,
-        @Schema(nullable = true, description = "Whether to reuse the theme layout; "
-            + "omitted keeps the current value") Boolean themeLayout) {
-        public SavePageRequest(Long version, PageDocument document, String source) {
-            this(version, document, source, null);
-        }
-    }
+        @Schema(allowableValues = {"manual", "ai"}) String source) { }
 
     @Schema(name = "MutationRequest", requiredProperties = {"version"})
     public record MutationRequest(Long version) {
@@ -75,9 +69,9 @@ public final class PageApi {
     }
 
     @Schema(name = "RevisionSummary", requiredProperties = {"name", "createdAt", "createdBy",
-        "source", "title"})
+        "source"})
     public record RevisionSummary(String name, Instant createdAt, String createdBy, String source,
-        String title, String parentRevision) {
+        String parentRevision) {
     }
 
     @Schema(name = "RevisionDetail", requiredProperties = {"summary", "document"})
