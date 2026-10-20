@@ -19,9 +19,7 @@ class PreviewAssetCorsFilterTest {
     void allowsSandboxedOriginForThemeAssets() {
         var exchange = exchange("/themes/theme-earth/assets/layout.js", "null");
         filter.filter(exchange, chain).block();
-        assertThat(allowOrigin(exchange)).isEqualTo("null");
-        assertThat(exchange.getResponse().getHeaders().get(HttpHeaders.VARY))
-            .contains(HttpHeaders.ORIGIN);
+        assertThat(allowOrigin(exchange)).isEqualTo("*");
         assertThat(chained.get()).isTrue();
     }
 
@@ -29,7 +27,7 @@ class PreviewAssetCorsFilterTest {
     void allowsSandboxedOriginForPluginAssets() {
         var exchange = exchange("/plugins/example/assets/icon.svg", "null");
         filter.filter(exchange, chain).block();
-        assertThat(allowOrigin(exchange)).isEqualTo("null");
+        assertThat(allowOrigin(exchange)).isEqualTo("*");
     }
 
     @Test
@@ -38,16 +36,15 @@ class PreviewAssetCorsFilterTest {
             MockServerHttpRequest.get("/site/themes/theme-earth/assets/layout.js")
                 .contextPath("/site").header(HttpHeaders.ORIGIN, "null"));
         filter.filter(exchange, chain).block();
-        assertThat(allowOrigin(exchange)).isEqualTo("null");
+        assertThat(allowOrigin(exchange)).isEqualTo("*");
     }
 
     @Test
-    void leavesRegularOriginsUntouched() {
+    void doesNotVaryByOriginSoSharedCachesCannotServeANoCorsCopy() {
         var exchange = exchange("/themes/theme-earth/assets/layout.js", "https://example.com");
         filter.filter(exchange, chain).block();
-        assertThat(allowOrigin(exchange)).isNull();
-        assertThat(exchange.getResponse().getHeaders().get(HttpHeaders.VARY))
-            .contains(HttpHeaders.ORIGIN);
+        assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.VARY))
+            .isNotEqualTo(HttpHeaders.ORIGIN);
     }
 
     @Test
