@@ -502,19 +502,22 @@ export function usePageChat(options: {
       !!activeRun.value &&
       (activeRun.value.status === 'running' || activeRun.value.status === 'waiting_for_user'),
   )
-  function appendSteerMessage(runId: string, text: string, index?: number) {
+  function appendSteerMessage(runId: string, text: string, index: number) {
     const current = [...(chat.messages.value || [])] as UIMessage[]
-    const position =
-      index ?? current.filter((message) => message.id.startsWith(`${runId}-steer-`)).length
-    const id = `${runId}-steer-${position}`
+    const prefix = `${runId}-steer-`
+    const id = `${prefix}${index}`
     if (current.some((message) => message.id === id)) return
     const message: UIMessage = {
       id,
       role: 'user',
       parts: [{ type: 'text', id: `${id}-text`, text }],
     }
-    const assistant = current.findIndex((item) => item.id === `${runId}-assistant`)
-    if (assistant >= 0) current.splice(assistant, 0, message)
+    const next = current.findIndex(
+      (item) =>
+        item.id === `${runId}-assistant` ||
+        (item.id.startsWith(prefix) && Number(item.id.slice(prefix.length)) > index),
+    )
+    if (next >= 0) current.splice(next, 0, message)
     else current.push(message)
     chat.setMessages(current)
   }
@@ -522,6 +525,9 @@ export function usePageChat(options: {
     const run = activeRun.value
     const value = text.trim()
     if (!canSteer.value || !run || !value || value.length > 2000) return false
+    const id = sessionId.value
+    const isCurrent = () =>
+      !disposed && sessionId.value === id && activeRun.value?.runId === run.runId
     steering.value = true
     try {
       await aiPageBuilderChatApi.steerPageChatRun({
@@ -529,10 +535,26 @@ export function usePageChat(options: {
         runId: run.runId,
         pageChatSteerRequest: { text: value },
       })
-      if (!disposed) appendSteerMessage(run.runId, value)
+      if (isCurrent()) {
+        try {
+          const { data } = await aiPageBuilderChatApi.getPageChat({
+            name: options.name,
+            sessionId: id,
+            size: 20,
+          })
+          if (isCurrent()) {
+            data.turns
+              .find((turn) => turn.runId === run.runId)
+              ?.steers?.forEach((text, index) => appendSteerMessage(run.runId, text, index))
+          }
+        } catch {
+          // The write succeeded; SSE or the next history refresh can recover its display.
+        }
+      }
       return true
     } catch (e) {
-      if (!disposed) localError.value = errorMessage(e)
+      if (!isCurrent()) return true
+      localError.value = errorMessage(e)
       return false
     } finally {
       steering.value = false

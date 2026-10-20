@@ -17,6 +17,7 @@ const api = vi.hoisted(() => ({
     getPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
     cancelPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
     answerPageChatQuestion: vi.fn<(...args: unknown[]) => unknown>(),
+    steerPageChatRun: vi.fn<(...args: unknown[]) => unknown>(),
   },
 }))
 interface MockChatOptions {
@@ -141,6 +142,153 @@ const renamedPart = (toolCallId: string) => ({
 })
 
 describe('persistent page chat', () => {
+  it.each(['SSE first', 'HTTP first'])(
+    'shows each accepted steer once with %s, preserving intentionally repeated text',
+    async (order) => {
+      waitingConversation()
+      const state = setup()
+      await state.recover()
+      for (let index = 0; index < 2; index++) {
+        let accept!: (value: unknown) => void
+        api.chat.steerPageChatRun.mockImplementationOnce(
+          () => new Promise((resolve) => (accept = resolve)),
+        )
+        api.chat.getPageChat.mockResolvedValue({
+          data: {
+            sessionId: 'busy',
+            turns: [{ runId: 'waiting', steers: Array(index + 1).fill('保留留白') }],
+          },
+        })
+        const event = {
+          type: 'data-steer',
+          data: { runId: 'waiting', index, text: '保留留白' },
+        }
+        const pending = state.steer('保留留白')
+        if (order === 'SSE first') sdk.options.onData(event)
+        accept({ data: waitingRun })
+        expect(await pending).toBe(true)
+        // HTTP success must also work when the stream is disconnected.
+        expect(
+          state.messages.value.filter((message) => message.id.startsWith('waiting-steer-')),
+        ).toHaveLength(index + 1)
+        if (order === 'HTTP first') sdk.options.onData(event)
+        sdk.options.onData(event)
+        expect(
+          state.messages.value
+            .filter((message) => message.id.startsWith('waiting-steer-'))
+            .map((message) => message.id),
+        ).toEqual(Array.from({ length: index + 1 }, (_, i) => `waiting-steer-${i}`))
+      }
+    },
+  )
+  it('merges server-indexed steers from another tab without replacing live assistant content', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    sdk.setMessages([
+      {
+        id: 'waiting-assistant',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Latest streamed text' }],
+        metadata: { runId: 'waiting' },
+      },
+    ])
+    api.chat.steerPageChatRun.mockResolvedValue({ data: waitingRun })
+    sdk.options.onData({
+      type: 'data-steer',
+      data: { runId: 'waiting', index: 1, text: '当前指令' },
+    })
+    api.chat.getPageChat.mockResolvedValue({
+      data: {
+        sessionId: 'busy',
+        turns: [
+          { runId: 'waiting', text: 'Stale history', steers: ['另一标签的指令', '当前指令'] },
+        ],
+      },
+    })
+    expect(await state.steer('当前指令')).toBe(true)
+    expect(state.messages.value.map((message) => message.id)).toEqual([
+      'waiting-steer-0',
+      'waiting-steer-1',
+      'waiting-assistant',
+    ])
+    expect(state.messages.value[2]?.parts).toEqual([{ type: 'text', text: 'Latest streamed text' }])
+  })
+  it('does not report an accepted steer as failed when history refresh fails', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    api.chat.steerPageChatRun.mockResolvedValue({ data: waitingRun })
+    api.chat.getPageChat.mockRejectedValueOnce(new Error('history unavailable'))
+    expect(await state.steer('已接受的指令')).toBe(true)
+    expect(state.error.value).toBe('')
+    sdk.options.onData({
+      type: 'data-steer',
+      data: { runId: 'waiting', index: 0, text: '已接受的指令' },
+    })
+    expect(state.messages.value.filter((message) => message.id === 'waiting-steer-0')).toHaveLength(
+      1,
+    )
+    expect(api.chat.steerPageChatRun).toHaveBeenCalledTimes(1)
+  })
+  it('reports a rejected steer in the current run without adding a message', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    const before = state.messages.value
+    api.chat.steerPageChatRun.mockRejectedValueOnce(new Error('Steer rejected'))
+    expect(await state.steer('未接受的指令')).toBe(false)
+    expect(state.error.value).toBe('Steer rejected')
+    expect(state.messages.value).toEqual(before)
+    expect(state.canSteer.value).toBe(true)
+  })
+  it.each(['success', 'failure', 'history'])(
+    'ignores a late steer %s after switching conversations',
+    async (response) => {
+      waitingConversation()
+      const state = setup()
+      await state.recover()
+      let resolve!: (value: unknown) => void
+      let reject!: (error: Error) => void
+      const deferred = new Promise((accept, fail) => {
+        resolve = accept
+        reject = fail
+      })
+      if (response === 'history') {
+        api.chat.steerPageChatRun.mockResolvedValue({ data: waitingRun })
+        api.chat.getPageChat.mockReturnValueOnce(deferred)
+      } else {
+        api.chat.steerPageChatRun.mockReturnValueOnce(deferred)
+      }
+      const pending = state.steer('Old instruction')
+      await vi.advanceTimersByTimeAsync(0)
+      api.chat.getPageChatRun.mockResolvedValueOnce({
+        data: { runId: 'waiting', status: 'completed' },
+      })
+      api.chat.getPageChat.mockResolvedValue({
+        data: { sessionId: 'busy', turns: [], activeRun: null },
+      })
+      await state.reconcile()
+      api.chat.getPageChat.mockResolvedValue({
+        data: { sessionId: 'other', turns: [], activeRun: null },
+      })
+      await state.selectSession('other')
+      if (response === 'failure') reject(new Error('Old failure'))
+      else
+        resolve({
+          data: {
+            ...waitingRun,
+            sessionId: 'busy',
+            turns: [{ runId: 'waiting', steers: ['Old instruction'] }],
+          },
+        })
+      // A stale failure must not restore the old prompt into the new conversation.
+      expect(await pending).toBe(true)
+      expect(state.messages.value).toEqual([])
+      expect(state.error.value).toBe('')
+      expect(state.sessionId.value).toBe('other')
+    },
+  )
   it('restores first-run questions when the server has no archived turns', async () => {
     waitingConversation()
     api.chat.getPageChat.mockResolvedValue({
