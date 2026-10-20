@@ -518,6 +518,11 @@ export function usePageChat(options: {
         (item.id.startsWith(prefix) && Number(item.id.slice(prefix.length)) > index),
     )
     if (next >= 0) current.splice(next, 0, message)
+    // A live assistant message has a server-generated id, so only its position
+    // identifies it. Inserting after it would make the SDK append every later
+    // delta as a second bubble instead of extending the existing one.
+    else if (current[current.length - 1]?.role === 'assistant')
+      current.splice(current.length - 1, 0, message)
     else current.push(message)
     chat.setMessages(current)
   }
