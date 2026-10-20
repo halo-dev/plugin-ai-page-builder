@@ -133,6 +133,8 @@ export function buildConversationDisplay(options: {
   })
 }
 
+export type ConversationDisplayItem = ReturnType<typeof buildConversationDisplay>[number]
+
 function turnResult(role: string, metadata: unknown) {
   if (role !== 'assistant' || !metadata || typeof metadata !== 'object') return undefined
   const { status, error, revision, recovery } = metadata as Record<string, unknown>

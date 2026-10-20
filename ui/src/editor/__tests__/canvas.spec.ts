@@ -239,6 +239,17 @@ describe('theme preview canvas', () => {
     expect(wrapper.emitted('update:document')).toBeUndefined()
   })
 
+  it('resets an open annotation draft when the same element is selected again', async () => {
+    const wrapper = render()
+    const canvas = await load(wrapper)
+    await click(canvas, 'h2')
+    await button(wrapper, '让 AI 修改').trigger('click')
+    await wrapper.get('textarea[aria-label="修改说明"]').setValue('Draft')
+    await click(canvas, 'h2')
+    expect(wrapper.find('textarea[aria-label="修改说明"]').exists()).toBe(false)
+    expect(button(wrapper, '让 AI 修改').exists()).toBe(true)
+  })
+
   it('blocks annotations when the source changes or the annotation limit is reached', async () => {
     const wrapper = render()
     const canvas = await load(wrapper)

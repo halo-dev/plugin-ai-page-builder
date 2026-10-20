@@ -1,48 +1,36 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
-import { useRouteQuery } from '@vueuse/router'
-import { useMutation, useQuery } from '@tanstack/vue-query'
+import { useMutation } from '@tanstack/vue-query'
 import {
   Dialog,
   Toast,
   VAlert,
   VButton,
-  VDropdown,
-  VDropdownItem,
   VEmpty,
   VLoading,
   VPageHeader,
   VPagination,
-  VStatusDot,
 } from '@halo-dev/components'
 import IconAddCircle from '~icons/mingcute/add-circle-line'
-import IconMore from '~icons/mingcute/more-2-line'
-import { aiPageBuilderApi, getPublicSiteUrl, pagePreviewUrl } from '../api/clients'
-import { errorMessage } from '../utils/error'
-import { usePageWrites } from '../composables/usePageWrites'
-import { pageKeys, queryClient } from '../lib/query-client'
-import type { PageDocument, PageSummary } from '../api/generated'
-import ClonePageModal from '../components/ClonePageModal.vue'
-import PagePreviewCard from '../components/PagePreviewCard.vue'
-import PageSettings from '../components/PageSettings.vue'
-import PublishPagePopper from '../components/PublishPagePopper.vue'
-import CreatePagePanel from '../components/create/CreatePagePanel.vue'
 import IconFileAi from '~icons/tabler/file-ai'
+import { aiPageBuilderApi, pagePreviewUrl } from '../api/clients'
+import type { PageSummary } from '../api/generated'
+import { errorMessage } from '../utils/error'
+import { confirmDialog } from '../utils/confirm'
+import { usePageWrites } from '../composables/usePageWrites'
+import { usePageListQuery } from '../composables/usePageListQuery'
+import { usePageSettingsEditor } from '../composables/usePageSettingsEditor'
+import { usePublicSiteUrl } from '../composables/usePublicSiteUrl'
+import { pageKeys, queryClient } from '../lib/query-client'
+import ClonePageModal from '../components/ClonePageModal.vue'
+import PageCard from '../components/PageCard.vue'
+import PageSettings from '../components/PageSettings.vue'
+import CreatePagePanel from '../components/create/CreatePagePanel.vue'
 
 const router = useRouter()
-const page = useRouteQuery<number>('page', 1, {
-  transform: (value) => Math.max(1, Number(value) || 1),
-})
-const size = useRouteQuery<number>('size', 20, {
-  transform: (value) => Math.max(1, Number(value) || 1),
-})
-const keyword = useRouteQuery<string>('keyword', '')
-const status = useRouteQuery<'published' | 'unpublished' | undefined>('status')
-const sort = useRouteQuery<'created' | undefined>('sort')
-watch([status, sort], () => {
-  page.value = 1
-})
+const { page, size, keyword, status, sort, listQuery, items, total, showToolbar } =
+  usePageListQuery()
 const statusItems = [
   { label: '全部', value: undefined },
   { label: '已发布', value: 'published' },
@@ -52,32 +40,7 @@ const sortItems = [
   { label: '默认（最近更新）', value: undefined },
   { label: '最近创建', value: 'created' },
 ]
-const listParams = computed(() => ({
-  page: page.value,
-  size: size.value,
-  keyword: keyword.value,
-  status: status.value,
-  sort: sort.value,
-}))
-const listQuery = useQuery({
-  queryKey: computed(() => pageKeys.list(listParams.value)),
-  queryFn: async () => (await aiPageBuilderApi.listPages(listParams.value)).data,
-  keepPreviousData: true,
-  queryClient,
-})
-const items = computed(() => listQuery.data.value?.items || [])
-const total = computed(() => listQuery.data.value?.total || 0)
-// The empty workspace shows the create panel instead; keep the toolbar only
-// when there is something to search or filter, or while loading/erroring.
-const showToolbar = computed(
-  () =>
-    !!items.value.length ||
-    !!keyword.value ||
-    !!status.value ||
-    listQuery.isLoading.value ||
-    listQuery.isError.value,
-)
-const cloneTarget = ref<PageSummary>()
+const cloneTarget = shallowRef<PageSummary>()
 
 function openEditor(name: string) {
   void router.push({ name: 'AiPageBuilderEditor', params: { name } })
@@ -87,24 +50,13 @@ function cloned(name: string) {
   openEditor(name)
 }
 // Published pages go straight to the public URL; drafts fall back to the theme preview.
-// Resolve the site URL up front so opening a page stays inside the click's user gesture.
-const siteBaseUrl = ref('')
-onMounted(() => {
-  void getPublicSiteUrl()
-    .then((url) => {
-      siteBaseUrl.value = url
-    })
-    .catch(() => {
-      // Keep the Console origin as a best-effort fallback.
-    })
-})
+const { pageUrl } = usePublicSiteUrl()
 function open(item: PageSummary) {
   if (!item.publishedRevision) {
     window.open(pagePreviewUrl(item.name), '_blank', 'noopener')
     return
   }
-  const base = (siteBaseUrl.value || window.location.origin).replace(/\/$/, '')
-  window.open(`${base}/${item.slug || item.name}`, '_blank', 'noopener')
+  window.open(pageUrl(item.slug || item.name), '_blank', 'noopener')
 }
 const exportMutation = useMutation({
   mutationFn: async (item: PageSummary) => {
@@ -138,18 +90,6 @@ const removeMutation = useMutation({
   queryClient,
 })
 const pageWrites = usePageWrites()
-function confirm(title: string, description: string): Promise<boolean> {
-  return new Promise((resolve) =>
-    Dialog.warning({
-      title,
-      description,
-      confirmText: '继续',
-      cancelText: '取消',
-      onConfirm: () => resolve(true),
-      onCancel: () => resolve(false),
-    }),
-  )
-}
 async function publishUpdate(item: PageSummary) {
   pageWrites.reset(item)
   try {
@@ -158,7 +98,7 @@ async function publishUpdate(item: PageSummary) {
     const result = await pageWrites.publishUpdate(
       async () =>
         !(detail.document.js ?? '').trim() ||
-        (await confirm(
+        (await confirmDialog(
           '发布包含脚本的页面？',
           '页面脚本会在访客浏览器中执行。请确认你信任这些内容。',
         )),
@@ -185,87 +125,24 @@ function remove(item: PageSummary) {
 async function confirmUnpublish(item: PageSummary) {
   pageWrites.reset(item)
   try {
-    if (await pageWrites.unpublish(() => confirm('取消发布此页面？', '访客将无法访问此页面。'))) {
+    if (
+      await pageWrites.unpublish(() => confirmDialog('取消发布此页面？', '访客将无法访问此页面。'))
+    ) {
       Toast.success('已取消发布')
     }
   } catch (e) {
     Toast.error(errorMessage(e))
   }
 }
-// Settings modal edits the saved page directly: the slug applies immediately,
-// title/description/layout are persisted as a saved draft on 应用.
-const settingsWrites = usePageWrites()
-const settingsDetail = settingsWrites.detail
-const settingsSaving = settingsWrites.pending
-let settingsGeneration = 0
-function closeSettings() {
-  settingsGeneration++
-  settingsWrites.reset()
-}
-async function openSettings(item: PageSummary) {
-  const generation = ++settingsGeneration
-  settingsWrites.reset()
-  try {
-    const detail = await queryClient.fetchQuery({
-      queryKey: pageKeys.detail(item.name),
-      queryFn: async () => (await aiPageBuilderApi.getPage({ name: item.name })).data,
-      staleTime: 0,
-    })
-    if (generation === settingsGeneration) settingsWrites.reset(detail)
-  } catch (e) {
-    if (generation === settingsGeneration) Toast.error(errorMessage(e))
-  }
-}
-const isConflict = (e: unknown) =>
-  (e as { response?: { status?: number } })?.response?.status === 409
-function refreshAfterConflict(e: unknown) {
-  if (isConflict(e)) void settingsWrites.refresh().catch(() => {})
-}
-async function saveSettingsSlug(slug: string) {
-  try {
-    return await settingsWrites.updateSlug(slug)
-  } catch (e) {
-    refreshAfterConflict(e)
-    throw e
-  }
-}
-type SettingsPatch = Partial<Pick<PageDocument, 'title' | 'description'>> & {
-  themeLayout?: boolean
-}
-async function applySettings(patch: SettingsPatch) {
-  const current = settingsDetail.value
-  if (!current) return
-  if (!Object.keys(patch).length) {
-    closeSettings()
-    return
-  }
-  const { themeLayout, ...documentPatch } = patch
-  try {
-    const result = await settingsWrites.save({
-      document: { ...current.document, ...documentPatch },
-      ...(themeLayout === undefined ? {} : { themeLayout }),
-    })
-    if (result) {
-      closeSettings()
-      Toast.success('设置已保存')
-    }
-  } catch (e) {
-    Toast.error(errorMessage(e))
-    refreshAfterConflict(e)
-  }
-}
-async function unpublishFromSettings() {
-  try {
-    const result = await settingsWrites.unpublish(
-      () => confirm('取消发布此页面？', '访客将无法访问此页面。'),
-      true,
-    )
-    if (result) Toast.success('已取消发布')
-  } catch (e) {
-    Toast.error(errorMessage(e))
-    refreshAfterConflict(e)
-  }
-}
+const {
+  detail: settingsDetail,
+  saving: settingsSaving,
+  open: openSettings,
+  close: closeSettings,
+  saveSlug: saveSettingsSlug,
+  apply: applySettings,
+  unpublish: unpublishFromSettings,
+} = usePageSettingsEditor({ confirm: confirmDialog })
 </script>
 <template>
   <VPageHeader title="页面工坊">
@@ -301,108 +178,20 @@ async function unpublishFromSettings() {
       v-else
       class="grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]"
     >
-      <article
+      <PageCard
         v-for="item in items"
         :key="item.name"
-        class="min-w-0 overflow-hidden rounded-lg border border-gray-200 bg-white transition-shadow hover:border-gray-300 hover:shadow-md"
-      >
-        <PagePreviewCard
-          :name="item.name"
-          :revision="item.draftRevision || ''"
-          :title="item.title"
-          @open="openEditor(item.name)"
-        />
-        <div class="p-4">
-          <RouterLink
-            :to="{ name: 'AiPageBuilderEditor', params: { name: item.name } }"
-            class="block truncate text-sm font-semibold text-gray-800 hover:underline"
-            >{{ item.title }}</RouterLink
-          >
-          <p class="mt-1 break-all text-xs text-gray-400">
-            {{ item.slug ? '/' + item.slug : '未设置访问路径' }}
-          </p>
-          <div class="mt-3.5 flex items-center justify-between gap-2">
-            <VStatusDot
-              :state="
-                item.publishedRevision
-                  ? item.hasUnpublishedChanges
-                    ? 'warning'
-                    : 'success'
-                  : 'default'
-              "
-              :text="
-                item.publishedRevision
-                  ? item.hasUnpublishedChanges
-                    ? '有未发布修改'
-                    : '已发布'
-                  : '未发布'
-              "
-            />
-            <span class="text-[11px] text-gray-400">
-              {{ item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '' }}
-            </span>
-          </div>
-          <div class="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3.5">
-            <VButton size="sm" class="flex-1" @click="open(item)">
-              {{ item.publishedRevision ? '访问页面 ↗' : '预览 ↗' }}
-            </VButton>
-            <VDropdown>
-              <VButton size="sm" :disabled="mutating" :aria-label="`${item.title}的操作`">
-                <IconMore />
-              </VButton>
-              <template #popper>
-                <VDropdownItem v-close-popper :disabled="mutating" @click="openSettings(item)">
-                  设置
-                </VDropdownItem>
-                <PublishPagePopper
-                  v-if="!item.publishedRevision"
-                  :name="item.name"
-                  :title="item.title"
-                  :slug="item.slug"
-                  :version="item.version"
-                  :disabled="mutating"
-                  placement="left-start"
-                >
-                  <VDropdownItem :disabled="mutating">发布</VDropdownItem>
-                </PublishPagePopper>
-                <VDropdownItem
-                  v-else
-                  v-close-popper
-                  :disabled="mutating"
-                  @click="publishUpdate(item)"
-                >
-                  更新发布
-                </VDropdownItem>
-                <VDropdownItem
-                  v-if="item.publishedRevision"
-                  v-close-popper
-                  :disabled="mutating"
-                  @click="confirmUnpublish(item)"
-                >
-                  取消发布
-                </VDropdownItem>
-                <VDropdownItem v-close-popper :disabled="mutating" @click="cloneTarget = item">
-                  克隆页面
-                </VDropdownItem>
-                <VDropdownItem
-                  v-close-popper
-                  :disabled="mutating"
-                  @click="exportMutation.mutate(item)"
-                  >导出</VDropdownItem
-                >
-                <VDropdownItem
-                  v-close-popper
-                  type="danger"
-                  :disabled="mutating"
-                  @click="remove(item)"
-                >
-                  删除页面
-                </VDropdownItem>
-              </template>
-            </VDropdown>
-          </div>
-        </div>
-      </article>
+        :item="item"
+        :disabled="mutating"
+        @open="openEditor(item.name)"
+        @visit="open"
+        @settings="openSettings"
+        @update="publishUpdate"
+        @unpublish="confirmUnpublish"
+        @clone="cloneTarget = $event"
+        @export="exportMutation.mutate($event)"
+        @remove="remove"
+      />
     </div>
     <div v-if="total" class="mt-6">
       <VPagination

@@ -1,21 +1,14 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
-import { Dialog, VDropdown, VDropdownItem, VLoading } from '@halo-dev/components'
-import IconSparkles from '~icons/mingcute/sparkles-line'
-import IconAdd from '~icons/mingcute/add-line'
-import IconMore from '~icons/mingcute/more-2-line'
-import IconArrowDown from '~icons/mingcute/down-line'
-import IconCheck from '~icons/mingcute/check-line'
-import IconError from '~icons/mingcute/warning-line'
-import IconClose from '~icons/mingcute/close-line'
+import { Dialog, VLoading } from '@halo-dev/components'
 import IconSpinner from '~icons/mingcute/loading-line'
-import IconChevron from '~icons/mingcute/right-line'
 import type { PageDetail } from '../api/generated'
-import { pageAdjustmentPresets, promptPresetGroups } from '../data/promptPresets'
 import { usePageChat } from '../composables/usePageChat'
 import ChatComposer from './chat/ChatComposer.vue'
-import ChatMessageParts from './chat/ChatMessageParts.vue'
-import ChatQuestions from './chat/ChatQuestions.vue'
+import ChatEmptyState from './chat/ChatEmptyState.vue'
+import ChatMessageItem from './chat/ChatMessageItem.vue'
+import ChatSessionHeader from './chat/ChatSessionHeader.vue'
+import AnnotationTray from './chat/AnnotationTray.vue'
 import { buildConversationDisplay } from '../editor/chat-display'
 import type { AnnotationDraft, PreparedPage } from '../editor/annotations'
 import type { StreamingPreview } from '../composables/useStreamingPreview'
@@ -200,75 +193,24 @@ const blankPage = computed(() => {
   const { html, css, js } = props.document
   return !html?.trim() && !css?.trim() && !js?.trim()
 })
-const suggestionGroups = computed(() =>
-  blankPage.value ? promptPresetGroups : [{ label: '常见调整', presets: pageAdjustmentPresets }],
-)
+// Kept here so the chosen preset group survives the empty state unmounting during a load.
 const activePresetGroup = shallowRef(0)
-const activePresets = computed(
-  () =>
-    (suggestionGroups.value[activePresetGroup.value] || suggestionGroups.value[0])?.presets || [],
-)
 watch(blankPage, () => (activePresetGroup.value = 0))
 </script>
 
 <template>
   <aside class="h-full min-h-0 min-w-0 flex-col bg-white" aria-label="页面助手">
-    <header class="flex h-12 shrink-0 items-center gap-1 border-b border-gray-100 px-3">
-      <IconSparkles class="text-base text-gray-700" />
-      <VDropdown>
-        <button
-          type="button"
-          class="apb-btn-ghost h-7 max-w-44 gap-1 px-2 text-[13px]"
-          :disabled="sessionBusy || disabled"
-          :aria-label="`当前会话：${currentSession?.title || '新会话'}，点击切换`"
-        >
-          <span class="truncate">{{ currentSession?.title || '新会话' }}</span>
-          <IconArrowDown class="shrink-0 text-xs text-gray-400" />
-        </button>
-        <template #popper>
-          <VDropdownItem
-            v-for="session in sessions"
-            :key="session.sessionId"
-            v-close-popper
-            @click="selectSession(session.sessionId)"
-          >
-            <template #prefix-icon>
-              <IconCheck v-if="session.sessionId === sessionId" class="text-xs text-emerald-600" />
-              <span v-else class="w-3.5 shrink-0" aria-hidden="true" />
-            </template>
-            {{ session.title || '新会话' }}
-          </VDropdownItem>
-        </template>
-      </VDropdown>
-      <div class="ml-auto flex items-center">
-        <button
-          type="button"
-          class="apb-icon-btn h-7 w-7"
-          v-tooltip="'新建会话'"
-          aria-label="新建会话"
-          :disabled="sessionBusy || disabled"
-          @click="createSession"
-        >
-          <IconAdd class="text-base" />
-        </button>
-        <VDropdown class="flex">
-          <button
-            type="button"
-            class="apb-icon-btn h-7 w-7"
-            v-tooltip="'会话操作'"
-            aria-label="会话操作"
-            :disabled="sessionBusy || disabled || !sessionId"
-          >
-            <IconMore class="text-base" />
-          </button>
-          <template #popper>
-            <VDropdownItem v-close-popper type="danger" @click="confirmDelete">
-              {{ defaultSession ? '清空会话' : '删除会话' }}
-            </VDropdownItem>
-          </template>
-        </VDropdown>
-      </div>
-    </header>
+    <ChatSessionHeader
+      :sessions="sessions"
+      :current-session="currentSession"
+      :session-id="sessionId"
+      :default-session="defaultSession"
+      :busy="sessionBusy"
+      :disabled="disabled"
+      @select="selectSession"
+      @create="createSession"
+      @delete="confirmDelete"
+    />
     <div ref="feed" class="min-h-0 flex-1 overflow-auto px-4 py-4" role="log" aria-label="页面对话">
       <div v-if="hasMore" class="mb-4 text-center">
         <button
@@ -282,104 +224,24 @@ watch(blankPage, () => (activePresetGroup.value = 0))
         </button>
       </div>
       <VLoading v-if="loading" />
-      <div
+      <ChatEmptyState
         v-else-if="!visibleMessages.length"
-        class="flex min-h-full flex-col items-center justify-center gap-3 px-1 py-6 text-center"
-      >
-        <span class="grid h-11 w-11 place-items-center rounded-2xl bg-gray-900 text-white">
-          <IconSparkles class="text-xl" />
-        </span>
-        <h2 class="text-base font-semibold">{{ blankPage ? '从一个想法开始' : '想调整哪里？' }}</h2>
-        <p class="max-w-64 text-xs leading-5 text-gray-500">
-          {{
-            blankPage
-              ? '描述想要的页面，或从下面的页面类型开始。生成内容会先保存为草稿，也可以直接在右侧画布中编辑。'
-              : '告诉助手需要修改的地方，或从下面的常见调整开始。每次修改都会先保存为草稿。'
-          }}
-        </p>
-        <div class="mt-1 w-full">
-          <div v-if="suggestionGroups.length > 1" class="mb-2 flex flex-wrap justify-center gap-1">
-            <button
-              v-for="(group, index) in suggestionGroups"
-              :key="group.label"
-              type="button"
-              class="rounded-full px-2.5 py-1 text-[11px] transition-colors"
-              :class="
-                index === activePresetGroup
-                  ? 'bg-gray-900 text-white'
-                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
-              "
-              :aria-pressed="index === activePresetGroup"
-              @click="activePresetGroup = index"
-            >
-              {{ group.label }}
-            </button>
-          </div>
-          <p v-else class="mb-1.5 text-[11px] text-gray-400">{{ suggestionGroups[0]?.label }}</p>
-          <div class="flex flex-wrap justify-center gap-1.5">
-            <button
-              v-for="preset in activePresets"
-              :key="preset.label"
-              type="button"
-              class="rounded-full border border-gray-200 px-2.5 py-1 text-xs text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
-              :disabled="disabled || !available"
-              @click="prompt = preset.prompt"
-            >
-              {{ preset.label }}
-            </button>
-          </div>
-        </div>
-      </div>
-      <article v-for="message in visibleMessages" :key="message.id" class="mb-6 text-[13px]">
-        <div v-if="message.role === 'user'" class="flex justify-end">
-          <div class="max-w-[88%] rounded-2xl rounded-br-md bg-gray-100 px-3.5 py-2.5 leading-6">
-            <p class="whitespace-pre-wrap">
-              {{ message.message.parts.find((p) => p.type === 'text')?.text }}
-            </p>
-            <div
-              v-if="message.annotations.length"
-              class="mt-2 space-y-1 border-t border-gray-200 pt-2"
-            >
-              <div v-for="item in message.annotations" :key="item.id" class="text-xs text-gray-500">
-                <span class="font-medium text-gray-600">{{ item.summary }}</span> ·
-                {{ item.comment }}
-              </div>
-            </div>
-          </div>
-        </div>
-        <template v-else>
-          <ChatMessageParts
-            :parts="message.parts"
-            :pending-question-id="waitingForUser ? pendingQuestion?.id : undefined"
-            :submitting="answering"
-            :answer-error="answerError"
-            @answer="answerQuestion"
-          />
-          <ChatQuestions
-            v-for="question in message.fallbackQuestions"
-            :key="question.id"
-            :question="question"
-            :pending="waitingForUser && pendingQuestion?.id === question.id"
-            :submitting="answering"
-            :error="pendingQuestion?.id === question.id ? answerError : ''"
-            @answer="answerQuestion(question.id, $event)"
-          />
-          <div
-            v-if="message.result"
-            class="mt-3 flex items-start gap-1.5 text-xs"
-            :class="message.result.failed ? 'text-red-600' : 'text-gray-400'"
-          >
-            <IconError v-if="message.result.failed" class="mt-0.5 shrink-0" />
-            <IconCheck v-else class="mt-0.5 shrink-0 text-emerald-600" />
-            <div>
-              <p>{{ message.result.text }}</p>
-              <p v-if="message.result.error" class="mt-1 break-all leading-5 text-gray-400">
-                {{ message.result.error }}
-              </p>
-            </div>
-          </div>
-        </template>
-      </article>
+        v-model:active-preset-group="activePresetGroup"
+        :blank-page="blankPage"
+        :disabled="disabled"
+        :available="available"
+        @pick="prompt = $event"
+      />
+      <ChatMessageItem
+        v-for="message in visibleMessages"
+        :key="message.id"
+        :message="message"
+        :waiting-for-user="waitingForUser"
+        :pending-question-id="pendingQuestion?.id"
+        :answering="answering"
+        :answer-error="answerError"
+        @answer="answerQuestion"
+      />
       <p v-if="waitingForUser && !loading" class="text-xs leading-5 text-gray-500" role="status">
         等待你的回答，提交后助手将继续。也可以点击下方停止按钮取消本轮。
       </p>
@@ -402,50 +264,13 @@ watch(blankPage, () => (activePresetGroup.value = 0))
       <p v-else-if="notice" class="text-xs text-gray-400" role="status">{{ notice }}</p>
     </div>
     <div class="shrink-0 px-3 pb-3">
-      <div v-if="annotations.length" class="mb-2">
-        <button
-          type="button"
-          class="flex w-full items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600"
-          :aria-expanded="annotationsOpen"
-          @click="annotationsOpen = !annotationsOpen"
-        >
-          <IconChevron
-            class="shrink-0 text-gray-400 transition-transform"
-            :class="{ 'rotate-90': annotationsOpen }"
-          />
-          <span class="shrink-0 font-medium">{{ annotations.length }} 条批注</span>
-          <span class="min-w-0 truncate text-gray-400">
-            {{ annotations[0]?.tag }} · {{ annotations[0]?.summary }}
-          </span>
-        </button>
-        <div v-if="annotationsOpen" class="mt-1.5 space-y-1.5">
-          <div
-            v-for="item in annotations"
-            :key="item.id"
-            class="flex items-start gap-2 rounded-lg border px-2.5 py-1.5 text-xs leading-5"
-            :class="
-              item.stale
-                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                : 'border-gray-200 bg-gray-50 text-gray-600'
-            "
-          >
-            <div class="min-w-0 flex-1">
-              <span class="font-medium">{{ item.tag }}</span> · {{ item.summary }}
-              <p class="truncate text-gray-400">{{ item.comment }}</p>
-              <p v-if="item.stale">内容已变化，请移除后重新选择</p>
-            </div>
-            <button
-              type="button"
-              class="apb-icon-btn h-6 w-6 shrink-0"
-              aria-label="移除批注"
-              :disabled="running || disabled"
-              @click="emit('removeAnnotation', item.id)"
-            >
-              <IconClose class="text-xs" />
-            </button>
-          </div>
-        </div>
-      </div>
+      <AnnotationTray
+        v-model:open="annotationsOpen"
+        :annotations="annotations"
+        :running="running"
+        :disabled="disabled"
+        @remove="emit('removeAnnotation', $event)"
+      />
       <div
         v-if="recovery && !running"
         class="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
