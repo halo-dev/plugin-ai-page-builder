@@ -36,8 +36,19 @@ not be re-armed, or a race that cleared someone else's barrier.
 3. **Persistence is injected as `RunPersistence` callbacks.**
    - The interface contains only the writes a run transition actually needs: `active`,
      `checkpoint`, `recordFinished`, `deleteCheckpoint`, and `checkpointAvailable`.
-   - `PageChatService` still owns snapshot construction, storage calls, session recovery,
-     and HTTP exception mapping.
+   - `PageChatService` owns snapshot construction, recovery-result decisions, and HTTP
+     mapping of run-transition exceptions. Recovery still rereads the durable reservation
+     under the live-page lock before deciding a result or changing a checkpoint.
+   - Refined on 2026-10-20: `ConversationTurns` owns durable history queries, idempotent
+     legacy migration, archive-before-release ordering, resumable session deletion, and
+     page-history cleanup. Normal completion and restart recovery share its finish
+     protocol; callers no longer repeat the archive, session-touch, and reservation-release
+     sequence. It uses the observed coordinator version for CAS, and skips a separate
+     touch of the default session because that record is the coordinator itself.
+   - A successful archive is retained if later writes fail; the durable reservation or
+     deletion marker remains until recovery completes the remaining work. Checkpoint
+     disposition stays with `PageRun` and the recovery decision, before archive completion.
+     The live-page lock and run admission do not move into the history module.
    - `PageRun` throws domain exceptions; HTTP status codes are mapped only at the public
      boundary of `PageChatService`.
 

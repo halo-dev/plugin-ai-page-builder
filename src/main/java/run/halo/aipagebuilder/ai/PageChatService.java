@@ -1,11 +1,5 @@
 package run.halo.aipagebuilder.ai;
 
-import static run.halo.app.extension.index.query.Queries.and;
-import static run.halo.app.extension.index.query.Queries.equal;
-import static run.halo.app.extension.index.query.Queries.isNull;
-import static run.halo.app.extension.index.query.Queries.lessThan;
-import static run.halo.app.extension.index.query.Queries.or;
-
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,8 +9,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Sort;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -24,11 +16,6 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
-import run.halo.app.extension.ListOptions;
-import run.halo.app.extension.Metadata;
-import run.halo.app.extension.PageRequestImpl;
-import run.halo.app.extension.router.selector.FieldSelector;
-import run.halo.aipagebuilder.model.PageChatTurnRecord;
 import run.halo.aipagebuilder.model.PageChatCheckpoint;
 import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.aipagebuilder.Json;
@@ -45,6 +32,7 @@ public class PageChatService {
     private final ReactiveExtensionClient client;
     private final PageService pages;
     private final PageCheckpoints checkpoints;
+    private final ConversationTurns conversations;
     private final AiGateway gateway;
     private final ContentPolicy policy;
     private final run.halo.aipagebuilder.theme.ThemeContextService themes;
@@ -73,6 +61,7 @@ public class PageChatService {
         this.themes = themes;
         this.client = client;
         this.checkpoints = new PageCheckpoints(client);
+        this.conversations = new ConversationTurns(client, checkpoints);
         this.pages = pages;
         this.gateway = gateway;
         this.policy = policy;
@@ -87,12 +76,9 @@ public class PageChatService {
             return Mono.error(badRequest("size 必须为 1–100，before 必须为返回的游标"));
         }
         return pages.get(name).then(load(name)).flatMap(this::recover)
-            .flatMap(coordinator -> selected(name, sessionId, coordinator).flatMap(session ->
-                history(session.getMetadata().getName(), before, size + 1).map(records -> {
-                    boolean hasMore = records.size() > size;
-                    var visible = records.subList(0, Math.min(size, records.size()));
-                    var turns = new ArrayList<>(visible.stream()
-                        .map(record -> record.getSpec().getTurn()).toList().reversed());
+            .flatMap(coordinator -> conversations.selected(name, sessionId, coordinator).flatMap(session ->
+                conversations.history(session.getMetadata().getName(), before, size).map(history -> {
+                    var turns = new ArrayList<>(history.turns());
                     var summary = summary(session, coordinator);
                     var current = coordinator.getSpec().getActive();
                     if (before == null && current != null
@@ -109,8 +95,7 @@ public class PageChatService {
                     }
                     return new ChatApi.Session(name, summary.version(), turns, summary.activeRun(),
                         new ChatApi.ModelContextWindow(MAX_TURNS, MAX_BYTES), summary.sessionId(), summary.title(),
-                        summary.createdAt(), summary.updatedAt(), hasMore,
-                        hasMore ? visible.getLast().getSpec().getSortKey() : null);
+                        summary.createdAt(), summary.updatedAt(), history.hasMore(), history.nextBefore());
                 }))).flatMap(value -> pages.get(name).flatMap(page ->
                     client.fetch(PageChatSession.class, name).flatMap(coordinator ->
                         checkpoints.load(value.sessionId()).map(checkpoint -> value.withRecovery(
@@ -121,8 +106,7 @@ public class PageChatService {
 
     public Mono<ChatApi.SessionList> sessions(String name) {
         return pages.get(name).then(load(name)).flatMap(this::recover).flatMap(coordinator ->
-            client.listAll(PageChatSession.class, sessionOptions(name),
-                    Sort.by(Sort.Order.desc("spec.updatedAt"), Sort.Order.asc("metadata.name")))
+            conversations.sessions(name)
                 .map(session -> summary(session, coordinator)).collectList().map(ChatApi.SessionList::new));
     }
 
@@ -131,7 +115,7 @@ public class PageChatService {
         return Mono.defer(() -> {
             validateTitle(title);
             return pages.get(name).then(load(name)).flatMap(coordinator ->
-                pages.withLivePage(name, () -> client.create(newSession(name, UUID.randomUUID().toString(), title.strip())))
+                pages.withLivePage(name, () -> conversations.create(name, UUID.randomUUID().toString(), title.strip()))
                     .map(session -> summary(session, coordinator)));
         });
     }
@@ -141,7 +125,7 @@ public class PageChatService {
         return Mono.defer(() -> {
             validateTitle(request.title());
             return pages.get(name).then(load(name)).flatMap(this::recover).flatMap(coordinator ->
-                selected(name, sessionId, coordinator).flatMap(session -> {
+                conversations.selected(name, sessionId, coordinator).flatMap(session -> {
                     requireVersion(session, request.version());
                     if (session.getSpec().isDeleting()
                         || sessionId.equals(coordinator.getSpec().getDeletingSessionId())
@@ -158,19 +142,8 @@ public class PageChatService {
 
     public Mono<Void> deleteSession(String name, String sessionId, Long version) {
         return pages.get(name).then(load(name)).flatMap(this::recover).flatMap(coordinator ->
-            pages.withLivePage(name, () -> selected(name, sessionId, coordinator).flatMap(session -> {
-                requireVersion(session, version);
-                if (coordinator.getSpec().getActive() != null) {
-                    return Mono.error(conflict("请先结束当前会话运行"));
-                }
-                if (coordinator.getSpec().getDeletingSessionId() != null
-                    && !sessionId.equals(coordinator.getSpec().getDeletingSessionId())) {
-                    return Mono.error(conflict("其他会话正在删除，请稍后重试"));
-                }
-                coordinator.getSpec().setDeletingSessionId(sessionId);
-                // Reserve against start's CAS before deleting any history.
-                return client.update(coordinator).flatMap(this::completeSessionDeletion).then();
-            }))).onErrorMap(OptimisticLockingFailureException.class,
+            pages.withLivePage(name, () -> conversations.deleteSession(coordinator, sessionId, version)))
+            .onErrorMap(OptimisticLockingFailureException.class,
                 error -> conflict("会话已变化，请重新载入"));
     }
 
@@ -195,8 +168,8 @@ public class PageChatService {
                     || coordinator.getSpec().getDeletingSessionId() != null) {
                     return Mono.error(conflict("页面正在运行或删除会话；请稍后重试"));
                 }
-                return selected(name, request.sessionId(), coordinator).flatMap(session ->
-                    findTurn(name, request.runId()).hasElement().flatMap(used -> {
+                return conversations.selected(name, request.sessionId(), coordinator).flatMap(session ->
+                    conversations.find(name, request.runId()).hasElement().flatMap(used -> {
                         if (session.getSpec().isDeleting()) return Mono.error(conflict("会话正在删除，请重试删除后再操作"));
                         if (used) return Mono.error(conflict("runId 已使用；请查询运行结果"));
                         return pages.committedAiRevision(name, request.runId())
@@ -280,9 +253,8 @@ public class PageChatService {
             });
         return Mono.deferContextual(context -> {
             runs.reserve(name, run);
-            var execution = memory.then(history(sessionId, null, MAX_TURNS))
-                .map(records -> contextWindow(records.stream()
-                    .map(record -> record.getSpec().getTurn()).toList().reversed()))
+            var execution = memory.then(conversations.history(sessionId, null, MAX_TURNS))
+                .map(history -> contextWindow(history.turns()))
                 .flatMap(history -> Mono.defer(() -> {
                     synchronized (run) {
                         if (run.execution.isDisposed()) return Mono.empty();
@@ -566,7 +538,7 @@ public class PageChatService {
 
     public Mono<ChatApi.CheckpointDetail> checkpoint(String name, String sessionId, String actor) {
         return pages.get(name).flatMap(page -> load(name).flatMap(this::recover)
-            .flatMap(coordinator -> selected(name, sessionId, coordinator)
+            .flatMap(coordinator -> conversations.selected(name, sessionId, coordinator)
                 .flatMap(session -> checkpoints.load(session.getMetadata().getName()))
                 .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "没有可恢复的进度")))
                 .flatMap(value -> {
@@ -616,11 +588,11 @@ public class PageChatService {
                     .map(revision -> new ChatApi.Run(runId, "completed", revision, null, page))
                     .defaultIfEmpty(result(current, null));
             }
-            return findTurn(name, runId)
+            return conversations.find(name, runId)
                 .flatMap(record -> {
-                    var turn = record.getSpec().getTurn();
+                    var turn = record.turn();
                     var result = result(turn, "completed".equals(turn.status()) ? page : null);
-                    return checkpoints.load(record.getSpec().getSessionId())
+                    return checkpoints.load(record.sessionId())
                         .filter(value -> runId.equals(value.getSpec().getRequest().runId()))
                         .map(value -> result.withRecovery(PageCheckpoints.summary(value, page,
                             session.getSpec().getActive() != null))).defaultIfEmpty(result);
@@ -667,16 +639,9 @@ public class PageChatService {
 
         @Override
         public Mono<Void> recordFinished(PageRun run, ChatApi.Turn turn) {
-            return client.fetch(PageChatSession.class, name).flatMap(session -> {
-                requireRun(session, run.request.runId());
-                return archive(name, run.sessionId, turn)
-                    .then(touchSession(name, run.sessionId)).then(Mono.defer(() -> {
-                        session.getSpec().setActive(null);
-                        session.getSpec().setActiveSessionId(null);
-                        session.getSpec().setUpdatedAt(Instant.now());
-                        return client.update(session);
-                    }));
-            }).switchIfEmpty(Mono.error(conflict("会话不存在"))).then();
+            return client.fetch(PageChatSession.class, name)
+                .switchIfEmpty(Mono.error(conflict("会话不存在")))
+                .flatMap(session -> conversations.finish(session, turn)).then();
         }
 
         @Override
@@ -712,82 +677,7 @@ public class PageChatService {
     }
 
     private Mono<PageChatSession> initializeSession(String name) {
-        return pages.withLivePage(name, () -> client.fetch(PageChatSession.class, name)
-            .filter(session -> session.getMetadata().getDeletionTimestamp() == null)
-            .switchIfEmpty(Mono.defer(() -> client.create(newSession(name, name, "默认会话"))
-                .onErrorResume(error -> error instanceof OptimisticLockingFailureException
-                    || error instanceof DataIntegrityViolationException,
-                    error -> client.fetch(PageChatSession.class, name))))
-            .flatMap(session -> {
-                if (session.getSpec().getPageName() != null && !name.equals(session.getSpec().getPageName())) {
-                    return Mono.error(conflict("默认会话名称冲突"));
-                }
-                return migrate(name, session).flatMap(this::completeSessionDeletion);
-            }));
-    }
-
-    private Mono<PageChatSession> completeSessionDeletion(PageChatSession coordinator) {
-        var deletingId = coordinator.getSpec().getDeletingSessionId();
-        if (deletingId == null) return Mono.just(coordinator);
-        var name = coordinator.getMetadata().getName();
-        return client.listAll(PageChatTurnRecord.class, turnOptions(deletingId), Sort.unsorted())
-            .concatMap(client::delete).then(checkpoints.delete(deletingId))
-            .then(Mono.defer(() -> deletingId.equals(name) ? Mono.empty()
-                : client.fetch(PageChatSession.class, deletingId)
-                    .filter(session -> session.getMetadata().getDeletionTimestamp() == null
-                        && name.equals(session.getSpec().getPageName()))
-                    .flatMap(client::delete).then()))
-            .then(client.fetch(PageChatSession.class, name)).flatMap(latest -> {
-                if (!deletingId.equals(latest.getSpec().getDeletingSessionId())) return Mono.just(latest);
-                latest.getSpec().setDeletingSessionId(null);
-                if (deletingId.equals(name)) {
-                    latest.getSpec().setTitle("默认会话");
-                    latest.getSpec().setUpdatedAt(Instant.now());
-                }
-                return client.update(latest);
-            });
-    }
-
-    private Mono<PageChatSession> selected(String name, String sessionId, PageChatSession coordinator) {
-        if (sessionId == null || sessionId.equals(name)) return Mono.just(coordinator);
-        return client.fetch(PageChatSession.class, sessionId)
-            .filter(session -> session.getMetadata().getDeletionTimestamp() == null
-                && name.equals(session.getSpec().getPageName()))
-            .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在")))
-            .flatMap(session -> migrate(name, session));
-    }
-
-    private Mono<PageChatSession> migrate(String name, PageChatSession session) {
-        var spec = session.getSpec();
-        var id = session.getMetadata().getName();
-        boolean initialize = spec.getPageName() == null;
-        if (!initialize && spec.getTurns().isEmpty()) return Mono.just(session);
-        return Flux.fromIterable(List.copyOf(spec.getTurns()))
-            .concatMap(turn -> archive(name, id, turn)).then(Mono.defer(() -> {
-                if (initialize) {
-                    spec.setPageName(name);
-                    spec.setTitle("默认会话");
-                    spec.setCreatedAt(session.getMetadata().getCreationTimestamp() == null
-                        ? Instant.now() : session.getMetadata().getCreationTimestamp());
-                    spec.setUpdatedAt(spec.getCreatedAt());
-                }
-                spec.getTurns().clear();
-                return client.update(session);
-            }));
-    }
-
-    private static PageChatSession newSession(String name, String id, String title) {
-        var session = new PageChatSession();
-        var metadata = new Metadata();
-        metadata.setName(id);
-        session.setMetadata(metadata);
-        var spec = new PageChatSession.Spec();
-        spec.setPageName(name);
-        spec.setTitle(title);
-        spec.setCreatedAt(Instant.now());
-        spec.setUpdatedAt(spec.getCreatedAt());
-        session.setSpec(spec);
-        return session;
+        return pages.withLivePage(name, () -> conversations.initialize(name));
     }
 
     private Mono<PageChatSession> recover(PageChatSession session) {
@@ -825,13 +715,7 @@ public class PageChatService {
                 var sessionId = activeSessionId(session);
                 return ("completed".equals(recovered.status()) || "cancelled".equals(turn.status())
                     ? checkpoints.delete(sessionId) : checkpoints.available(sessionId, turn.runId()))
-                    .then(archive(name, sessionId, recovered)).then(touchSession(name, sessionId))
-                    .then(Mono.defer(() -> {
-                        session.getSpec().setActive(null);
-                        session.getSpec().setActiveSessionId(null);
-                        session.getSpec().setUpdatedAt(Instant.now());
-                        return client.update(session);
-                    }));
+                    .then(Mono.defer(() -> conversations.finish(session, recovered)));
             }).defaultIfEmpty(session);
     }
 
@@ -849,83 +733,6 @@ public class PageChatService {
             .getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) {
             throw new AiGenerationException(AiGenerationException.Reason.STORAGE_LIMIT);
         }
-    }
-
-    private Mono<List<PageChatTurnRecord>> history(String sessionId, String before, int size) {
-        var options = turnOptions(sessionId);
-        if (before != null) {
-            options.setFieldSelector(options.getFieldSelector().andQuery(lessThan("spec.sortKey", before)));
-        }
-        return client.listBy(PageChatTurnRecord.class, options,
-            PageRequestImpl.of(1, size, Sort.by(Sort.Order.desc("spec.sortKey"))))
-            .map(result -> result.getItems());
-    }
-
-    private Mono<PageChatTurnRecord> findTurn(String name, String runId) {
-        var options = turnPageOptions(name);
-        options.setFieldSelector(options.getFieldSelector().andQuery(equal("spec.runId", runId)));
-        return client.listBy(PageChatTurnRecord.class, options,
-                PageRequestImpl.of(1, 1, Sort.unsorted()))
-            .flatMap(result -> Mono.justOrEmpty(result.getItems().stream().findFirst()));
-    }
-
-    private Mono<PageChatTurnRecord> archive(String name, String sessionId, ChatApi.Turn turn) {
-        var record = new PageChatTurnRecord();
-        var metadata = new Metadata();
-        metadata.setName(turnName(sessionId, turn.runId()));
-        record.setMetadata(metadata);
-        var spec = new PageChatTurnRecord.Spec();
-        spec.setPageName(name);
-        spec.setSessionId(sessionId);
-        spec.setRunId(turn.runId());
-        spec.setSortKey(java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSSSSSSSS'Z'")
-            .withZone(java.time.ZoneOffset.UTC).format(turn.createdAt()) + "/" + turn.runId());
-        spec.setTurn(turn);
-        record.setSpec(spec);
-        return client.fetch(PageChatTurnRecord.class, metadata.getName())
-            .switchIfEmpty(Mono.defer(() -> client.create(record).onErrorResume(
-                error -> error instanceof OptimisticLockingFailureException
-                    || error instanceof DataIntegrityViolationException,
-                error -> client.fetch(PageChatTurnRecord.class, metadata.getName())
-                    .switchIfEmpty(Mono.error(error)))));
-    }
-
-    static String turnName(String sessionId, String runId) {
-        return UUID.nameUUIDFromBytes((sessionId + "/" + runId).getBytes(StandardCharsets.UTF_8)).toString();
-    }
-
-    private Mono<Void> touchSession(String name, String sessionId) {
-        if (name.equals(sessionId)) return Mono.empty();
-        return client.fetch(PageChatSession.class, sessionId).flatMap(session -> {
-            session.getSpec().setUpdatedAt(Instant.now());
-            return client.update(session);
-        }).then();
-    }
-
-    public static ListOptions sessionOptions(String name) {
-        return new ListOptions().setFieldSelector(FieldSelector.of(or(equal("spec.pageName", name),
-            and(equal("metadata.name", name), isNull("spec.pageName"))))
-            .andQuery(isNull("metadata.deletionTimestamp")));
-    }
-
-    public static ListOptions turnPageOptions(String name) {
-        return new ListOptions().setFieldSelector(FieldSelector.of(equal("spec.pageName", name))
-            .andQuery(isNull("metadata.deletionTimestamp")));
-    }
-
-    private static ListOptions turnOptions(String sessionId) {
-        return new ListOptions().setFieldSelector(FieldSelector.of(equal("spec.sessionId", sessionId))
-            .andQuery(isNull("metadata.deletionTimestamp")));
-    }
-
-    /** Called after the page is deleted; requires no PageChatService bean dependency. */
-    public static Mono<Void> deletePageHistory(ReactiveExtensionClient client, String name) {
-        return client.listAll(PageChatTurnRecord.class, turnPageOptions(name), Sort.unsorted())
-            .concatMap(client::delete)
-            .thenMany(client.listAll(PageChatCheckpoint.class, turnPageOptions(name), Sort.unsorted()))
-            .concatMap(client::delete)
-            .thenMany(client.listAll(PageChatSession.class, sessionOptions(name), Sort.unsorted()))
-            .concatMap(client::delete).then();
     }
 
     private static String activeSessionId(PageChatSession coordinator) {

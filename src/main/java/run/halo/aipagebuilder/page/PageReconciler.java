@@ -15,7 +15,7 @@ import run.halo.app.extension.controller.Controller;
 import run.halo.app.extension.controller.ControllerBuilder;
 import run.halo.app.extension.controller.Reconciler;
 import run.halo.app.extension.router.selector.FieldSelector;
-import run.halo.aipagebuilder.ai.PageChatService;
+import run.halo.aipagebuilder.ai.ConversationTurns;
 import run.halo.aipagebuilder.model.ThemePage;
 import run.halo.aipagebuilder.model.ThemePageRevision;
 
@@ -50,7 +50,7 @@ public class PageReconciler implements Reconciler<Reconciler.Request> {
             .andQuery(isNull("metadata.deletionTimestamp")));
         return client.listAll(ThemePageRevision.class, options, Sort.unsorted())
             .concatMap(client::delete)
-            .then(PageChatService.deletePageHistory(client, name))
+            .then(ConversationTurns.deletePageHistory(client, name))
             .then(client.fetch(ThemePage.class, name)).flatMap(latest -> {
                 if (latest.getMetadata().getDeletionTimestamp() != null
                     && ExtensionUtil.removeFinalizers(latest.getMetadata(), Set.of(FINALIZER))) {
