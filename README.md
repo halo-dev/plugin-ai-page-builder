@@ -29,7 +29,7 @@
 
 ### 安装
 
-1. 从 [GitHub Releases](https://github.com/halo-dev/plugin-ai-page-builder/releases) 下载 JAR 文件，在 Halo Console 的「插件」中安装并启用。详见 [Halo 插件安装文档](https://docs.halo.run/user-guide/plugins)。
+1. 从 [应用市场](https://www.halo.run/store/apps/app-gscuxwkq) 安装，或从 [GitHub Releases](https://github.com/halo-dev/plugin-ai-page-builder/releases) 下载 JAR 文件，在 Halo Console 的「插件」中安装并启用。详见 [Halo 插件安装文档](https://docs.halo.run/user-guide/plugins)。
 2. 如需使用 AI，在 [AI Foundation](https://www.halo.run/store/apps/app-acslk9nu) 中配置 Provider、模型和默认语言模型。
 3. 从「内容 → 页面工坊」进入。
 
