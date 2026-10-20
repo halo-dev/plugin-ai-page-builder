@@ -18,7 +18,7 @@ public class PagePreviewRoutes {
 
     @Bean
     RouterFunction<ServerResponse> aiPageBuilderTokenPreview(PageService pages,
-        PageRenderer renderer, PagePreviewStore store) {
+        PagePreview preview, PagePreviewStore store) {
         return RouterFunctions.route().GET(PATH.getPatternString(), request ->
             Mono.defer(() -> {
                 var entry = store.get(request.pathVariable("token"));
@@ -26,14 +26,9 @@ public class PagePreviewRoutes {
                 return pages.get(entry.name())
                     .filter(detail -> Objects.equals(entry.version(), detail.page().version())
                         && entry.revision().equals(detail.page().draftRevision()))
-                    .flatMap(detail -> {
-                        var safeRequest = PagePreviewResponse.withoutCredential(request);
-                        return renderer.preview(safeRequest, entry.name(),
-                                detail.page().slug() == null ? entry.name() : detail.page().slug(),
-                                detail.page().themeLayout(), detail.document())
-                            .<ServerResponse>map(response ->
-                                new PagePreviewResponse(response, safeRequest.uri()));
-                    })
+                    .flatMap(detail -> preview.token(request, entry.name(),
+                        detail.page().slug() == null ? entry.name() : detail.page().slug(),
+                        detail.page().themeLayout(), detail.document()))
                     .switchIfEmpty(ServerResponse.notFound().build())
                     .onErrorResume(ResponseStatusException.class, error ->
                         error.getStatusCode().value() == 404 ? ServerResponse.notFound().build()

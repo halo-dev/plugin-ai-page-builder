@@ -38,12 +38,14 @@ import run.halo.aipagebuilder.page.PageApi.SiteUrlResponse;
 public class PageEndpoint implements CustomEndpoint {
     private final PageService service;
     private final PageRenderer renderer;
+    private final PagePreview preview;
     private final PageImportReviewService reviewService;
 
-    public PageEndpoint(PageService service, PageRenderer renderer,
+    public PageEndpoint(PageService service, PageRenderer renderer, PagePreview preview,
         PageImportReviewService reviewService) {
         this.service = service;
         this.renderer = renderer;
+        this.preview = preview;
         this.reviewService = reviewService;
     }
 
@@ -175,7 +177,7 @@ public class PageEndpoint implements CustomEndpoint {
             .GET("/pages/{name}/revisions/{revision}/preview", request ->
                     service.get(name(request)).flatMap(detail ->
                         service.revisionDetail(name(request), request.pathVariable("revision"))
-                            .flatMap(revision -> renderer.preview(request, detail.page().name(),
+                            .flatMap(revision -> preview.render(request, detail.page().name(),
                                 detail.page().slug() != null ? detail.page().slug()
                                     : detail.page().name(),
                                 detail.page().themeLayout(), revision.document()))),
@@ -193,7 +195,7 @@ public class PageEndpoint implements CustomEndpoint {
                     .requestBody(requestBodyBuilder().required(true)
                         .implementation(RestoreRequest.class)))
             .GET("/pages/{name}/preview", request -> service.get(name(request))
-                    .flatMap(detail -> renderer.preview(request, detail.page().name(),
+                    .flatMap(detail -> preview.render(request, detail.page().name(),
                         detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
                         detail.page().themeLayout(), detail.document())),
                 builder -> builder.operationId("previewPage").tag("AiPageBuilder")
@@ -203,7 +205,7 @@ public class PageEndpoint implements CustomEndpoint {
                             .schema(schemaBuilder().type("string")))))
             .POST("/pages/{name}/preview", request -> body(request, PageDocument.class)
                     .flatMap(document -> service.get(name(request))
-                        .flatMap(detail -> renderer.preview(request, detail.page().name(),
+                        .flatMap(detail -> preview.render(request, detail.page().name(),
                             detail.page().slug() != null ? detail.page().slug() : detail.page().name(),
                             detail.page().themeLayout(), document))),
                 builder -> builder.operationId("previewPageDocument").tag("AiPageBuilder")

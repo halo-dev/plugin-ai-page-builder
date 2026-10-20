@@ -19,6 +19,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.web.reactive.function.server.HandlerStrategies;
+import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
@@ -37,7 +38,7 @@ class PageRouterTest {
             "draft", "published", Instant.now(), true);
         when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document),
-            eq(false))).thenReturn(ServerResponse.ok().build());
+            eq(false))).thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
@@ -73,7 +74,7 @@ class PageRouterTest {
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document),
-            anyBoolean())).thenReturn(ServerResponse.ok().build());
+            anyBoolean())).thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();

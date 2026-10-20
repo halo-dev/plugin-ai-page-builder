@@ -25,7 +25,8 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /** Keep the bearer URL in a script-free host, outside the untrusted preview document. */
-record PagePreviewResponse(ServerResponse delegate, URI documentUri) implements ServerResponse {
+record PagePreviewResponse(ServerResponse delegate, URI documentUri, String childPolicy)
+    implements ServerResponse {
     static ServerRequest withoutCredential(ServerRequest request) {
         var uri = UriComponentsBuilder.fromUri(request.uri())
             .replacePath(request.requestPath().contextPath().value() + "/")
@@ -78,11 +79,8 @@ record PagePreviewResponse(ServerResponse delegate, URI documentUri) implements 
                     } finally {
                         DataBufferUtils.release(buffer);
                     }
-                    var policy = getHeaders().getFirst("Content-Security-Policy")
-                        .replace("base-uri 'none'", "base-uri " + documentUri.toASCIIString());
-                    var bytes = host(html, documentUri, policy).getBytes(StandardCharsets.UTF_8);
-                    getHeaders().set("Content-Security-Policy",
-                        policy.replace("frame-src 'none'", "frame-src data:"));
+                    var bytes = host(html, documentUri, childPolicy)
+                        .getBytes(StandardCharsets.UTF_8);
                     getHeaders().setContentLength(bytes.length);
                     return super.writeWith(Mono.just(bufferFactory().wrap(bytes)));
                 });
@@ -104,7 +102,7 @@ record PagePreviewResponse(ServerResponse delegate, URI documentUri) implements 
         child.select("base").remove();
         child.head().prependElement("base").attr("href", base.toASCIIString());
         child.head().prependElement("meta").attr("http-equiv", "Content-Security-Policy")
-            .attr("content", policy.replace("sandbox allow-scripts; ", ""));
+            .attr("content", policy);
         var source = Base64.getEncoder().encodeToString(
             child.outerHtml().getBytes(StandardCharsets.UTF_8));
         var host = Jsoup.parse("<!doctype html><html><head><meta charset='utf-8'>"

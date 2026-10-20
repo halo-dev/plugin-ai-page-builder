@@ -2,57 +2,37 @@ package run.halo.aipagebuilder.page;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.regex.Pattern;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
-import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.app.theme.TemplateNameResolver;
-import run.halo.aipagebuilder.ai.PublicApiCatalog;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 
 @Component
 public class PageRenderer {
-    private static final Set<String> WEB_SCHEMES = Set.of("http", "https");
-    private static final Pattern AUTHORITY = Pattern.compile("[A-Za-z0-9._\\-:\\[\\]]+");
     private final TemplateNameResolver templateNameResolver;
     private final PageRenderCache content;
-    private final PublicApiCatalog publicApiCatalog;
-    private final ExternalUrlSupplier externalUrlSupplier;
+    private final PageOrigins origins;
 
     public PageRenderer(TemplateNameResolver templateNameResolver, ContentPolicy contentPolicy,
-        PublicApiCatalog publicApiCatalog, ExternalUrlSupplier externalUrlSupplier) {
+        ExternalUrlSupplier externalUrlSupplier) {
         this.templateNameResolver = templateNameResolver;
         this.content = new PageRenderCache(contentPolicy);
-        this.publicApiCatalog = publicApiCatalog;
-        this.externalUrlSupplier = externalUrlSupplier;
+        this.origins = new PageOrigins(externalUrlSupplier);
     }
 
-    public Mono<ServerResponse> render(ServerRequest request, String name, String slug,
+    public Mono<RenderingResponse> render(ServerRequest request, String name, String slug,
         boolean themeLayout, PageDocument document) {
-        return render(request, name, slug, themeLayout, document, false, false);
+        return render(request, name, slug, themeLayout, document, false);
     }
 
-    public Mono<ServerResponse> render(ServerRequest request, String name, String slug,
+    public Mono<RenderingResponse> render(ServerRequest request, String name, String slug,
         boolean themeLayout, PageDocument document, boolean disableScripts) {
-        return render(request, name, slug, themeLayout, document, false, disableScripts);
-    }
-
-    public Mono<ServerResponse> preview(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document) {
-        return render(request, name, slug, themeLayout, document, true, false);
-    }
-
-    private Mono<ServerResponse> render(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document, boolean preview, boolean disableScripts) {
         return Mono.defer(() -> {
             var rootId = "ai-page-builder-" + name;
             var compiled = content.compile(rootId, document);
@@ -62,109 +42,20 @@ public class PageRenderer {
                 compiled.css(), scriptBlocked);
             var templateName = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";
             return templateNameResolver.resolveTemplateNameOrDefault(request.exchange(), templateName)
-                .flatMap(template -> {
-                    var response = ServerResponse.ok().contentType(MediaType.TEXT_HTML)
-                        .cacheControl(CacheControl.noStore());
-                    if (preview) {
-                        // Preview content runs in an opaque origin. CSP blocks Console API
-                        // requests, external scripts/styles, frames, workers and form
-                        // submissions; images, fonts and media stay unrestricted so imported
-                        // pages keep their external assets.
-                        response.header("Content-Security-Policy", previewPolicy(request));
-                    }
-                    return response.render(template, Map.of("aiPageBuilder", pageView,
-                        "_templateId", "plugin:ai-page-builder:" + templateName));
-                });
+                .flatMap(template -> RenderingResponse.create(template)
+                    .header("Content-Type", MediaType.TEXT_HTML_VALUE)
+                    .header("Cache-Control", CacheControl.noStore().getHeaderValue())
+                    .modelAttribute("aiPageBuilder", pageView)
+                    .modelAttribute("_templateId", "plugin:ai-page-builder:" + templateName)
+                    .build());
         });
     }
 
     @jakarta.annotation.PreDestroy
     public void clearCache() { content.clear(); }
 
-    private String previewPolicy(ServerRequest request) {
-        // Resources and root-relative API calls resolve against the origin that actually
-        // serves the preview document, which is not necessarily the configured external
-        // URL (for example when the Console is opened via 127.0.0.1 instead of localhost).
-        var base = servingOrigin(request);
-        var sources = base == null ? List.<String>of()
-            : allowedPrefixes().stream().map(prefix -> base + prefix).distinct().toList();
-        // Without a trailing slash a CSP source path matches that exact path only, so a
-        // sub-path deployment such as /site would block /site/themes and /site/plugins.
-        var resourceSources = base == null ? "'unsafe-inline'" : base + "/ 'unsafe-inline'";
-        var connectSources = sources.isEmpty() ? "'none'" : String.join(" ", sources);
-        // 'unsafe-eval' restores theme runtimes that compile expressions at runtime (Alpine,
-        // for example). It adds no data access: page scripts are already arbitrary inline JS
-        // and connect-src still limits what they can reach.
-        return "sandbox allow-scripts; default-src 'none'; script-src " + resourceSources
-            + " 'unsafe-eval'; style-src " + resourceSources
-            + "; img-src * data: blob:; font-src * data:; media-src *"
-            + "; connect-src " + connectSources
-            + "; base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'"
-            + "; form-action 'none'";
-    }
-
-    private List<String> allowedPrefixes() {
-        try {
-            return publicApiCatalog.publicPathPrefixes();
-        } catch (IllegalStateException error) {
-            // A catalog refresh must not turn every preview into a 500 error page; fall back
-            // to the most restrictive policy until the next request can build the allowlist.
-            org.slf4j.LoggerFactory.getLogger(PageRenderer.class)
-                .warn("Unable to build the preview API allowlist; blocking API access", error);
-            return List.of();
-        }
-    }
-
-    /**
-     * Canonical public origin used for public links. Prefers the configured external URL so
-     * visitors behind a reverse proxy see the address they actually use.
-     */
     String origin(ServerRequest request) {
-        var external = externalOrigin(request);
-        return external != null ? external : requestOrigin(request);
-    }
-
-    /** Origin serving the preview document; the configured external URL is the fallback. */
-    private String servingOrigin(ServerRequest request) {
-        var requestBase = requestOrigin(request);
-        return requestBase != null ? requestBase : externalOrigin(request);
-    }
-
-    private String externalOrigin(ServerRequest request) {
-        java.net.URL url = null;
-        try {
-            url = externalUrlSupplier.getURL(request.exchange().getRequest());
-        } catch (RuntimeException error) {
-            org.slf4j.LoggerFactory.getLogger(PageRenderer.class)
-                .debug("Unable to resolve the external URL; falling back to the request", error);
-        }
-        if (url == null) return null;
-        var base = checkedOrigin(url.getProtocol(), url.getAuthority());
-        if (base == null) return null;
-        var path = url.getPath();
-        if (path != null && !path.isBlank() && !"/".equals(path)) {
-            // A configured path must not be able to inject another CSP directive.
-            if (!path.matches("[A-Za-z0-9._~!$&'()*+=:@%/\\-]*")) return null;
-            return base + (path.endsWith("/") ? path.substring(0, path.length() - 1) : path);
-        }
-        return base;
-    }
-
-    private static String requestOrigin(ServerRequest request) {
-        var forwarded = request.headers().firstHeader("X-Forwarded-Proto");
-        var scheme = forwarded != null ? forwarded.split(",", 2)[0].trim()
-            : request.uri().getScheme();
-        if (scheme == null || scheme.isBlank()) scheme = "http";
-        var authority = request.uri().getRawAuthority();
-        if (authority == null) authority = request.headers().firstHeader("Host");
-        return checkedOrigin(scheme, authority);
-    }
-
-    /** Rejects values that would break out of the CSP source list. */
-    private static String checkedOrigin(String scheme, String authority) {
-        if (scheme == null || !WEB_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT))) return null;
-        if (authority == null || !AUTHORITY.matcher(authority).matches()) return null;
-        return scheme.toLowerCase(Locale.ROOT) + "://" + authority;
+        return origins.publicOrigin(request);
     }
 
     private static String renderHtml(String html, String js, boolean disableScripts) {

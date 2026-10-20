@@ -19,6 +19,14 @@ and the context needed to continue generation.
 The page's currently saved, editable content version, independent of the published version
 shown to visitors.
 
+**Page Preview**:
+An isolated rendering of a page's Draft, historical revision, or supplied unsaved content,
+without changing the version shown to visitors.
+
+**Token Preview**:
+A Page Preview of a specific saved Draft, accessible through a temporary credential.
+It becomes unavailable when the credential expires or the page's version or Draft changes.
+
 **Conversation Turn**:
 A user request together with the assistant's responses, tool activity, clarification questions,
 and follow-up instructions during the resulting page-generation run.

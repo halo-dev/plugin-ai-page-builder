@@ -65,8 +65,9 @@ class PageEndpointTest {
     };
     private final PageService service = mock(PageService.class);
     private final PageRenderer renderer = mock(PageRenderer.class);
+    private final PagePreview preview = mock(PagePreview.class);
     private final PageImportReviewService reviewService = mock(PageImportReviewService.class);
-    private final PageEndpoint endpoint = new PageEndpoint(service, renderer, reviewService);
+    private final PageEndpoint endpoint = new PageEndpoint(service, renderer, preview, reviewService);
 
     private static PageDetail detail(PageDocument document) {
         return new PageDetail(new PageApi.PageSummary("about", "company/about-us", "About", "",
@@ -103,7 +104,7 @@ class PageEndpointTest {
         }
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     private static ServerRequest binaryRequest(String path, byte[] bytes) {
@@ -132,7 +133,7 @@ class PageEndpointTest {
         assertThat(response.statusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.headers().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
         verify(reviewService).review(eq(bytes), eq("admin"), isNull());
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     @Test
@@ -148,7 +149,7 @@ class PageEndpointTest {
 
         assertThat(response.statusCode()).isEqualTo(HttpStatus.OK);
         verify(reviewService).review(eq(bytes), eq("admin"), eq("model-a"));
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     @Test
@@ -169,7 +170,7 @@ class PageEndpointTest {
         var result = asAdmin(endpoint, importRequest(bytes, null));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-        verifyNoInteractions(service, reviewService, renderer);
+        verifyNoInteractions(service, reviewService, renderer, preview);
     }
 
     @Test
@@ -209,7 +210,7 @@ class PageEndpointTest {
         }
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     @Test
@@ -217,7 +218,7 @@ class PageEndpointTest {
         var result = asAdmin(endpoint, importRequest(new byte[PageArchive.MAX_BYTES + 1]));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE));
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     @Test
@@ -228,15 +229,15 @@ class PageEndpointTest {
         assertThatThrownBy(() -> asAdmin(endpoint, request).block())
             .isInstanceOfSatisfying(ResponseStatusException.class,
                 error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     @Test
     void candidatePreviewUsesSameThemeAndCssAsGetWithoutSaving() {
         var resolver = mock(TemplateNameResolver.class);
-        var renderingEndpoint = new PageEndpoint(service,
-            new PageRenderer(resolver, new ContentPolicy(), mock(PublicApiCatalog.class),
-                EXTERNAL_URLS), reviewService);
+        var pageRenderer = new PageRenderer(resolver, new ContentPolicy(), EXTERNAL_URLS);
+        var renderingEndpoint = new PageEndpoint(service, pageRenderer,
+            new PagePreview(pageRenderer, mock(PublicApiCatalog.class), EXTERNAL_URLS), reviewService);
         var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
         var candidate = new PageDocument(2, "code", null, null, "<p>Unsaved</p>", """
             :root {color: red}
@@ -287,16 +288,16 @@ class PageEndpointTest {
     }
 
     @Test
-    void previewsPassStableNameAndSeparateSlugToRenderer() {
+    void previewsPassStableNameAndSeparateSlugToPreview() {
         var document = new PageDocument(1, "code", null, null, "", "", "About", "");
         when(service.get("about")).thenReturn(Mono.just(detail(document)));
-        when(renderer.preview(any(), eq("about"), eq("company/about-us"), eq(true), eq(document)))
+        when(preview.render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document)))
             .thenReturn(ServerResponse.ok().build());
         assertThat(asAdmin(endpoint, request("/pages/about/preview")).block().statusCode())
             .isEqualTo(HttpStatus.OK);
         assertThat(asAdmin(endpoint, previewRequest(Json.toJson(document))).block().statusCode())
             .isEqualTo(HttpStatus.OK);
-        verify(renderer, times(2)).preview(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
+        verify(preview, times(2)).render(any(), eq("about"), eq("company/about-us"), eq(true), eq(document));
     }
 
     @Test
@@ -309,12 +310,12 @@ class PageEndpointTest {
                 new PageApi.RevisionSummary("rev-1", java.time.Instant.now(), "admin", "ai",
                     "Old title", null),
                 revisionDocument)));
-        when(renderer.preview(any(), eq("about"), eq("company/about-us"), eq(true),
+        when(preview.render(any(), eq("about"), eq("company/about-us"), eq(true),
             eq(revisionDocument))).thenReturn(ServerResponse.ok().build());
 
         assertThat(asAdmin(endpoint, request("/pages/about/revisions/rev-1/preview")).block()
             .statusCode()).isEqualTo(HttpStatus.OK);
-        verify(renderer).preview(any(), eq("about"), eq("company/about-us"), eq(true),
+        verify(preview).render(any(), eq("about"), eq("company/about-us"), eq(true),
             eq(revisionDocument));
     }
 
@@ -327,16 +328,16 @@ class PageEndpointTest {
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
         verify(service).get("about");
         verifyNoMoreInteractions(service);
-        verifyNoInteractions(renderer);
+        verifyNoInteractions(renderer, preview);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"html", "css", "schema"})
     void invalidCandidateIsRejectedBeforeThemeRendering(String invalidField) {
         var resolver = mock(TemplateNameResolver.class);
-        var renderingEndpoint = new PageEndpoint(service,
-            new PageRenderer(resolver, new ContentPolicy(), mock(PublicApiCatalog.class),
-                EXTERNAL_URLS), reviewService);
+        var pageRenderer = new PageRenderer(resolver, new ContentPolicy(), EXTERNAL_URLS);
+        var renderingEndpoint = new PageEndpoint(service, pageRenderer,
+            new PagePreview(pageRenderer, mock(PublicApiCatalog.class), EXTERNAL_URLS), reviewService);
         var stored = new PageDocument(1, "code", null, null, "<p>Stored</p>", "", "Stored", null);
         var candidate = new PageDocument("schema".equals(invalidField) ? 99 : 1, "code", null, null,
             "html".equals(invalidField) ? "<script>alert(1)</script>" : "<p>Unsaved</p>",
@@ -357,7 +358,7 @@ class PageEndpointTest {
         var result = asAdmin(endpoint, previewRequest(json));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     @Test
@@ -366,7 +367,7 @@ class PageEndpointTest {
         var result = endpoint.endpoint().route(request).flatMap(handler -> handler.handle(request));
         assertThatThrownBy(result::block).isInstanceOfSatisfying(ResponseStatusException.class,
             error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
-        verifyNoInteractions(service, renderer);
+        verifyNoInteractions(service, renderer, preview);
     }
 
     @Test

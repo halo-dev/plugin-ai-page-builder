@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Base64;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,12 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.test.web.reactive.server.WebTestClient;
-import org.springframework.web.reactive.function.server.ServerResponse;
+import org.springframework.web.reactive.function.server.HandlerStrategies;
+import org.springframework.web.reactive.function.server.RenderingResponse;
+import org.springframework.web.reactive.result.view.View;
+import org.springframework.web.server.ServerWebExchange;
+import run.halo.app.infra.ExternalUrlSupplier;
+import run.halo.aipagebuilder.ai.PublicApiCatalog;
 import reactor.core.publisher.Mono;
 import run.halo.aipagebuilder.model.PageDocument;
 
@@ -33,8 +39,20 @@ class PagePreviewTest {
     private final PagePreviewStore store = new PagePreviewStore(clock);
     private final PageService pages = mock(PageService.class);
     private final PageRenderer renderer = mock(PageRenderer.class);
+    private final PagePreview previews = new PagePreview(renderer, mock(PublicApiCatalog.class),
+        mock(ExternalUrlSupplier.class));
     private final WebTestClient client = WebTestClient.bindToRouterFunction(
-        new PagePreviewRoutes().aiPageBuilderTokenPreview(pages, renderer, store))
+        new PagePreviewRoutes().aiPageBuilderTokenPreview(pages, previews, store))
+        .handlerStrategies(HandlerStrategies.builder().viewResolver((name, locale) ->
+            Mono.just(new View() {
+                @Override
+                public Mono<Void> render(Map<String, ?> model, MediaType type,
+                    ServerWebExchange exchange) {
+                    var bytes = model.get("html").toString().getBytes(StandardCharsets.UTF_8);
+                    return exchange.getResponse().writeWith(Mono.just(
+                        exchange.getResponse().bufferFactory().wrap(bytes)));
+                }
+            })).build())
         .webFilter(new PagePreviewIdentityFilter()).build();
 
     @Test
@@ -70,14 +88,15 @@ class PagePreviewTest {
         var document = new PageDocument(1, "code", null, null, "<p>Saved</p>", "", "Title", "");
         var ticket = store.issue(page("a", 1L), "alice");
         when(pages.get("a")).thenReturn(Mono.just(new PageApi.PageDetail(page("a", 1L), document)));
-        when(renderer.preview(any(), eq("a"), eq("about"), eq(true), eq(document)))
-            .thenReturn(ServerResponse.ok().contentType(MediaType.TEXT_HTML)
-                .header("Content-Security-Policy", "sandbox allow-scripts").bodyValue("saved"));
+        when(renderer.render(any(), eq("a"), eq("about"), eq(true), eq(document)))
+            .thenReturn(RenderingResponse.create("test").header("Content-Type", MediaType.TEXT_HTML_VALUE)
+                .modelAttribute("html", "saved").build());
         client.get().uri(PagePreviewStore.PATH + ticket.token()).exchange().expectStatus().isOk()
             .expectHeader().valueEquals("Cache-Control", "no-store")
             .expectHeader().valueEquals("Referrer-Policy", "no-referrer")
             .expectHeader().valueEquals("X-Robots-Tag", "noindex, nofollow, noarchive")
-            .expectHeader().valueEquals("Content-Security-Policy", "sandbox allow-scripts")
+            .expectHeader().value("Content-Security-Policy", value -> assertThat(value)
+                .contains("sandbox allow-scripts", "frame-src data:", "connect-src 'none'"))
             .expectBody(String.class).value(body -> assertThat(body)
                 .contains("<iframe", "sandbox=\"allow-scripts\"", "data:text/html;base64,"));
     }
@@ -183,17 +202,15 @@ class PagePreviewTest {
         var ticket = store.issue(page("a", 1L), "alice");
         var document = new PageDocument(1, "code", null, null, "<p>Saved</p>", "", "Title", "");
         when(pages.get("a")).thenReturn(Mono.just(new PageApi.PageDetail(page("a", 1L), document)));
-        when(renderer.preview(any(), any(), any(), anyBoolean(), any())).thenAnswer(call -> {
+        when(renderer.render(any(), any(), any(), anyBoolean(), any())).thenAnswer(call -> {
             var request = call.<org.springframework.web.reactive.function.server.ServerRequest>
                 getArgument(0);
             assertThat(request.uri().toString()).isEqualTo("https://example.test/");
             assertThat(request.exchange().getRequest().getURI()).isEqualTo(request.uri());
             assertThat(request.pathVariables()).isEmpty();
-            return ServerResponse.ok().contentType(MediaType.TEXT_HTML)
-                .header("Content-Security-Policy",
-                    "sandbox allow-scripts; base-uri 'none'; frame-src 'none'")
-                .bodyValue("<html><head><base href='https://wrong.test/'></head><body>"
-                    + "<script>window.probe = location.href</script><p>Saved</p></body></html>");
+            return RenderingResponse.create("test").header("Content-Type", MediaType.TEXT_HTML_VALUE)
+                .modelAttribute("html","<html><head><base href='https://wrong.test/'></head><body>"
+                    + "<script>window.probe = location.href</script><p>Saved</p></body></html>").build();
         });
         var result = client.get().uri(URI.create("https://example.test/preview/"
                 + "%61i-page-builder/" + ticket.token() + "?copy=" + ticket.token()))
