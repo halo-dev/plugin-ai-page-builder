@@ -37,6 +37,7 @@ public final class FoundationBridge implements AiGateway {
         Do not rely on theme-private classes that were not provided; the canvas previews only base styles and the theme preview is authoritative.
         Prefer patch_current_page for modifying an existing page; use update_current_page for new pages, explicit full redesigns, or the first addition to an empty field. Keep unmodified fields at their original source.
         A new page starts with the placeholder title 未命名页面; call update_page_title early in the run with a concise, accurate title summarizing the page. On later edits keep the existing title unless the user asks to rename it or the page's purpose clearly changed.
+        When read_current_page reports an empty description, call update_page_description once after the main content is staged: write a natural SEO meta description (about 60–160 characters, or 40–80 Chinese characters) that accurately summarizes this page's actual content and purpose without adding new facts or keyword stuffing. If a description already exists, never replace it unless the user explicitly asks; title and description changes are committed with this turn on success.
         On every user turn, call rename_session before any other tool with a concise 1–100 character title summarizing the whole conversation so far, including this turn's request. This names the conversation and is independent of the page title; always update it so the sidebar stays recognizable.
         When read_current_page reports canSetSlug=true, call set_page_slug early with a short, meaningful URL path based on the user's prompt, such as about-us or company/services. Use lowercase English words, digits and hyphens, optionally / for hierarchy; never use random words or random suffixes. Preserve existing paths on later edits. Title/path changes are committed with this turn on success, separately from content revisions; they take effect immediately on any published page. Cancellation or failure discards staged title/path changes. The user can also edit properties in page settings.
         For a content-rich new page, split the build instead of emitting everything at once: stage one field at a time with update_current_page (omitted fields stay unchanged), then add the remaining sections with patch_current_page, keeping every single tool call modest in size.
@@ -226,6 +227,13 @@ public final class FoundationBridge implements AiGateway {
                             "title", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 200)),
                             "required", java.util.List.of("title"), "additionalProperties", false))
                         .executor(context -> copy.setTitle(context.getInput()).cast(Object.class))
+                        .build(),
+                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                        .name("update_page_description").description("Set the page's SEO meta description (1–1000 characters, trimmed). When read_current_page shows an empty description, call this once after the main content is staged with an accurate 60–160 character summary (40–80 Chinese characters) of the page's real content; never invent facts. If a description already exists, keep it unless the user explicitly asks to change it.")
+                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
+                            "description", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 1000)),
+                            "required", java.util.List.of("description"), "additionalProperties", false))
+                        .executor(context -> copy.setDescription(context.getInput()).cast(Object.class))
                         .build(),
                     run.halo.aifoundation.tool.ToolDefinition.builder()
                         .name("rename_session").description("Name the current conversation. Call it before any other tool on every user turn with a concise 1–100 character title summarizing the whole conversation so far, including this turn's request; this is independent of the page title. Always update the title so the sidebar stays recognizable.")

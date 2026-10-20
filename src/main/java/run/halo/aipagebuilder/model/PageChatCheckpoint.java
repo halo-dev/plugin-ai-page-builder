@@ -28,7 +28,9 @@ public class PageChatCheckpoint extends AbstractExtension {
         private boolean invalidUpdate;
         private String slug;
         private String title;
+        private String description;
         private boolean invalidTitleUpdate;
+        private boolean invalidDescriptionUpdate;
         private boolean invalidSlugUpdate;
         private boolean available;
         private int steps;

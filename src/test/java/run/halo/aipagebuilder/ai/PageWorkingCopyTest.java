@@ -51,7 +51,7 @@ class PageWorkingCopyTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"update", "patch", "title", "slug"})
+    @ValueSource(strings = {"update", "patch", "title", "description", "slug"})
     void pageToolAcknowledgementWaitsForDurableCheckpointAndCloseWaitsForWrite(String operation) {
         var copy = copy("<p>old</p>", "");
         var write = reactor.core.publisher.Sinks.<Void>empty();
@@ -77,7 +77,7 @@ class PageWorkingCopyTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"update", "patch", "title", "slug"})
+    @ValueSource(strings = {"update", "patch", "title", "description", "slug"})
     void checkpointFailureRejectsQueuedAndLaterEditsWithoutRollingBackMemory(String operation) {
         var copy = copy("<p>old</p>", "");
         var write = reactor.core.publisher.Sinks.<Void>empty();
@@ -223,6 +223,43 @@ class PageWorkingCopyTest {
             Mono.just(ThemeStyleContext.unavailable()), null, true);
         assertThat(legacy.setSlug(Map.of("slug", "about")).block()).containsEntry("valid", false);
         assertThat(legacy.slug()).isNull();
+    }
+
+    @Test
+    void setDescriptionStagesTrimmedSeoDescriptionAndReadExposesIt() {
+        var copy = copy("<p>old</p>", "");
+        assertThat(copy.read()).containsEntry("description", "");
+        assertThat(copy.setDescription(Map.of("description", "  了解我们的公司历史与团队故事。  ")).block())
+            .containsEntry("valid", true).containsEntry("staged", true);
+        assertThat(copy.description()).isEqualTo("了解我们的公司历史与团队故事。");
+        assertThat(copy.read()).containsEntry("description", "了解我们的公司历史与团队故事。");
+        assertThat(copy.document().html()).isEqualTo("<p>old</p>");
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")).block())
+            .containsEntry("valid", true);
+        assertThat(copy.description()).isEqualTo("了解我们的公司历史与团队故事。");
+        assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
+            .filteredOn(name -> !"read_current_page".equals(name))
+            .containsExactly("update_page_description", "update_current_page");
+    }
+
+    @Test
+    void invalidDescriptionIsRejectedWithoutMutationAndClearedByLaterSuccess() {
+        var copy = copy("<p>old</p>", "");
+        List<Map<String, Object>> invalidInputs = List.of(
+            Map.<String, Object>of(),
+            Map.<String, Object>of("description", "   "),
+            Map.<String, Object>of("description", "x".repeat(1001)),
+            Map.<String, Object>of("description", 1));
+        for (var input : invalidInputs) {
+            assertThat(copy.setDescription(input).block()).containsEntry("valid", false)
+                .containsEntry("staged", false);
+            assertThat(copy.description()).isEmpty();
+            assertThat(copy.hasInvalidUpdate()).isTrue();
+        }
+        assertThat(copy.setDescription(Map.of("description", "关于我们的团队与业务。")).block())
+            .containsEntry("valid", true).containsEntry("staged", true);
+        assertThat(copy.hasInvalidUpdate()).isFalse();
     }
 
     @Test
@@ -611,6 +648,7 @@ class PageWorkingCopyTest {
             case "patch" -> copy.patch(Map.of("baseHash", hash(copy), "patches",
                 List.of(patch("html", "old", "new"))));
             case "title" -> copy.setTitle(Map.of("title", "New title"));
+            case "description" -> copy.setDescription(Map.of("description", "New description"));
             case "slug" -> copy.setSlug(Map.of("slug", "new-path"));
             default -> throw new IllegalArgumentException(operation);
         };

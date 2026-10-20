@@ -199,6 +199,7 @@ function displayParts(
       get_theme_context: '读取主题样式',
       update_current_page: '更新页面内容',
       update_page_title: '设置页面标题',
+      update_page_description: '设置页面描述',
       set_page_slug: '设置访问路径',
       rename_session: '命名会话',
       patch_current_page: '局部修改页面',
