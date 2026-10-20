@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
-import IconClose from '~icons/mingcute/close-line'
-import IconZoomIn from '~icons/mingcute/zoom-in-line'
-import IconZoomOut from '~icons/mingcute/zoom-out-line'
-import ImageReplaceDropdown from './ImageReplaceDropdown.vue'
+import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
+import CanvasZoomControls from './editor/CanvasZoomControls.vue'
+import ElementInspector from './editor/ElementInspector.vue'
 import type { PageDocument } from '../api/generated'
 import { pagePreviewUrl, renderPagePreview } from '../api/clients'
 import { errorMessage } from '../utils/error'
@@ -17,14 +15,8 @@ import {
   type CanvasEdit,
   type ElementPath,
 } from '../editor/document'
-import {
-  PREVIEW_DEVICES,
-  type PreviewDevice,
-  MIN_PREVIEW_SCALE,
-  MAX_PREVIEW_SCALE,
-  adjustPreviewScale,
-  calculateFitScale,
-} from '../editor/preview-canvas'
+import type { PreviewDevice } from '../editor/preview-canvas'
+import { usePreviewScale } from '../composables/usePreviewScale'
 import type { PreviewRootState } from '../editor/preview'
 import type { AnnotationTarget } from '../editor/annotations'
 
@@ -46,51 +38,6 @@ const emit = defineEmits<{
   'update:document': [document: PageDocument]
   annotate: [target: AnnotationTarget, comment: string]
 }>()
-const annotationTarget = shallowRef<AnnotationTarget>()
-const annotationComment = shallowRef('')
-const annotationInput = useTemplateRef<HTMLTextAreaElement>('annotationInput')
-const annotationCurrent = computed(
-  () =>
-    annotationTarget.value?.content.html === props.document.html &&
-    annotationTarget.value?.content.css === props.document.css &&
-    (annotationTarget.value?.content.js ?? '') === (props.document.js ?? ''),
-)
-function openAnnotation() {
-  if (
-    !editable.value ||
-    !selected.value ||
-    !selectedPath.value ||
-    (props.annotationCount || 0) >= 5 ||
-    selectedPath.value.length > 64
-  )
-    return
-  annotationTarget.value = {
-    path: [...selectedPath.value],
-    tag: selected.value.localName.slice(0, 32),
-    summary: (
-      selected.value.textContent ||
-      selected.value.getAttribute('alt') ||
-      selected.value.localName
-    )
-      .trim()
-      .slice(0, 300),
-    html: selected.value.outerHTML.slice(0, 4000),
-    content: { html: props.document.html, css: props.document.css, js: props.document.js ?? '' },
-  }
-  annotationComment.value = ''
-  void nextTick(() => annotationInput.value?.focus())
-}
-function submitAnnotation() {
-  if (
-    !annotationTarget.value ||
-    !annotationCurrent.value ||
-    !editable.value ||
-    !annotationComment.value.trim()
-  )
-    return
-  emit('annotate', annotationTarget.value, annotationComment.value.trim())
-  select()
-}
 // Use the server's complete theme render for each validated snapshot. Scripts
 // stay disabled: editable DOM must retain the source document's node paths.
 const rootId = computed(() => `ai-page-builder-${props.name}`)
@@ -109,39 +56,19 @@ const pending = shallowRef(false)
 const unsupported = shallowRef(false)
 const selectedPath = shallowRef<ElementPath>()
 const selected = shallowRef<HTMLElement>()
+// Remount the inspector only when the selection changes; document updates and
+// layout refreshes must keep an in-progress annotation draft alive.
+const selectionEpoch = shallowRef(0)
 const outline = shallowRef<Record<string, string>>()
 const box = shallowRef<{ left: number; top: number; width: number; height: number }>()
 let originalRootState: { classes: Set<string>; attributes: Map<string, string | null> } | undefined
 let removeListeners = () => {}
 let contentObserver: ResizeObserver | undefined
-let stageObserver: ResizeObserver | undefined
 
-const stageSize = shallowRef({ width: 0, height: 0 })
-const manualScale = shallowRef<number>()
-const viewport = computed(() => PREVIEW_DEVICES[props.device])
-watch(
+const { stageSize, viewport, scale, wrapStyle, frameStyle, zoom, fit } = usePreviewScale(
   () => props.device,
-  () => {
-    manualScale.value = undefined
-  },
+  stage,
 )
-const scale = computed(
-  () => manualScale.value ?? calculateFitScale(stageSize.value, viewport.value),
-)
-const scalePercent = computed(() => Math.round(scale.value * 100))
-function zoom(direction: -1 | 1) {
-  manualScale.value = adjustPreviewScale(scale.value, direction)
-}
-const wrapStyle = computed(() => ({
-  width: `${viewport.value.width * scale.value}px`,
-  height: `${stageSize.value.height || viewport.value.height * scale.value}px`,
-}))
-const frameStyle = computed(() => ({
-  width: `${viewport.value.width}px`,
-  height: `${stageSize.value.height ? stageSize.value.height / scale.value : viewport.value.height}px`,
-  transform: `scale(${scale.value})`,
-  transformOrigin: 'top left',
-}))
 
 function containerEl(): HTMLElement | undefined {
   return (
@@ -160,8 +87,8 @@ const editable = computed(
     !previewError.value &&
     sameDocument(rendered.value, props.document),
 )
-const textEditable = computed(() => selected.value && canEditText(selected.value))
-const duplicateAllowed = computed(() => selected.value && canDuplicate(selected.value))
+const textEditable = computed(() => !!selected.value && canEditText(selected.value))
+const duplicateAllowed = computed(() => !!selected.value && canDuplicate(selected.value))
 
 watch(
   () =>
@@ -214,7 +141,7 @@ watch(
       selected.value = undefined
       outline.value = undefined
       box.value = undefined
-      annotationTarget.value = undefined
+      selectionEpoch.value++
       const page = new DOMParser().parseFromString(source, 'text/html')
       // Preserve the original markup: serializing a parsed <pre> can strip a
       // second leading newline when srcdoc parses it again.
@@ -329,8 +256,11 @@ function select(element?: HTMLElement) {
   selectedPath.value = element && root ? elementPath(root, element) : undefined
   selected.value = selectedPath.value ? element : undefined
   if (selected.value) contentObserver?.observe(selected.value)
-  annotationTarget.value = undefined
+  selectionEpoch.value++
   updateOutline()
+}
+function annotate(target: AnnotationTarget, comment: string) {
+  emit('annotate', target, comment)
 }
 function selectParent() {
   select(selected.value?.parentElement || undefined)
@@ -395,31 +325,10 @@ function apply(edit: CanvasEdit, path = selectedPath.value) {
   pending.value = true
   emit('update:document', next)
 }
-function valueOf(event: Event): string {
-  return (event.target as HTMLInputElement).value
-}
-function replaceImage(url: string) {
-  if (!editable.value) return
-  apply({ type: 'attribute', name: 'src', value: url })
-}
-watch(
-  stage,
-  (element) => {
-    stageObserver?.disconnect()
-    if (!element || typeof ResizeObserver === 'undefined') return
-    stageObserver = new ResizeObserver(() => {
-      stageSize.value = { width: element.clientWidth, height: element.clientHeight }
-    })
-    stageObserver.observe(element)
-    stageSize.value = { width: element.clientWidth, height: element.clientHeight }
-  },
-  { immediate: true },
-)
 onBeforeUnmount(() => {
   requestId++
   removeListeners()
   contentObserver?.disconnect()
-  stageObserver?.disconnect()
 })
 </script>
 
@@ -447,200 +356,26 @@ onBeforeUnmount(() => {
             />
           </div>
         </div>
-        <div
-          v-if="box && selected"
-          :key="selectedPath?.join('.')"
-          class="absolute z-[3] w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
-          :style="popperStyle"
-          role="dialog"
-          aria-label="元素操作"
-        >
-          <div class="mb-2 flex items-center gap-1 text-xs">
-            <strong class="font-mono text-gray-700">{{ selected.localName }}</strong>
-            <button
-              type="button"
-              class="apb-btn-ghost h-6 px-1.5 text-xs"
-              :disabled="!editable || selectedIsRootChild"
-              @click="selectParent"
-            >
-              父区块
-            </button>
-            <button
-              type="button"
-              class="apb-icon-btn ml-auto h-6 w-6"
-              aria-label="取消选择"
-              @click="select()"
-            >
-              <IconClose class="text-xs" />
-            </button>
-          </div>
-          <template v-if="annotationTarget">
-            <p class="mb-1.5 line-clamp-2 text-xs leading-5 text-gray-500">
-              {{ annotationTarget.tag }} · {{ annotationTarget.summary }}
-            </p>
-            <textarea
-              ref="annotationInput"
-              v-model="annotationComment"
-              class="apb-input resize-y"
-              rows="3"
-              maxlength="2000"
-              placeholder="描述要让 AI 做的修改"
-              aria-label="修改说明"
-            />
-            <p v-if="!annotationCurrent" class="mt-1 text-xs leading-5 text-amber-600">
-              内容已变化，请重新选择元素。
-            </p>
-            <div class="mt-2 flex gap-1.5">
-              <button
-                type="button"
-                class="apb-btn-primary h-7 flex-1 text-xs"
-                :disabled="!editable || !annotationCurrent || !annotationComment.trim()"
-                @click="submitAnnotation"
-              >
-                添加到对话
-              </button>
-              <button
-                type="button"
-                class="apb-btn-outline h-7 px-2 text-xs"
-                @click="annotationTarget = undefined"
-              >
-                取消
-              </button>
-            </div>
-          </template>
-          <template v-else>
-            <button
-              type="button"
-              class="apb-btn-primary mb-2 h-7 w-full text-xs"
-              :disabled="!editable || (annotationCount || 0) >= 5"
-              @click="openAnnotation"
-            >
-              让 AI 修改
-            </button>
-            <fieldset class="m-0 min-w-0 border-0 p-0" :disabled="!editable">
-              <label v-if="textEditable" class="mb-2 flex flex-col gap-1 text-xs text-gray-600">
-                文字
-                <textarea
-                  class="apb-input resize-y"
-                  :value="selected.textContent || ''"
-                  rows="2"
-                  @change="apply({ type: 'text', value: valueOf($event) })"
-                />
-              </label>
-              <p v-else-if="selected.children.length" class="mb-2 text-xs leading-5 text-gray-400">
-                包含嵌套内容，请选中文字子元素，或在源码中编辑。
-              </p>
-              <template v-if="selected.localName === 'img'">
-                <label class="mb-2 flex flex-col gap-1 text-xs text-gray-600"
-                  >图片说明<input
-                    class="apb-input"
-                    :value="selected.getAttribute('alt') || ''"
-                    @change="apply({ type: 'attribute', name: 'alt', value: valueOf($event) })"
-                /></label>
-                <ImageReplaceDropdown class="mb-2 block w-full" @select="replaceImage">
-                  <button
-                    type="button"
-                    class="apb-btn-outline h-7 w-full text-xs"
-                    :disabled="!editable"
-                  >
-                    替换图片
-                  </button>
-                </ImageReplaceDropdown>
-              </template>
-              <template v-if="selected.localName === 'a'">
-                <label class="mb-2 flex flex-col gap-1 text-xs text-gray-600"
-                  >链接地址<input
-                    class="apb-input"
-                    :value="selected.getAttribute('href') || ''"
-                    @change="apply({ type: 'attribute', name: 'href', value: valueOf($event) })"
-                /></label>
-                <label class="mb-2 flex flex-col gap-1 text-xs text-gray-600"
-                  >打开方式<select
-                    class="apb-input"
-                    :value="selected.getAttribute('target') || ''"
-                    @change="apply({ type: 'attribute', name: 'target', value: valueOf($event) })"
-                  >
-                    <option value="">当前窗口</option>
-                    <option value="_self">当前窗口（显式）</option>
-                    <option value="_blank">新窗口</option>
-                  </select></label
-                >
-              </template>
-            </fieldset>
-            <div class="flex gap-1">
-              <button
-                type="button"
-                class="apb-btn-outline h-7 flex-1 px-1 text-xs"
-                :disabled="!editable || !selected.previousElementSibling"
-                @click="apply({ type: 'up' })"
-              >
-                上移
-              </button>
-              <button
-                type="button"
-                class="apb-btn-outline h-7 flex-1 px-1 text-xs"
-                :disabled="!editable || !selected.nextElementSibling"
-                @click="apply({ type: 'down' })"
-              >
-                下移
-              </button>
-              <button
-                type="button"
-                class="apb-btn-outline h-7 flex-1 px-1 text-xs"
-                :disabled="!editable || !duplicateAllowed"
-                @click="apply({ type: 'duplicate' })"
-              >
-                复制
-              </button>
-              <button
-                type="button"
-                class="apb-btn-danger h-7 flex-1 px-1 text-xs"
-                :disabled="!editable"
-                @click="apply({ type: 'delete' })"
-              >
-                删除
-              </button>
-            </div>
-            <p v-if="!duplicateAllowed" class="mt-1.5 text-xs leading-5 text-gray-400">
-              此区块包含 ID，复制可能破坏样式或引用。
-            </p>
-          </template>
-        </div>
+        <ElementInspector
+          v-if="box && selected && selectedPath"
+          :key="selectionEpoch"
+          :selected="selected"
+          :selected-path="selectedPath"
+          :editable="editable"
+          :text-editable="textEditable"
+          :duplicate-allowed="duplicateAllowed"
+          :is-root-child="selectedIsRootChild"
+          :annotation-count="annotationCount"
+          :document="document"
+          :popper-style="popperStyle"
+          @edit="apply"
+          @annotate="annotate"
+          @select-parent="selectParent"
+          @close="select()"
+        />
       </div>
       <div v-if="!editable" class="absolute inset-3 z-[2]" aria-hidden="true" />
-      <div
-        class="absolute bottom-6 right-6 z-[5] flex items-center rounded-lg border border-gray-200 bg-white text-xs shadow-sm"
-        role="group"
-        aria-label="画布缩放"
-      >
-        <button
-          type="button"
-          class="apb-icon-btn h-7 w-7"
-          aria-label="缩小"
-          :disabled="scale <= MIN_PREVIEW_SCALE"
-          @click="zoom(-1)"
-        >
-          <IconZoomOut class="text-sm" />
-        </button>
-        <button
-          type="button"
-          class="h-7 min-w-12 px-1 text-center text-gray-600 hover:bg-gray-50"
-          title="适应画布"
-          aria-label="适应画布"
-          @click="manualScale = undefined"
-        >
-          {{ scalePercent }}%
-        </button>
-        <button
-          type="button"
-          class="apb-icon-btn h-7 w-7"
-          aria-label="放大"
-          :disabled="scale >= MAX_PREVIEW_SCALE"
-          @click="zoom(1)"
-        >
-          <IconZoomIn class="text-sm" />
-        </button>
-      </div>
+      <CanvasZoomControls :scale="scale" @zoom="zoom" @fit="fit" />
       <div
         v-if="unsupported || previewError"
         class="absolute inset-3 z-[4] flex flex-col items-center justify-center gap-3 bg-white text-sm text-gray-500"

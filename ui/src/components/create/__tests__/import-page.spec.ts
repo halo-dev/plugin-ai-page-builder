@@ -311,6 +311,17 @@ describe('page archive import', () => {
     expect(button(wrapper, '开始 AI 审查').exists()).toBe(true)
   })
 
+  it('resets the report when the review model changes', async () => {
+    const wrapper = modal()
+    await reviewed(wrapper, new File(['zip'], 'page.zip'))
+    expect(wrapper.text()).toContain('AI 审查通过')
+
+    await wrapper.get('[data-test=model-selector]').setValue('model-a')
+
+    expect(wrapper.text()).not.toContain('AI 审查通过')
+    expect(button(wrapper, '开始 AI 审查').exists()).toBe(true)
+  })
+
   it('renders evidence as text and never as HTML', async () => {
     mocks.reviewPageImport.mockResolvedValue({
       data: report('suspicious', [
@@ -386,6 +397,25 @@ describe('page archive import', () => {
     await button(wrapper, '取消').trigger('click')
     await vi.advanceTimersByTimeAsync(250)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+
+  it('aborts a pending review when the modal unmounts', async () => {
+    let options: { signal?: AbortSignal; timeout?: number } | undefined
+    mocks.reviewPageImport.mockImplementation((_request, requestOptions) => {
+      options = requestOptions
+      return new Promise((_resolve, reject) => {
+        // A real client rejects once the signal aborts; the disposed scope must swallow it.
+        requestOptions?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+      })
+    })
+    const wrapper = modal()
+    await reviewed(wrapper, new File(['zip'], 'page.zip'))
+
+    expect(options?.signal?.aborted).toBe(false)
+    wrapper.unmount()
+    await flushPromises()
+    expect(options?.signal?.aborted).toBe(true)
+    expect(mocks.toastError).not.toHaveBeenCalled()
   })
 
   it('blocks rapid import resubmission while pending', async () => {

@@ -1,35 +1,41 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { shallowRef } from 'vue'
+import { nextTick, shallowRef } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import AiPanel from '../../components/AiPanel.vue'
 import type { PageDetail } from '../../api/generated'
 
-vi.mock('../../composables/usePageChat', () => ({
-  usePageChat: () => ({
-    sessions: shallowRef([]),
-    sessionId: shallowRef('one'),
-    sessionBusy: shallowRef(false),
-    hasMore: shallowRef(false),
-    loadingEarlier: shallowRef(false),
-    messages: shallowRef([]),
-    preview: shallowRef(undefined),
-    loading: shallowRef(false),
-    available: shallowRef(true),
-    modelName: shallowRef('model'),
-    error: shallowRef(''),
-    notice: shallowRef(''),
-    running: shallowRef(false),
-    activeRun: shallowRef(undefined),
-    waitingForUser: shallowRef(false),
-    pendingQuestion: shallowRef(undefined),
-    questions: shallowRef([]),
-    answering: shallowRef(false),
-    answerError: shallowRef(''),
-    canSend: shallowRef(true),
-    lastPrompt: shallowRef(''),
-    recover: async () => {},
-  }),
-}))
+const chatLoading = vi.hoisted(() => ({ current: undefined as { value: boolean } | undefined }))
+
+vi.mock('../../composables/usePageChat', () => {
+  const loading = shallowRef(false)
+  chatLoading.current = loading
+  return {
+    usePageChat: () => ({
+      sessions: shallowRef([]),
+      sessionId: shallowRef('one'),
+      sessionBusy: shallowRef(false),
+      hasMore: shallowRef(false),
+      loadingEarlier: shallowRef(false),
+      messages: shallowRef([]),
+      preview: shallowRef(undefined),
+      loading,
+      available: shallowRef(true),
+      modelName: shallowRef('model'),
+      error: shallowRef(''),
+      notice: shallowRef(''),
+      running: shallowRef(false),
+      activeRun: shallowRef(undefined),
+      waitingForUser: shallowRef(false),
+      pendingQuestion: shallowRef(undefined),
+      questions: shallowRef([]),
+      answering: shallowRef(false),
+      answerError: shallowRef(''),
+      canSend: shallowRef(true),
+      lastPrompt: shallowRef(''),
+      recover: async () => {},
+    }),
+  }
+})
 vi.mock('@halo-dev/components', () => ({
   Dialog: {},
   VDropdown: { template: '<div><slot /></div>' },
@@ -96,6 +102,27 @@ describe('new session presets', () => {
 
     await preset(wrapper, '适配主题风格').trigger('click')
     expect(wrapper.get('textarea').element.value).toContain('当前主题的视觉规范')
+    wrapper.unmount()
+  })
+
+  it('keeps the selected preset group while the panel is loading', async () => {
+    const wrapper = await panel({
+      schemaVersion: 2,
+      mode: 'code',
+      title: '未命名页面',
+      html: '',
+      css: '',
+    })
+    await preset(wrapper, '个人、团队与内容').trigger('click')
+    expect(wrapper.text()).toContain('专题导读')
+
+    chatLoading.current!.value = true
+    await nextTick()
+    expect(wrapper.text()).not.toContain('专题导读')
+
+    chatLoading.current!.value = false
+    await nextTick()
+    expect(wrapper.text()).toContain('专题导读')
     wrapper.unmount()
   })
 })

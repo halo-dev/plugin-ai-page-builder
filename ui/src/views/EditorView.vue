@@ -3,54 +3,35 @@ import {
   computed,
   defineAsyncComponent,
   onBeforeUnmount,
-  onMounted,
   shallowRef,
   useTemplateRef,
   watch,
 } from 'vue'
-import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
-import { Dialog, Toast, VLoading } from '@halo-dev/components'
-import IconArrowLeft from '~icons/mingcute/arrow-left-line'
-import IconUndo from '~icons/mingcute/back-line'
-import IconRedo from '~icons/mingcute/forward-line'
-import IconSettings from '~icons/mingcute/settings-3-line'
-import IconHistory from '~icons/mingcute/history-line'
-import IconExternal from '~icons/mingcute/external-link-line'
-import IconSave from '~icons/mingcute/save-2-line'
-import IconRocket from '~icons/mingcute/rocket-line'
+import { useRoute, useRouter } from 'vue-router'
+import { Toast, VLoading } from '@halo-dev/components'
 import IconClose from '~icons/mingcute/close-line'
 import IconRefresh from '~icons/mingcute/refresh-2-line'
-import IconEdit from '~icons/mingcute/edit-2-line'
-import IconCode from '~icons/mingcute/code-line'
-import IconPlay from '~icons/mingcute/play-line'
-import IconDesktop from '~icons/mingcute/computer-line'
-import IconMobile from '~icons/mingcute/cellphone-line'
-import IconTablet from '~icons/mingcute/pad-line'
-import type { PreviewDevice } from '../editor/preview-canvas'
-import IconSun from '~icons/mingcute/sun-line'
-import IconMoon from '~icons/mingcute/moon-line'
-import IconContrast from '~icons/mingcute/brightness-line'
 import IconChat from '~icons/mingcute/chat-3-line'
 import IconCanvas from '~icons/mingcute/layout-grid-line'
-import IconSpinner from '~icons/mingcute/loading-line'
-import {
-  pagePreviewUrl,
-  aiPageBuilderApi,
-  aiPageBuilderChatApi,
-  getPublicSiteUrl,
-} from '../api/clients'
-import type { ThemeStyleContext } from '../api/generated'
+import { pagePreviewUrl, aiPageBuilderApi } from '../api/clients'
 import { errorMessage } from '../utils/error'
+import { confirmDialog } from '../utils/confirm'
 import { pageKeys, queryClient } from '../lib/query-client'
 import AiPanel from '../components/AiPanel.vue'
 import PageSettings from '../components/PageSettings.vue'
-import PublishPagePopper from '../components/PublishPagePopper.vue'
 import SourceEditor from '../components/SourceEditor.vue'
 import ApbSegmented from '../components/ui/ApbSegmented.vue'
+import EditorHeader from '../components/editor/EditorHeader.vue'
+import CanvasToolbar from '../components/editor/CanvasToolbar.vue'
 import { useWorkingDocument } from '../composables/useWorkingDocument'
 import { usePageAnnotations } from '../composables/usePageAnnotations'
+import { useThemePreview } from '../composables/useThemePreview'
+import { usePublicSiteUrl } from '../composables/usePublicSiteUrl'
+import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
+import { useEditorShortcuts } from '../composables/useEditorShortcuts'
 import type { AnnotationTarget, PreparedPage } from '../editor/annotations'
 import type { StreamingPreview } from '../composables/useStreamingPreview'
+import type { PreviewDevice } from '../editor/preview-canvas'
 import RuntimePreview from '../components/RuntimePreview.vue'
 import StreamingCanvas from '../components/chat/StreamingCanvas.vue'
 
@@ -120,65 +101,17 @@ async function annotate(target: AnnotationTarget, comment: string) {
     Toast.info(errorMessage(e))
   }
 }
-const themeContext = shallowRef<ThemeStyleContext>()
-const previewMode = shallowRef<'default' | 'light' | 'dark'>('default')
-const rootStates = computed(() =>
-  themeContext.value?.colorMode?.strategy === 'explicit'
-    ? themeContext.value.colorMode.rootStates
-    : [],
-)
-const rootState = computed(() => rootStates.value.find((state) => state.mode === previewMode.value))
-const themeModes = [
-  { value: 'default', icon: IconContrast, title: '主题默认模式' },
-  { value: 'light', icon: IconSun, title: '模拟亮色模式' },
-  { value: 'dark', icon: IconMoon, title: '模拟暗色模式' },
-] as const
-function cyclePreviewMode() {
-  const order = ['default', 'light', 'dark'] as const
-  const next = order[(order.indexOf(previewMode.value) + 1) % order.length]!
-  previewMode.value = next
-}
-const previewModeIcon = computed(
-  () => themeModes.find((mode) => mode.value === previewMode.value) || themeModes[0],
-)
-queryClient
-  .fetchQuery({
-    queryKey: pageKeys.themeContext,
-    queryFn: async () => (await aiPageBuilderChatApi.getThemeContext()).data,
-    staleTime: 60_000,
-    retry: false,
-  })
-  .then((context) => {
-    themeContext.value = context
-  })
-  .catch(() => {
-    // Theme context is optional; manual editing and validation stay independent.
-  })
+const { themeContext, rootStates, rootState, previewModeIcon, cyclePreviewMode } = useThemePreview()
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
 const view = shallowRef<'visual' | 'source' | 'runtime'>('visual')
 const runtimePreview = useTemplateRef<{ refresh: () => void }>('runtimePreview')
-const viewOptions = [
-  { value: 'visual', label: '编辑', icon: IconEdit },
-  { value: 'source', label: '源码', icon: IconCode },
-  { value: 'runtime', label: '运行', icon: IconPlay, title: '运行已保存的草稿，脚本在沙箱中执行' },
-] as const
-const siteBaseUrl = shallowRef('')
-onMounted(() => {
-  void getPublicSiteUrl()
-    .then((url) => {
-      siteBaseUrl.value = url
-    })
-    .catch(() => {
-      // Keep the Console origin as a best-effort fallback.
-    })
-})
+const { pageUrl } = usePublicSiteUrl()
 const publicUrl = computed(() => {
   const page = detail.value?.page
   if (!page?.publishedRevision || !page.slug) return ''
-  const base = (siteBaseUrl.value || window.location.origin).replace(/\/$/, '')
-  return `${base}/${page.slug}`
+  return pageUrl(page.slug)
 })
 function openPublicPage() {
   if (publicUrl.value) window.open(publicUrl.value, '_blank', 'noopener')
@@ -189,11 +122,6 @@ const mobilePanelOptions = [
   { value: 'canvas', label: '画布', icon: IconCanvas },
 ] as const
 const device = shallowRef<PreviewDevice>('desktop')
-const deviceOptions = [
-  { value: 'desktop', icon: IconDesktop, title: '桌面 1280px' },
-  { value: 'tablet', icon: IconTablet, title: '平板 768px' },
-  { value: 'mobile', icon: IconMobile, title: '手机 390px' },
-] as const
 let loadId = 0
 async function load() {
   const name = String(route.params.name)
@@ -221,63 +149,24 @@ async function load() {
   }
 }
 watch(() => route.params.name, load, { immediate: true })
-function confirm(title: string, description: string): Promise<boolean> {
-  return new Promise((resolve) =>
-    Dialog.warning({
-      title,
-      description,
-      confirmText: '继续',
-      cancelText: '取消',
-      onConfirm: () => resolve(true),
-      onCancel: () => resolve(false),
-    }),
-  )
-}
-async function leave() {
-  if (locked.value) {
-    Toast.info('请等待当前操作完成，或先停止助手。')
-    return false
-  }
-  return !dirty.value || confirm('离开工作台？', '当前修改尚未保存，离开将丢失这些修改。')
-}
-onBeforeRouteLeave(leave)
-onBeforeRouteUpdate((to, from) => to.params.name === from.params.name || leave())
-function beforeUnload(event: BeforeUnloadEvent) {
-  if (dirty.value || locked.value) {
-    event.preventDefault()
-    event.returnValue = ''
-  }
-}
-function keydown(event: KeyboardEvent) {
-  if (!(event.ctrlKey || event.metaKey)) return
-  if (event.key.toLowerCase() === 's') {
-    event.preventDefault()
-    void saveDraft()
-  }
-  const target = event.target instanceof HTMLElement ? event.target : undefined
-  const nativeInput = target?.closest('input, textarea, [contenteditable="true"]')
-  if (
-    event.key.toLowerCase() === 'z' &&
-    !settingsOpen.value &&
-    (!nativeInput || target?.closest('.apb-code'))
-  ) {
-    event.preventDefault()
-    event.stopPropagation()
-    move(event.shiftKey ? 'redo' : 'undo')
-  }
-}
-window.addEventListener('beforeunload', beforeUnload)
-window.addEventListener('keydown', keydown, true)
+useUnsavedChangesGuard({
+  dirty: () => dirty.value,
+  locked: () => locked.value,
+  confirm: () => confirmDialog('离开工作台？', '当前修改尚未保存，离开将丢失这些修改。'),
+})
+useEditorShortcuts({
+  save: saveDraft,
+  move,
+  undoDisabled: () => settingsOpen.value,
+})
 onBeforeUnmount(() => {
   loadId++
-  window.removeEventListener('beforeunload', beforeUnload)
-  window.removeEventListener('keydown', keydown, true)
 })
 async function reload() {
   if (locked.value) return
   if (
     dirty.value &&
-    !(await confirm('载入最新版本？', '当前未保存修改会被替换。取消可继续保留本地修改。'))
+    !(await confirmDialog('载入最新版本？', '当前未保存修改会被替换。取消可继续保留本地修改。'))
   )
     return
   const name = String(route.params.name)
@@ -302,11 +191,11 @@ async function publish(unpublish = false) {
   const scripted = !!detail.value.document.js
   try {
     const result = unpublish
-      ? await writes.unpublish(() => confirm('取消发布？', '访客将无法访问此页面。'))
+      ? await writes.unpublish(() => confirmDialog('取消发布？', '访客将无法访问此页面。'))
       : await writes.publishUpdate(
           async () =>
             !scripted ||
-            (await confirm(
+            (await confirmDialog(
               '发布包含脚本的页面？',
               '页面脚本会在访客浏览器中执行。请确认你信任这些内容。',
             )),
@@ -319,7 +208,10 @@ async function publish(unpublish = false) {
 async function restore(revision: string) {
   try {
     const result = await restoreDraft(revision, () =>
-      confirm('恢复选中版本？', '当前修改会先保存，选中版本将复制为新草稿。线上发布版本不会改变。'),
+      confirmDialog(
+        '恢复选中版本？',
+        '当前修改会先保存，选中版本将复制为新草稿。线上发布版本不会改变。',
+      ),
     )
     if (result) {
       historyOpen.value = false
@@ -345,145 +237,29 @@ function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
     class="flex w-full flex-col overflow-hidden bg-gray-50 text-gray-900"
     style="position: fixed; inset: 0; overflow: clip; overscroll-behavior: contain"
   >
-    <header
-      class="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-gray-200 bg-white px-3 py-1.5 md:h-12 md:flex-nowrap md:py-0"
-    >
-      <button
-        type="button"
-        class="apb-icon-btn"
-        aria-label="返回页面列表"
-        v-tooltip="'返回页面列表'"
-        @click="router.push({ name: 'AiPageBuilderPages' })"
-      >
-        <IconArrowLeft class="text-base" />
-      </button>
-      <div class="min-w-0">
-        <h1 class="max-w-56 truncate text-[13px] font-semibold leading-4">
-          {{ working?.title || '页面工作台' }}
-        </h1>
-      </div>
-      <span
-        v-if="detail"
-        class="apb-chip ml-1 shrink-0"
-        :class="
-          detail.page.publishedRevision
-            ? detail.page.hasUnpublishedChanges
-              ? 'bg-amber-50 text-amber-700'
-              : 'bg-emerald-50 text-emerald-700'
-            : 'bg-gray-100 text-gray-500'
-        "
-      >
-        {{
-          detail.page.publishedRevision
-            ? detail.page.hasUnpublishedChanges
-              ? '有未发布修改'
-              : '已发布'
-            : '未发布'
-        }}
-      </span>
-      <button
-        v-if="publicUrl"
-        type="button"
-        class="apb-chip max-w-44 shrink-0 bg-blue-50 text-blue-700 hover:bg-blue-100"
-        v-tooltip="`打开公开页面：${publicUrl}`"
-        @click="openPublicPage"
-      >
-        <IconExternal class="shrink-0 text-xs" />
-        <span class="truncate">/{{ detail?.page.slug }}</span>
-      </button>
-      <div
-        v-if="detail && !loading"
-        class="ml-auto flex max-w-full items-center gap-1 overflow-x-auto max-md:w-full"
-      >
-        <button
-          type="button"
-          class="apb-icon-btn"
-          :disabled="locked || !canUndo"
-          v-tooltip="'撤销（⌘/Ctrl Z）'"
-          aria-label="撤销"
-          @click="move('undo')"
-        >
-          <IconUndo class="text-base" />
-        </button>
-        <button
-          type="button"
-          class="apb-icon-btn"
-          :disabled="locked || !canRedo"
-          v-tooltip="'重做（⌘/Ctrl Shift Z）'"
-          aria-label="重做"
-          @click="move('redo')"
-        >
-          <IconRedo class="text-base" />
-        </button>
-        <span class="mx-1 h-4 w-px bg-gray-200" />
-        <button
-          type="button"
-          class="apb-icon-btn"
-          :disabled="locked"
-          v-tooltip="'页面设置'"
-          aria-label="页面设置"
-          @click="settingsOpen = true"
-        >
-          <IconSettings class="text-base" />
-        </button>
-        <button
-          type="button"
-          class="apb-icon-btn"
-          :disabled="locked"
-          v-tooltip="'历史版本'"
-          aria-label="历史版本"
-          @click="historyOpen = true"
-        >
-          <IconHistory class="text-base" />
-        </button>
-        <button
-          type="button"
-          class="apb-icon-btn"
-          :disabled="locked"
-          v-tooltip="'预览（新窗口）'"
-          aria-label="预览"
-          @click="preview"
-        >
-          <IconExternal class="text-base" />
-        </button>
-        <span class="mx-1 h-4 w-px bg-gray-200" />
-        <button
-          type="button"
-          class="apb-btn-outline"
-          :disabled="locked || !dirty || !valid"
-          @click="saveDraft"
-        >
-          <IconSpinner v-if="busy" class="animate-spin text-sm" />
-          <IconSave v-else class="text-sm" />
-          保存
-        </button>
-        <PublishPagePopper
-          v-if="!detail.page.publishedRevision"
-          :name="detail.page.name"
-          :title="detail.page.title"
-          :slug="detail.page.slug"
-          :version="detail.page.version"
-          :disabled="locked || dirty || !valid"
-          :scripted="!!working?.js"
-          :writes="writes"
-        >
-          <button type="button" class="apb-btn-primary" :disabled="locked || dirty || !valid">
-            <IconRocket class="text-sm" />
-            发布
-          </button>
-        </PublishPagePopper>
-        <button
-          v-else
-          type="button"
-          class="apb-btn-primary"
-          :disabled="locked || dirty || !valid || busy"
-          @click="publish()"
-        >
-          <IconRocket class="text-sm" />
-          更新发布
-        </button>
-      </div>
-    </header>
+    <EditorHeader
+      :page="detail?.page"
+      :title="working?.title || '页面工作台'"
+      :busy="busy"
+      :locked="locked"
+      :dirty="dirty"
+      :valid="valid"
+      :can-undo="canUndo"
+      :can-redo="canRedo"
+      :ready="!!detail && !loading"
+      :public-url="publicUrl"
+      :scripted="!!working?.js"
+      :writes="writes"
+      @back="router.push({ name: 'AiPageBuilderPages' })"
+      @undo="move('undo')"
+      @redo="move('redo')"
+      @settings="settingsOpen = true"
+      @history="historyOpen = true"
+      @preview="preview"
+      @save="saveDraft"
+      @publish="publish()"
+      @open-public="openPublicPage"
+    />
     <div
       v-if="error"
       class="flex shrink-0 flex-wrap items-center gap-2 border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700"
@@ -537,72 +313,19 @@ function applySettingsAndClose(value: Parameters<typeof applySettings>[0]) {
           :class="mobilePanel === 'canvas' ? 'flex' : 'hidden md:flex'"
           aria-label="页面编辑区"
         >
-          <div
-            class="flex shrink-0 flex-wrap items-center gap-2 border-b border-gray-200 bg-white px-3 py-1.5 md:h-11 md:flex-nowrap md:py-0"
-          >
-            <ApbSegmented v-model="view" :options="viewOptions" :disabled="locked" />
-            <span
-              class="apb-chip"
-              :class="
-                saving
-                  ? 'bg-blue-50 text-blue-700'
-                  : dirty
-                    ? 'bg-amber-50 text-amber-700'
-                    : 'bg-emerald-50 text-emerald-700'
-              "
-            >
-              <span
-                class="h-1.5 w-1.5 rounded-full"
-                :class="saving ? 'bg-blue-500' : dirty ? 'bg-amber-500' : 'bg-emerald-500'"
-              />
-              {{ saving ? '保存中…' : dirty ? '未保存' : '已保存' }}
-            </span>
-            <span
-              v-if="working?.js"
-              class="apb-chip bg-purple-50 text-purple-700"
-              title="页面包含 JavaScript，编辑画布不执行脚本；交互效果请在「运行」中查看，发布后会在访客浏览器中执行"
-              >含脚本</span
-            >
-            <span
-              v-if="view === 'visual' && !streamPreview && working?.js"
-              class="hidden text-xs text-gray-400 lg:inline"
-              title="编辑画布不执行页面脚本，交互效果请在「运行」中查看"
-              >脚本仅在「运行」中执行</span
-            >
-            <span
-              v-if="view === 'runtime' && dirty"
-              class="apb-chip bg-amber-50 text-amber-700"
-              title="运行预览只读取已保存的草稿，请先保存再查看最新修改"
-              >运行的是已保存草稿</span
-            >
-            <div class="ml-auto flex items-center gap-2">
-              <button
-                v-if="view === 'runtime'"
-                type="button"
-                class="apb-icon-btn"
-                v-tooltip="'重新运行'"
-                aria-label="重新运行"
-                @click="runtimePreview?.refresh()"
-              >
-                <IconRefresh class="text-base" />
-              </button>
-              <button
-                v-if="rootStates.length && view !== 'runtime'"
-                type="button"
-                class="apb-icon-btn"
-                v-tooltip="previewModeIcon.title"
-                :aria-label="previewModeIcon.title"
-                @click="cyclePreviewMode"
-              >
-                <component :is="previewModeIcon.icon" class="text-base" />
-              </button>
-              <ApbSegmented
-                v-if="view !== 'source' || streamPreview"
-                v-model="device"
-                :options="deviceOptions"
-              />
-            </div>
-          </div>
+          <CanvasToolbar
+            v-model:view="view"
+            v-model:device="device"
+            :locked="locked"
+            :saving="saving"
+            :dirty="dirty"
+            :scripted="!!working?.js"
+            :has-stream-preview="!!streamPreview"
+            :root-state-count="rootStates.length"
+            :preview-mode-icon="previewModeIcon"
+            @refresh="runtimePreview?.refresh()"
+            @cycle-preview-mode="cyclePreviewMode"
+          />
           <div class="relative min-h-0 flex-1">
             <!-- overlay: the validation notice must never push the canvas up and down -->
             <div
