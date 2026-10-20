@@ -6,13 +6,13 @@ import static org.springdoc.webflux.core.fn.SpringdocRouteBuilder.route;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Duration;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import run.halo.aipagebuilder.security.PageAccess;
 import run.halo.app.core.extension.endpoint.CustomEndpoint;
 import run.halo.app.extension.GroupVersion;
 
@@ -39,11 +39,7 @@ public class AiEndpoint implements CustomEndpoint {
     }
 
     private Mono<ServerResponse> status(ServerRequest request) {
-        return ReactiveSecurityContextHolder.getContext()
-            .filter(context -> context.getAuthentication() != null
-                && context.getAuthentication().isAuthenticated())
-            .filter(context -> context.getAuthentication().getAuthorities().stream()
-                .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())))
+        return PageAccess.superAdministrator()
             .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN)))
             .then(Mono.defer(() -> gateway.status().timeout(Duration.ofSeconds(5))
                 .onErrorReturn(new AiStatus(false, "AI Foundation 暂不可用。"))

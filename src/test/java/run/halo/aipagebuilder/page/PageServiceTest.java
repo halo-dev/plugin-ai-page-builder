@@ -903,6 +903,45 @@ class PageServiceTest {
         assertBadRequest(() -> service.list(1, 20, null, null, "title").block());
     }
 
+    @Test
+    void publishingRequiresTheExactDraftAndVersion() {
+        var created = service.create(new CreatePageRequest("mcp-page", "First"), "owner").block();
+        var name = created.page().name();
+        assertConflict(() -> service.publish(name, created.page().version(), "other").block());
+        assertThat(service.get(name).block().page().publishedRevision()).isNull();
+        var saved = service.save(name, new SavePageRequest(created.page().version(),
+            document("Changed"), "ai"), "owner").block();
+        assertConflict(() -> service.publish(name, saved.page().version(),
+            created.page().draftRevision()).block());
+        assertConflict(() -> service.publish(name, created.page().version(),
+            saved.page().draftRevision()).block());
+        var published = service.publish(name, saved.page().version(), saved.page().draftRevision())
+            .block();
+        assertThat(published.page().publishedRevision()).isEqualTo(saved.page().draftRevision());
+    }
+
+    @Test
+    void revisionPaginationIsScopedAndBounded() {
+        var created = service.create(new CreatePageRequest("history", "History"), "owner").block();
+        var options = new AtomicReference<ListOptions>();
+        var request = new AtomicReference<PageRequest>();
+        when(client.listBy(eq(ThemePageRevision.class), any(ListOptions.class),
+            any(PageRequest.class)))
+            .thenAnswer(invocation -> {
+                options.set(invocation.getArgument(1));
+                request.set(invocation.getArgument(2));
+                return Mono.just(ListResult.emptyResult());
+            });
+        service.revisions(created.page().name(), 2, 10).block();
+        assertThat(request.get().getPageNumber()).isEqualTo(2);
+        assertThat(request.get().getPageSize()).isEqualTo(10);
+        assertThat(options.get().getFieldSelector().query().toString())
+            .contains(created.page().name());
+        assertThat(request.get().getSort().toList()).containsExactly(
+            Sort.Order.desc("metadata.creationTimestamp"), Sort.Order.asc("metadata.name"));
+        assertBadRequest(() -> service.revisions(created.page().name(), 1, 101).block());
+    }
+
     private static PageDocument document(String title) {
         return new PageDocument(1, "code", "", Map.of(), "<h1>" + title + "</h1>", "", title, "");
     }

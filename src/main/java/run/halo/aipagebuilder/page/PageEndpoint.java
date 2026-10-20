@@ -13,15 +13,13 @@ import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import run.halo.aipagebuilder.security.PageAccess;
 import run.halo.app.core.extension.endpoint.CustomEndpoint;
 import run.halo.app.extension.GroupVersion;
 import run.halo.aipagebuilder.model.PageDocument;
@@ -225,13 +223,7 @@ public class PageEndpoint implements CustomEndpoint {
     }
 
     private static Mono<String> actor() {
-        return ReactiveSecurityContextHolder.getContext()
-            .map(context -> context.getAuthentication())
-            .filter(authentication -> authentication.isAuthenticated()
-                && !(authentication instanceof AnonymousAuthenticationToken))
-            .filter(authentication -> authentication.getAuthorities().stream()
-                .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())))
-            .map(Authentication::getName)
+        return PageAccess.superAdministrator()
             .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN,
                 "Super administrator access is required")));
     }
