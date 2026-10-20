@@ -2,7 +2,7 @@
 
 [返回 README](../README.md)
 
-需要 Java 21、Node.js >= 22.12.0、pnpm 10.33.0 和 Docker。以下命令均在仓库根目录执行。
+需要 Java 21、Node.js >= 22.12.0、pnpm 12 和 Docker。以下命令均在仓库根目录执行。
 
 ```bash
 # 安装前端依赖

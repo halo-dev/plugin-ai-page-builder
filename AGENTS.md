@@ -11,7 +11,7 @@ AI Page Builder is a Halo 2.26+ plugin with a Java backend and Vue 3/TypeScript 
 
 ## Build, Test, and Development Commands
 
-Use Java 21, Node.js >=22.12.0, and pnpm 10.33.0. Docker is required for the local Halo instance and OpenAPI generation. Run these commands from the repository root:
+Use Java 21, Node.js >=22.12.0, and pnpm 12. Docker is required for the local Halo instance and OpenAPI generation. Run these commands from the repository root:
 
 - `pnpm --dir ui install --frozen-lockfile`: install frontend dependencies.
 - `bash gradlew haloServer`: start Halo at `http://localhost:8090`.
