@@ -406,7 +406,7 @@ class PageChatServiceTest {
             "Renamed", base.description(), 2L, base.themeLayout(), base.draftRevision(),
             base.publishedRevision(), Instant.now(), base.hasUnpublishedChanges()), fixture.base.document());
         when(pages.saveAi(eq("page"), eq(1L), eq(fixture.base.document()), eq("admin"),
-            eq(runId), eq("old-revision"), isNull(), eq("Renamed"), any()))
+            eq(runId), eq("old-revision"), isNull(), eq("Renamed"), isNull()))
             .thenReturn(Mono.just(renamed));
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
@@ -441,6 +441,24 @@ class PageChatServiceTest {
     }
 
     @Test
+    void agentCannotOverwriteAnExistingDescriptionWithoutExplicitReplacement() {
+        var base = fixture.base.page();
+        var described = new PageApi.PageDetail(new PageApi.PageSummary(base.name(), base.slug(),
+            base.title(), "用户手写的描述", 1L, base.themeLayout(), base.draftRevision(),
+            base.publishedRevision(), Instant.now(), base.hasUnpublishedChanges()),
+            fixture.base.document());
+        when(pages.get("page")).thenReturn(Mono.just(described));
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setDescription(Map.of("description", "AI 想覆盖"))
+                .thenMany(Flux.empty());
+        });
+        service.start("page", request(), "admin").block().blockLast();
+        verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
+            anyString(), any(), any(), any());
+    }
+
+    @Test
     void initialGenerationCommitsSemanticPathWithTitleAndContent() {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
@@ -454,7 +472,7 @@ class PageChatServiceTest {
         var events = service.start("page", request(), "admin").block().collectList().block();
         verify(pages).saveAi(eq("page"), eq(1L),
             org.mockito.ArgumentMatchers.argThat(document -> document.html().equals("<p>About us</p>")),
-            eq("admin"), eq(runId), eq("old-revision"), eq("company/about"), eq("关于我们"), any());
+            eq("admin"), eq(runId), eq("old-revision"), eq("company/about"), eq("关于我们"), isNull());
         assertThat(events).extracting(event -> event.get("type")).contains("data-page-committed");
     }
 
@@ -555,6 +573,7 @@ class PageChatServiceTest {
             PageWorkingCopy copy = i.getArgument(3);
             return copy.setTitle(Map.of("title", "Renamed"))
                 .then(copy.setSlug(Map.of("slug", "company/about")))
+                .then(copy.setDescription(Map.of("description", "关于我们的团队。")))
                 .thenMany(Flux.never());
         });
         service.start("page", request(), "admin").block();
@@ -563,18 +582,19 @@ class PageChatServiceTest {
         assertThat(restarted.result("page", runId).block().status()).isEqualTo("interrupted");
         var saved = restarted.checkpoint("page", "page", "admin").block();
         var next = UUID.randomUUID().toString();
-        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"), eq("Renamed"), any()))
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"), eq("Renamed"), eq("关于我们的团队。")))
             .thenReturn(Mono.just(fixture.changed));
         doAnswer(i -> {
             PageWorkingCopy copy = i.getArgument(3);
             assertThat(copy.slug()).isEqualTo("company/about");
             assertThat(copy.title()).isEqualTo("Renamed");
-            assertThat(copy.recoveryContext()).contains("company/about");
+            assertThat(copy.description()).isEqualTo("关于我们的团队。");
+            assertThat(copy.recoveryContext()).contains("company/about", "关于我们的团队。");
             return Flux.empty();
         }).when(gateway).chat(anyString(), any(), anyString(), any());
         restarted.start("page", resumeRequest(saved, next), "admin").block().blockLast();
         assertThat(restarted.result("page", next).block().status()).isEqualTo("completed");
-        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"), eq("Renamed"), any());
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next), eq("old-revision"), eq("company/about"), eq("Renamed"), eq("关于我们的团队。"));
     }
 
     @org.junit.jupiter.params.ParameterizedTest

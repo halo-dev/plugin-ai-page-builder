@@ -244,7 +244,7 @@ class PageWorkingCopyTest {
     }
 
     @Test
-    void invalidDescriptionIsRejectedWithoutMutationAndClearedByLaterSuccess() {
+    void invalidDescriptionIsRejectedWithoutBlockingLaterContentUpdates() {
         var copy = copy("<p>old</p>", "");
         List<Map<String, Object>> invalidInputs = List.of(
             Map.<String, Object>of(),
@@ -255,11 +255,28 @@ class PageWorkingCopyTest {
             assertThat(copy.setDescription(input).block()).containsEntry("valid", false)
                 .containsEntry("staged", false);
             assertThat(copy.description()).isEmpty();
-            assertThat(copy.hasInvalidUpdate()).isTrue();
+            assertThat(copy.hasInvalidUpdate()).isFalse();
         }
+        assertThat(copy.update(Map.of("html", "<p>new</p>", "css", "")).block())
+            .containsEntry("valid", true);
         assertThat(copy.setDescription(Map.of("description", "关于我们的团队与业务。")).block())
             .containsEntry("valid", true).containsEntry("staged", true);
         assertThat(copy.hasInvalidUpdate()).isFalse();
+    }
+
+    @Test
+    void existingDescriptionRequiresExplicitReplacement() {
+        var copy = copy("<p>old</p>", "");
+        copy.description("用户手写的描述");
+        copy.existingDescription("用户手写的描述");
+        assertThat(copy.setDescription(Map.of("description", "AI 想覆盖的描述")).block())
+            .containsEntry("valid", false).containsEntry("staged", false);
+        assertThat(copy.description()).isEqualTo("用户手写的描述");
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+        assertThat(copy.setDescription(Map.of("description", "用户要求的新描述",
+            "replaceExisting", true)).block())
+            .containsEntry("valid", true).containsEntry("staged", true);
+        assertThat(copy.description()).isEqualTo("用户要求的新描述");
     }
 
     @Test

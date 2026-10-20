@@ -119,11 +119,11 @@ public final class PageWorkingCopy {
     private PageDocument document;
     private String title = "";
     private String description = "";
+    private boolean hasExistingDescription;
     private String slug;
     private final boolean canSetSlug;
     private boolean invalidSlugUpdate;
     private boolean invalidTitleUpdate;
-    private boolean invalidDescriptionUpdate;
     private boolean invalidUpdate;
     private ThemeStyleContext themeSnapshot;
     private PageReferenceTools.Session references;
@@ -427,6 +427,10 @@ public final class PageWorkingCopy {
 
     synchronized void description(String value) { description = value == null ? "" : value; }
 
+    synchronized void existingDescription(String value) {
+        hasExistingDescription = value != null && !value.isBlank();
+    }
+
     public Mono<Map<String, Object>> setTitle(Map<String, Object> input) {
         return edit(() -> applyTitle(input));
     }
@@ -470,34 +474,32 @@ public final class PageWorkingCopy {
         consume(Json.toJson(input));
         var tool = "update_page_description";
         if (input == null || !(input.get("description") instanceof String raw)) {
-            return invalidDescription("description 必须是字符串");
+            return rejectDescription("description 必须是字符串");
         }
         var description = raw.trim();
         if (description.isEmpty()) {
-            return invalidDescription("页面描述不能为空；已有描述时不要调用此工具");
+            return rejectDescription("页面描述不能为空；已有描述时不要调用此工具");
+        }
+        if (!this.description.equals(description) && hasExistingDescription
+            && !Boolean.TRUE.equals(input.get("replaceExisting"))) {
+            return rejectDescription("页面已有描述；只有用户明确要求修改时才可传 replaceExisting=true");
         }
         try {
             var changed = !description.equals(this.description);
             run.halo.aipagebuilder.page.PageService.validateProperties(this.title, description);
             this.description = description;
-            invalidDescriptionUpdate = false;
             summaries.add(new ChatApi.Tool(tool, "completed",
                 changed ? "已暂存新的页面描述" : "页面描述未变化"));
             return Map.of("valid", true, "staged", changed, "baseHash", baseHash());
         } catch (ResponseStatusException error) {
-            return invalidDescription(error.getReason());
+            return rejectDescription(error.getReason());
         }
     }
 
-    private Map<String, Object> invalidDescription(String message) {
-        invalidDescriptionUpdate = true;
+    /** Optional metadata: a rejected description must not fail the whole turn. */
+    private Map<String, Object> rejectDescription(String message) {
         summaries.add(new ChatApi.Tool("update_page_description", "error", message));
         return Map.of("valid", false, "staged", false, "error", message, "baseHash", baseHash());
-    }
-
-    synchronized boolean hasInvalidDescriptionUpdate() { return invalidDescriptionUpdate; }
-    synchronized void invalidDescriptionUpdate(boolean value) {
-        invalidDescriptionUpdate = value;
     }
 
     private Map<String, Object> stage(String tool, String html, String css, String js) {
@@ -544,7 +546,7 @@ public final class PageWorkingCopy {
     public synchronized boolean exhausted() { return budget.exhausted(); }
     synchronized boolean hasInvalidContentUpdate() { return invalidUpdate; }
     synchronized boolean hasInvalidSlugUpdate() { return invalidSlugUpdate; }
-    public synchronized boolean hasInvalidUpdate() { return invalidUpdate || invalidSlugUpdate || invalidTitleUpdate || invalidDescriptionUpdate; }
+    public synchronized boolean hasInvalidUpdate() { return invalidUpdate || invalidSlugUpdate || invalidTitleUpdate; }
     public synchronized PageDocument document() { return document; }
     public synchronized List<ChatApi.Tool> summaries() { return List.copyOf(summaries); }
 }

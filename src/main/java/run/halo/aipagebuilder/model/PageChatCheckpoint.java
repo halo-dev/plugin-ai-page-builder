@@ -30,7 +30,6 @@ public class PageChatCheckpoint extends AbstractExtension {
         private String title;
         private String description;
         private boolean invalidTitleUpdate;
-        private boolean invalidDescriptionUpdate;
         private boolean invalidSlugUpdate;
         private boolean available;
         private int steps;

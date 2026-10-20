@@ -226,7 +226,6 @@ public class PageChatService {
             if (spec.getDescription() != null) {
                 run.copy.description(spec.getDescription());
             }
-            run.copy.invalidDescriptionUpdate(spec.isInvalidDescriptionUpdate());
             run.copy.restore(spec.getDocument(), spec.isInvalidUpdate(), spec.getSlug(),
                 spec.isInvalidSlugUpdate(), spec.getTurn().tools());
             run.questions.addAll(spec.getTurn().questions().stream()
@@ -577,7 +576,6 @@ public class PageChatService {
             snapshot.setTitle(run.copy.title());
             snapshot.setDescription(run.copy.description());
             snapshot.setInvalidTitleUpdate(run.copy.hasInvalidTitleUpdate());
-            snapshot.setInvalidDescriptionUpdate(run.copy.hasInvalidDescriptionUpdate());
             snapshot.setInvalidSlugUpdate(run.copy.hasInvalidSlugUpdate());
             snapshot.setTurn(run.turn());
             snapshot.setSteps(run.copy.budget.steps());
