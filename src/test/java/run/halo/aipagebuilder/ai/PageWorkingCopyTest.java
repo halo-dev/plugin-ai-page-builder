@@ -420,17 +420,6 @@ class PageWorkingCopyTest {
     }
 
     @Test
-    void noOpStillValidatesWholeDocument() {
-        var copy = copy("<script>bad</script>", "");
-        var original = copy.document();
-        assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
-            List.of(patch("html", "bad", "bad")))).block())
-            .containsEntry("valid", false);
-        assertThat(copy.document()).isSameAs(original);
-        assertThat(copy.hasInvalidUpdate()).isTrue();
-    }
-
-    @Test
     void patchReusesCallAndByteBudgetsWithoutPartialStaging() {
         var copy = copy("<p>old</p>", "");
         for (int i = 0; i < PageWorkingCopy.MAX_CALLS; i++) {
@@ -549,6 +538,34 @@ class PageWorkingCopyTest {
         assertThatThrownBy(() -> edit(copy, operation).block()).hasMessage("theme unavailable");
         assertThat(reads).hasValue(1);
         assertThat(copy.calls()).isEqualTo(4);
+    }
+
+    @Test
+    void emptyThemeStillStagesSourceAndWaitsForCheckpoint() {
+        var copy = new PageWorkingCopy(
+            new PageDocument(1, "code", null, null, "<p>old</p>", "", "Title", ""),
+            new ContentPolicy(), Mono.empty());
+        var write = reactor.core.publisher.Sinks.<Void>empty();
+        copy.checkpoint(write::asMono);
+        var pending = copy.update(Map.of("css", "p{color:red}")).toFuture();
+        assertThat(copy.document().css()).isEqualTo("p{color:red}");
+        assertThat(pending).isNotDone();
+        write.tryEmitEmpty();
+        assertThat(pending.join()).containsEntry("valid", true).containsEntry("staged", true);
+    }
+
+    @Test
+    void patchShapeErrorsAndRejectedContentKeepDistinctGuidance() {
+        var copy = copy("<p>old</p>", "");
+        var original = copy.document();
+        assertThat(copy.patch(Map.of("baseHash", "stale", "patches",
+            List.of(patch("html", "old", "new")))).block())
+            .containsEntry("valid", false).doesNotContainKey("guidance");
+        assertThat(copy.patch(Map.of("baseHash", hash(copy), "patches",
+            List.of(patch("html", "old", "<script>bad</script>")))).block())
+            .containsEntry("valid", false).containsKey("guidance");
+        assertThat(copy.document()).isSameAs(original);
+        assertThat(copy.hasInvalidUpdate()).isTrue();
     }
 
     @Test

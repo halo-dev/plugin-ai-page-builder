@@ -11,6 +11,7 @@ import run.halo.aipagebuilder.theme.ThemeStyleContext;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.content.PageDocumentPatch;
+import run.halo.aipagebuilder.content.PageSourceEdits;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PagePaths;
 
@@ -123,6 +124,7 @@ public final class PageWorkingCopy {
     }
 
     private final ContentPolicy policy;
+    private final PageSourceEdits sourceEdits;
     private final Mono<ThemeStyleContext> themeContext;
     private PageDocument document;
     private String slug;
@@ -276,6 +278,7 @@ public final class PageWorkingCopy {
         Mono<ThemeStyleContext> themeContext, String slug, boolean published) {
         this.document = document;
         this.policy = policy;
+        this.sourceEdits = new PageSourceEdits(policy);
         this.themeContext = themeContext.cache();
         this.slug = slug == null || slug.isBlank() ? null : slug;
         this.canSetSlug = this.slug == null && !published;
@@ -455,16 +458,9 @@ public final class PageWorkingCopy {
 
     private Map<String, Object> stage(String tool, String html, String css, String js) {
         try {
-            boolean changed = !html.equals(document.html()) || !css.equals(document.css())
-                || !js.equals(document.js());
-            var candidate = changed
-                ? new PageDocument(js.isEmpty() ? 1 : 2, "code", null, null, html, css,
-                    document.title(), document.description(), js) : document;
-            policy.validate(candidate);
-            if (!css.equals(document.css()) && themeSnapshot != null) {
-                policy.validateThemeColorMode(css, themeSnapshot);
-            }
-            document = candidate;
+            var prepared = sourceEdits.prepare(document, html, css, js);
+            document = prepared.finish(themeSnapshot);
+            var changed = prepared.sourceChanged();
             invalidUpdate = false;
             summaries.add(new ChatApi.Tool(tool, "completed",
                 changed ? "已暂存通过校验的修改" : "内容未变化"));

@@ -15,6 +15,7 @@ import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.ai.DocumentHash;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.content.PageDocumentPatch;
+import run.halo.aipagebuilder.content.PageSourceEdits;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PageApi;
 import run.halo.aipagebuilder.page.PagePreviewStore;
@@ -31,6 +32,7 @@ import run.halo.mcpserver.api.McpToolResult;
 public final class PageMcpToolProvider implements McpToolProvider {
     private final PageService pages;
     private final ContentPolicy policy;
+    private final PageSourceEdits sourceEdits;
     private final ThemeContextService themes;
     private final PagePreviewStore previews;
     private final ExternalUrlSupplier urls;
@@ -39,6 +41,7 @@ public final class PageMcpToolProvider implements McpToolProvider {
         PagePreviewStore previews, ExternalUrlSupplier urls) {
         this.pages = pages;
         this.policy = policy;
+        this.sourceEdits = new PageSourceEdits(policy);
         this.themes = themes;
         this.previews = previews;
         this.urls = urls;
@@ -168,20 +171,18 @@ public final class PageMcpToolProvider implements McpToolProvider {
             var html = field(fields, "html", original.html());
             var css = field(fields, "css", original.css());
             var js = field(fields, "js", original.js());
-            var sourceChanged = !html.equals(original.html()) || !css.equals(original.css())
-                || !js.equals(original.js());
-            var candidate = new PageDocument(sourceChanged ? (js.isEmpty() ? 1 : 2)
-                : original.schemaVersion(), sourceChanged ? "code" : original.mode(),
-                sourceChanged ? null : original.editorVersion(),
-                sourceChanged ? null : original.projectData(), html, css,
+            var base = new PageDocument(original.schemaVersion(), original.mode(),
+                original.editorVersion(), original.projectData(), original.html(), original.css(),
                 field(fields, "title", original.title()),
-                field(fields, "description", original.description()), js);
-            policy.validate(candidate);
-            var validation = !css.equals(original.css()) ? theme(current.page().themeLayout())
-                .doOnNext(context -> policy.validateThemeColorMode(css, context)).then()
-                : Mono.<Void>empty();
-            return validation.then(Mono.defer(() -> pages.save(name,
-                new PageApi.SavePageRequest(version, candidate, "ai"), actor))).map(this::summary);
+                field(fields, "description", original.description()), original.js());
+            var prepared = sourceEdits.prepare(base, html, css, js);
+            var context = prepared.cssChanged() ? theme(current.page().themeLayout())
+                : Mono.just(ThemeStyleContext.unavailable());
+            return context.defaultIfEmpty(ThemeStyleContext.unavailable())
+                .map(prepared::finish)
+                .flatMap(candidate -> pages.save(name,
+                    new PageApi.SavePageRequest(version, candidate, "ai"), actor))
+                .map(this::summary);
         });
     }
 

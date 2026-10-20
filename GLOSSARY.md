@@ -19,6 +19,10 @@ and the context needed to continue generation.
 The page's currently saved, editable content version, independent of the published version
 shown to visitors.
 
+**Source Edit**:
+A proposed change to a page's HTML, CSS, or JavaScript, expressed as replacement fields or
+exact-text patches. Validating a source edit does not itself stage a Working Copy or save a Draft.
+
 **Page Preview**:
 An isolated rendering of a page's Draft, historical revision, or supplied unsaved content,
 without changing the version shown to visitors.

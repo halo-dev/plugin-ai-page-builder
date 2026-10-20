@@ -254,11 +254,7 @@ class PageMcpToolProviderTest {
     }
 
     @Test
-    void scriptsUseSchemaTwoAndInvalidContentNeverSaves() {
-        call("update_page", Map.of("name", "page", "expectedVersion", 4, "js",
-            "console.log('ok')"));
-        assertThat(savedDocument().schemaVersion()).isEqualTo(2);
-        clearInvocations(pages);
+    void invalidContentNeverSaves() {
         assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4,
             "html", "<script>alert(1)</script>")), "INVALID_ARGUMENT");
         assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4)),
@@ -300,6 +296,52 @@ class PageMcpToolProviderTest {
         clearInvocations(themes);
         assertThat(call("update_page", args).error()).isFalse();
         verifyNoInteractions(themes);
+    }
+
+    @Test
+    void emptyThemeStillSavesChangedCss() {
+        when(themes.current()).thenReturn(Mono.empty());
+        assertThat(call("update_page", Map.of("name", "page", "expectedVersion", 4,
+            "css", "h1{color:blue}")).error()).isFalse();
+        assertThat(savedDocument().css()).isEqualTo("h1{color:blue}");
+        verify(themes).current();
+    }
+
+    @Test
+    void mixedMetadataAndSourceEditsValidateTheFinalCandidate() {
+        var original = current.document();
+        when(pages.get("page")).thenReturn(Mono.just(detail(new PageDocument(
+            original.schemaVersion(), original.mode(), original.editorVersion(),
+            original.projectData(), original.html(), original.css(), "", "", original.js()))));
+        assertThat(call("update_page", Map.of("name", "page", "expectedVersion", 4,
+            "title", " Repaired ", "description", "New description", "html", "<p>New</p>"))
+            .error()).isFalse();
+        var saved = savedDocument();
+        assertThat(saved.title()).isEqualTo(" Repaired ");
+        assertThat(saved.description()).isEqualTo("New description");
+        assertThat(saved.html()).isEqualTo("<p>New</p>");
+        assertThat(saved.mode()).isEqualTo("code");
+        verifyNoInteractions(themes);
+    }
+
+    @Test
+    void invalidMetadataRejectsBeforeThemeLoading() {
+        var result = call("update_page", Map.of("name", "page", "expectedVersion", 4,
+            "title", "", "css", "@media(prefers-color-scheme:dark){h1{color:white}}"));
+        assertError(result, "INVALID_ARGUMENT");
+        assertThat(result.textContent()).contains("页面标题");
+        verifyNoInteractions(themes);
+        verify(pages, never()).save(any(), any(), any());
+    }
+
+    @Test
+    void themeFailureDoesNotSaveOrRetry() {
+        when(themes.current()).thenReturn(Mono.error(
+            new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "theme unavailable")));
+        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4,
+            "css", "h1{color:blue}")), "INTERNAL_ERROR");
+        verify(themes).current();
+        verify(pages, never()).save(any(), any(), any());
     }
 
     @Test
