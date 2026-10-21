@@ -15,6 +15,7 @@ vi.mock('@halo-dev/components', async () => {
           h('button', { ...attrs, disabled: props.disabled }, slots.default?.()),
     }),
     VDropdown: { template: '<div><slot /><slot name="popper" /></div>' },
+    VDropdownDivider: { template: '<div />' },
     VDropdownItem: {
       props: ['disabled'],
       emits: ['click'],
