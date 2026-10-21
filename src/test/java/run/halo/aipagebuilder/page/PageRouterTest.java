@@ -104,6 +104,34 @@ class PageRouterTest {
     }
 
     @Test
+    void onlyAnonymousVisitorsReceiveCacheValidators() {
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
+        var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
+            "draft", "published", Instant.now(), true);
+        when(service.findPublished("about/company"))
+            .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+            .thenReturn(RenderingResponse.create("test").build());
+        var request = request("/about/company");
+        var handler = router.route(request).block();
+        assertThat(handler).isNotNull();
+
+        assertThat(handler.handle(request).block()).isInstanceOf(PageCacheResponse.class);
+
+        var admin = new UsernamePasswordAuthenticationToken("admin", "password",
+            AuthorityUtils.createAuthorityList("ROLE_super-role"));
+        assertThat(handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block())
+            .isNotInstanceOf(PageCacheResponse.class);
+
+        var member = new UsernamePasswordAuthenticationToken("member", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertThat(handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)).block())
+            .isNotInstanceOf(PageCacheResponse.class);
+    }
+
+    @Test
     void unpublishedAndMissingPagesFallThroughButBusinessPathsCanMatch() {
         when(service.findPublished("about")).thenReturn(Mono.empty());
         assertThat(router.route(request("/about")).block()).isNull();
