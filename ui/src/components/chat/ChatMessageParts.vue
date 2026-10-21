@@ -38,7 +38,7 @@ const emit = defineEmits<{ answer: [questionId: string, answers: PageChatAnswerI
           <IconError v-else-if="part.tool.state === 'error'" class="text-red-500" />
           <IconCheck v-else-if="part.tool.state === 'success'" class="text-emerald-600" />
           <IconCheck v-else class="text-gray-300" />
-          <span class="text-gray-600">{{ part.tool.label }}</span>
+          <span class="shrink-0 whitespace-nowrap text-gray-600">{{ part.tool.label }}</span>
           <span v-if="part.tool.hint" class="min-w-0 truncate text-gray-400">{{
             part.tool.hint
           }}</span>
@@ -57,7 +57,7 @@ const emit = defineEmits<{ answer: [questionId: string, answers: PageChatAnswerI
           <IconError v-else-if="part.tool.state === 'error'" class="text-red-500" />
           <IconCheck v-else-if="part.tool.state === 'success'" class="text-emerald-600" />
           <IconCheck v-else class="text-gray-300" />
-          <span class="text-gray-600">{{ part.tool.label }}</span>
+          <span class="shrink-0 whitespace-nowrap text-gray-600">{{ part.tool.label }}</span>
           <span v-if="part.tool.status" class="text-gray-400">{{ part.tool.status }}</span>
         </div>
         <p
