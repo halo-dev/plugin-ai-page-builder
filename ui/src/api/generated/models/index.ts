@@ -46,6 +46,8 @@ export * from './test-operation';
 export * from './theme-color-mode';
 export * from './theme-content-slot';
 export * from './theme-content-wrapper';
+export * from './theme-context-coverage';
+export * from './theme-context-gap';
 export * from './theme-root-state';
 export * from './theme-style-context';
 export * from './theme-ui-stack';

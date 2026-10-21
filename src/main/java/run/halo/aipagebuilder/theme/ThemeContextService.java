@@ -96,14 +96,9 @@ public class ThemeContextService {
             return Mono.error(new IllegalArgumentException("Invalid source pagination"));
         }
         return withTheme(themeName, root -> {
-            var file = sourcePath(root, path, true);
-            byte[] bytes;
-            try (var input = Files.newInputStream(file)) {
-                bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
-            }
-            var byteTruncated = bytes.length > MAX_SOURCE_BYTES;
-            var source = new String(bytes, 0, Math.min(bytes.length, MAX_SOURCE_BYTES),
-                StandardCharsets.UTF_8);
+            var read = readSource(root, path);
+            var source = read.text();
+            var byteTruncated = read.byteTruncated();
             var start = Math.min(offset, source.length());
             var end = Math.min(start + limit, source.length());
             var summary = path + " · " + (start == 0 && !byteTruncated && end == source.length()
@@ -115,6 +110,49 @@ public class ThemeContextService {
                 "byteTruncated", byteTruncated, "summary", summary);
         });
     }
+
+    public Mono<Map<String, Object>> searchFile(String themeName, String path, String query,
+        int offset, int limit) {
+        if (query == null || query.isBlank() || query.length() > 200
+            || offset < 0 || offset > MAX_SOURCE_BYTES || limit < 1 || limit > 20) {
+            return Mono.error(new IllegalArgumentException("Invalid source search"));
+        }
+        return withTheme(themeName, root -> {
+            var read = readSource(root, path);
+            var source = read.text();
+            var matches = new ArrayList<Map<String, Object>>();
+            int cursor = Math.min(offset, source.length());
+            while (matches.size() < limit) {
+                int index = source.indexOf(query, cursor);
+                if (index < 0) break;
+                int start = Math.max(0, index - 128);
+                if (start > 0 && Character.isLowSurrogate(source.charAt(start))) start--;
+                int end = Math.min(source.length(), start + 512);
+                if (end < source.length() && Character.isHighSurrogate(source.charAt(end - 1))) end--;
+                matches.add(Map.of("offset", index, "start", start, "end", end,
+                    "text", source.substring(start, end)));
+                cursor = index + query.length();
+            }
+            boolean hasMore = source.indexOf(query, cursor) >= 0;
+            return Map.<String, Object>of("themeName", themeName, "path", path, "matches", matches,
+                "nextOffset", hasMore ? cursor : source.length(), "hasMore", hasMore,
+                "byteTruncated", read.byteTruncated(), "scannedCharacters", source.length(),
+                "summary", path + " · " + matches.size() + " 处匹配"
+                    + (read.byteTruncated() ? "（仅搜索文件前 1 MiB）" : ""));
+        });
+    }
+
+    private static SourceText readSource(Path root, String path) throws IOException {
+        var file = sourcePath(root, path, true);
+        byte[] bytes;
+        try (var input = Files.newInputStream(file)) {
+            bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
+        }
+        return new SourceText(new String(bytes, 0, Math.min(bytes.length, MAX_SOURCE_BYTES),
+            StandardCharsets.UTF_8), bytes.length > MAX_SOURCE_BYTES);
+    }
+
+    private record SourceText(String text, boolean byteTruncated) { }
 
     private Mono<Map<String, Object>> withTheme(String name, SourceAction action) {
         return activeThemeName().filter(name::equals)
@@ -221,7 +259,8 @@ public class ThemeContextService {
                 + " 的正文容器，仅用于文章页参考；生成的落地页不要复制其 wrapper 链或正文类名。");
         }
         return new ThemeStyleContext(name, displayName, state, result.sources(), notes,
-            result.previewCss(), result.colorMode(), result.contentSlot(), result.uiStack());
+            result.previewCss(), result.colorMode(), result.contentSlot(), result.uiStack(),
+            result.coverage());
     }
 
     /**

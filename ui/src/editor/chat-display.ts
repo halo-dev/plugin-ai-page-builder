@@ -205,6 +205,7 @@ function displayParts(
       patch_current_page: '局部修改页面',
       list_theme_files: '查找主题文件',
       read_theme_file: '读取主题文件',
+      search_theme_file: '搜索主题源码',
       list_posts: '查找文章',
       list_single_pages: '查找独立页面',
       list_ai_pages: '查找 AI 页面',

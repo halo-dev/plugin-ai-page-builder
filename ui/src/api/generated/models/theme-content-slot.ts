@@ -31,6 +31,12 @@ export interface ThemeContentSlot {
     'contentClasses': Array<string>;
     /**
      * 
+     * @type {string}
+     * @memberof ThemeContentSlot
+     */
+    'mainLandmark': ThemeContentSlotMainLandmarkEnum;
+    /**
+     * 
      * @type {Array<ThemeContentWrapper>}
      * @memberof ThemeContentSlot
      */
@@ -48,4 +54,13 @@ export interface ThemeContentSlot {
      */
     'wrapper': Array<ThemeContentWrapper>;
 }
+
+export const ThemeContentSlotMainLandmarkEnum = {
+    Present: 'present',
+    Absent: 'absent',
+    Unknown: 'unknown'
+} as const;
+
+export type ThemeContentSlotMainLandmarkEnum = typeof ThemeContentSlotMainLandmarkEnum[keyof typeof ThemeContentSlotMainLandmarkEnum];
+
 

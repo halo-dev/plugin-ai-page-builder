@@ -59,6 +59,8 @@ models/test-operation.ts
 models/theme-color-mode.ts
 models/theme-content-slot.ts
 models/theme-content-wrapper.ts
+models/theme-context-coverage.ts
+models/theme-context-gap.ts
 models/theme-root-state.ts
 models/theme-style-context.ts
 models/theme-ui-stack.ts

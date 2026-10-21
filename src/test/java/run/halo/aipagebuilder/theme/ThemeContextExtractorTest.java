@@ -42,7 +42,7 @@ class ThemeContextExtractorTest {
             .doesNotContain("secretScript", "secretComment", "secretTitle", "secretBody");
         assertThat(result.previewCss()).contains("--ink", "var(--ink)", "font-family", ".page-shell")
             .doesNotContain("max-width");
-        assertThat(result.notes()).anyMatch(note -> note.contains("动态或不安全"));
+        assertThat(result.coverage().gaps()).isEmpty();
     }
 
     @Test
@@ -83,7 +83,7 @@ class ThemeContextExtractorTest {
         assertThat(result.notes()).anyMatch(note -> note.contains("重复或循环"))
             .anyMatch(note -> note.contains("深度上限"))
             .anyMatch(note -> note.contains("未找到静态片段"))
-            .anyMatch(note -> note.contains("文件不存在"));
+                .anyMatch(note -> note.contains("文件不存在"));
     }
 
     @Test
@@ -134,7 +134,7 @@ class ThemeContextExtractorTest {
             reads.add(path);
             return files.get(path);
         });
-        assertThat(reads).hasSize(8);
+        assertThat(reads).hasSize(9);
         int size = result.previewCss().length() + result.notes().stream().mapToInt(String::length).sum()
             + result.sources().stream().mapToInt(source -> source.path().length() + source.kind().length()
                 + source.content().length()).sum();
@@ -471,10 +471,111 @@ class ThemeContextExtractorTest {
             new ThemeStyleContext.UiStack(java.util.List.of("Tailwind CSS"),
                 java.util.List.of("btn")));
         assertThat(context.brief()).contains("theme-earth", "main.shell", ".prose",
-            "layout content slot", "main.layout-shell", "main landmark",
+            "layout content slot", "main.layout-shell", "Main landmark",
             "not a landing-page container", "Tailwind CSS", "btn");
         assertThat(ThemeStyleContext.unavailable().brief()).isEmpty();
         assertThat(ThemeStyleContext.standalone().brief()).contains("STANDALONE");
+    }
+
+    @Test
+    void reservesStylesheetReadsAndContextForThemeOverridesAfterVendorFiles() {
+        var files = new LinkedHashMap<String, String>();
+        var layout = new StringBuilder("<html><head>");
+        for (int i = 0; i < 7; i++) {
+            layout.append("<link href='/assets/").append(i).append(".css'>");
+            files.put("templates/assets/" + i + ".css", i == 6
+                ? "body{color:var(--brand)}:root{--brand:#abcdef}"
+                : ":root{--vendor:" + i + "}body{font-size:16px}".repeat(1_000));
+        }
+        layout.append("</head><body><main><div th:replace='${content}'></div></main></body></html>");
+        files.put("templates/layout.html", layout.toString());
+        files.put("templates/page.html", "<article th:utext='${singlePage.content.content}'></article>");
+        var result = extractor.extract(files::get, "sample", "templates/page.html");
+        assertThat(result.sources()).anySatisfy(source -> {
+            assertThat(source.path()).isEqualTo("templates/assets/6.css");
+            assertThat(source.content()).contains("--brand:#abcdef", "color:var(--brand)");
+        });
+        assertThat(result.coverage().gaps()).noneMatch(gap -> gap.path().equals("templates/assets/6.css"));
+        assertThat(result.sources().stream().mapToInt(source -> source.path().length()
+            + source.kind().length() + source.content().length()).sum()).isLessThanOrEqualTo(22_000);
+    }
+
+    @Test
+    void selectsFoundationAndLastOverridesInCascadeOrderBeforeArticleStyles() {
+        var files = new LinkedHashMap<String, String>();
+        var layout = new StringBuilder();
+        for (int i = 0; i < 10; i++) {
+            layout.append("<link href='/assets/").append(i).append(".css'>");
+            files.put("templates/assets/" + i + ".css", "body{font-size:" + (10 + i) + "px}");
+        }
+        layout.append("<main th:insert='${content}'></main>");
+        files.put("templates/layout.html", layout.toString());
+        files.put("templates/page.html", "<link href='/assets/article.css'>"
+            + "<article th:utext='${singlePage.content.content}'></article>");
+        files.put("templates/assets/article.css", "body{color:red}");
+        var reads = new ArrayList<String>();
+        var result = extractor.extract(path -> { reads.add(path); return files.get(path); },
+            "sample", "templates/page.html");
+        assertThat(result.sources().stream().filter(source -> source.kind().equals("css"))
+            .map(ThemeContextExtractor.Source::path)).containsExactly("templates/assets/0.css",
+                "templates/assets/3.css", "templates/assets/4.css", "templates/assets/5.css",
+                "templates/assets/6.css", "templates/assets/7.css", "templates/assets/8.css",
+                "templates/assets/9.css");
+        assertThat(reads).hasSize(10).doesNotContain("templates/assets/article.css");
+        assertThat(result.previewCss()).containsSubsequence("font-size:10px", "font-size:19px");
+        assertThat(result.coverage().gaps()).anyMatch(gap -> gap.path().equals("templates/assets/article.css")
+            && gap.reason().equals("file_limit"));
+    }
+
+    @Test
+    void reportsActualMainLandmarkWithoutAssumingHeaderAlignment() {
+        for (var main : java.util.List.of("<main>", "<div role='main'>")) {
+            var closing = main.startsWith("<main") ? "</main>" : "</div>";
+            var result = extractor.extract(path -> "<body>" + main
+                + "<aside></aside><div class='content-column'><div th:replace='${content}'></div>"
+                + "</div>" + closing + "</body>");
+            assertThat(result.contentSlot().mainLandmark()).isEqualTo("present");
+            assertThat(result.contentSlot().slot()).hasSize(2);
+        }
+        assertThat(extractor.extract(path -> "<div class='flex'><div th:replace='${content}'></div></div>")
+            .contentSlot().mainLandmark()).isEqualTo("absent");
+        assertThat(extractor.extract(path -> "<main th:if='${enabled}'><div th:replace='${content}'></div></main>")
+            .contentSlot().mainLandmark()).isEqualTo("unknown");
+        assertThat(extractor.extract(path -> "<main th:replace='${content}'></main>")
+            .contentSlot().mainLandmark()).isEqualTo("absent");
+        assertThat(extractor.extract(path -> "<main></main>").contentSlot().mainLandmark()).isEqualTo("unknown");
+    }
+
+    @Test
+    void keepsConditionalHeadBlocksOutsideTheContentSlotAncestry() {
+        var result = extractor.extract(path -> """
+            <html><head><meta charset="UTF-8">
+            <th:block th:if="${head != null}"><th:block th:replace="${head}" /></th:block>
+            <link rel="stylesheet" href="https://example.com/style.css"></head>
+            <body><header><img th:if="${logo}" src="logo.png"></header>
+            <main><th:block th:replace="${content}" /></main></body></html>
+            """);
+        assertThat(result.contentSlot().mainLandmark()).isEqualTo("present");
+        assertThat(result.contentSlot().slot()).extracting(ThemeStyleContext.ContentSlot.Wrapper::tag)
+            .containsExactly("main");
+    }
+
+    @Test
+    void reportsBoundedDynamicGapsWithoutTreatingSlotsAsMissingDependencies() {
+        var result = extractor.extract(path -> """
+            <html><head><th:block th:replace='${head}'/></head>
+            <body th:style='${theme.config.colors}'><main><div th:replace='${content}'/></main>
+            <footer th:replace='~{blocks/footer :: ${theme.config.footer.style}}'/></body></html>
+            """);
+        assertThat(result.coverage().gaps()).anyMatch(gap -> gap.reason().equals("dynamic_expression")
+            && gap.detail().contains("body@th:style"))
+            .anyMatch(gap -> gap.reason().equals("unresolved_fragment"))
+            .noneMatch(gap -> gap.detail().contains("${head}") || gap.detail().contains("${content}"));
+        var many = new StringBuilder("<main th:insert='${content}'>");
+        for (int i = 0; i < 50; i++) many.append("<div th:replace='${fragment").append(i).append("}'/>");
+        var bounded = extractor.extract(path -> many + "</main>");
+        assertThat(bounded.coverage().gaps()).hasSize(32);
+        assertThat(bounded.coverage().hasMore()).isTrue();
     }
 
     @Test

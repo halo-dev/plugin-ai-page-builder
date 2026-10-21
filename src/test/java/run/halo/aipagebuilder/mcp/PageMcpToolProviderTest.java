@@ -110,6 +110,25 @@ class PageMcpToolProviderTest {
     }
 
     @Test
+    void themeSchemaValidatesLandmarksAndStructuredExtractionGaps() {
+        when(themes.current()).thenReturn(Mono.just(new ThemeStyleContext("theme", "Theme",
+            "SUPPORTED", List.of(), List.of(), "", ThemeStyleContext.ColorMode.unknown(),
+            new ThemeStyleContext.ContentSlot("", List.of(), List.of(), List.of(), "present"),
+            ThemeStyleContext.UiStack.empty(), new ThemeStyleContext.Coverage(List.of(
+                new ThemeStyleContext.Gap("templates/main.css", "source_truncated", "budget")), true))));
+        var output = call("get_theme_context", Map.of()).structuredContent();
+        var schema = SCHEMAS.getSchema(Json.MAPPER.valueToTree(tool("get_theme_context").outputSchema()));
+        var invalid = Json.MAPPER.valueToTree(output).deepCopy();
+        ((tools.jackson.databind.node.ObjectNode) invalid.get("contentSlot"))
+            .put("mainLandmark", "assumed");
+        assertThat(schema.validate(invalid)).isNotEmpty();
+        invalid = Json.MAPPER.valueToTree(output).deepCopy();
+        ((tools.jackson.databind.node.ObjectNode) invalid.get("coverage").get("gaps").get(0))
+            .remove("reason");
+        assertThat(schema.validate(invalid)).isNotEmpty();
+    }
+
+    @Test
     void outputsAllowOmittedNullsAndEmptyPagesWithoutLeakingEditorData() {
         var document = new PageDocument(1, "code", null, null, "", "");
         var page = new PageApi.PageSummary("page", null, "Title", null, 4L, true, false, null, "draft", null,

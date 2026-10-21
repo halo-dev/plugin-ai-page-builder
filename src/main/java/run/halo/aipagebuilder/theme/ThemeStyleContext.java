@@ -7,10 +7,17 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Schema(name = "ThemeStyleContext", requiredProperties = {"layoutState", "sources", "notes", "previewCss",
-    "colorMode", "contentSlot", "uiStack"})
+    "colorMode", "contentSlot", "uiStack", "coverage"})
 public record ThemeStyleContext(String themeName, String displayName, String layoutState,
     List<ThemeContextExtractor.Source> sources, List<String> notes, String previewCss,
-    ColorMode colorMode, ContentSlot contentSlot, UiStack uiStack) {
+    ColorMode colorMode, ContentSlot contentSlot, UiStack uiStack, Coverage coverage) {
+
+    public ThemeStyleContext(String themeName, String displayName, String layoutState,
+        List<ThemeContextExtractor.Source> sources, List<String> notes, String previewCss,
+        ColorMode colorMode, ContentSlot contentSlot, UiStack uiStack) {
+        this(themeName, displayName, layoutState, sources, notes, previewCss, colorMode,
+            contentSlot, uiStack, Coverage.empty());
+    }
 
     public ThemeStyleContext(String themeName, String displayName, String layoutState,
         List<ThemeContextExtractor.Source> sources, List<String> notes, String previewCss) {
@@ -50,14 +57,17 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
         if (contentSlot != null && !contentSlot.slot().isEmpty()) {
             text.append(" The page mounts inside the layout content slot: ")
                 .append(selectors(contentSlot.slot()))
-                .append(", the same container the header and footer align to. Fill that box; "
-                    + "do not repeat its max-width, padding or margin. The layout already "
-                    + "provides the main landmark.")
-                .append(" If the slot has no width constraint, use the theme's global container "
-                    + "(as used by the header) for your sections.");
+                .append(". Fill that box and do not repeat its max-width, padding or margin. "
+                    + "It may be a content column beside a sidebar; do not assume it has "
+                    + "the header or footer's width.");
         } else {
             text.append(" No layout content-slot container was found: check the layout before "
                 + "adding width or outer spacing.");
+        }
+        if (contentSlot != null) {
+            text.append(" Main landmark around the slot: ").append(contentSlot.mainLandmark())
+                .append(". Avoid another main only when present; unknown requires checking "
+                    + "the layout source.");
         }
         if (contentSlot != null && (!contentSlot.wrapper().isEmpty()
             || !contentSlot.contentClasses().isEmpty())) {
@@ -79,8 +89,10 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
             text.append(" UI stack: ").append(String.join(", ", uiStack.frameworks())).append('.');
         }
         if (uiStack != null && !uiStack.componentClasses().isEmpty()) {
-            text.append(" Prefer existing theme component classes: ")
-                .append(String.join(", ", uiStack.componentClasses())).append('.');
+            text.append(" Candidate theme component classes: ")
+                .append(String.join(", ", uiStack.componentClasses()))
+                .append(". Search their CSS and template usage before relying on variants "
+                    + "or interactions; names alone do not establish their contract.");
         }
         if (colorMode != null && "explicit".equals(colorMode.strategy())
             && !colorMode.rootStates().isEmpty()) {
@@ -89,8 +101,21 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
                     .collect(Collectors.joining(", ")))
                 .append("; inherit theme colors and never override with prefers-color-scheme.");
         }
+        if (!coverage.gaps().isEmpty() || coverage.hasMore()) {
+            text.append(" The static summary has extraction gaps. Check coverage in "
+                + "get_theme_context and use search_theme_file/read_theme_file for relevant "
+                + "missing sources. Dynamic setting values are not available.");
+        }
         return text.toString();
     }
+
+    @Schema(name = "ThemeContextCoverage", requiredProperties = {"gaps", "hasMore"})
+    public record Coverage(List<Gap> gaps, boolean hasMore) {
+        public static Coverage empty() { return new Coverage(List.of(), false); }
+    }
+
+    @Schema(name = "ThemeContextGap", requiredProperties = {"path", "reason", "detail"})
+    public record Gap(String path, String reason, String detail) { }
 
     private static String selectors(List<ContentSlot.Wrapper> wrappers) {
         return wrappers.stream().map(ContentSlot.Wrapper::selector)
@@ -122,9 +147,15 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
     }
 
     @Schema(name = "ThemeContentSlot",
-        requiredProperties = {"template", "slot", "wrapper", "contentClasses"})
+        requiredProperties = {"template", "slot", "wrapper", "contentClasses", "mainLandmark"})
     public record ContentSlot(String template, List<Wrapper> slot, List<Wrapper> wrapper,
-        List<String> contentClasses) {
+        List<String> contentClasses,
+        @Schema(allowableValues = {"present", "absent", "unknown"}) String mainLandmark) {
+        public ContentSlot(String template, List<Wrapper> slot, List<Wrapper> wrapper,
+            List<String> contentClasses) {
+            this(template, slot, wrapper, contentClasses, "unknown");
+        }
+
         public static ContentSlot empty() {
             return new ContentSlot("", List.of(), List.of(), List.of());
         }
