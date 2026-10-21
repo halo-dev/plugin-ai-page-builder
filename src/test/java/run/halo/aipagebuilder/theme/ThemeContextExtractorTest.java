@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import run.halo.aipagebuilder.content.ContentPolicy;
 
@@ -60,7 +61,8 @@ class ThemeContextExtractorTest {
             reads.add(path);
             return path.equals("templates/layout.html") ? layout : "body { color: red; }";
         });
-        assertThat(reads).containsExactly("templates/layout.html", "templates/assets/main.css");
+        assertThat(reads).containsExactly("templates/layout.html", "templates/assets/main.css",
+            "templates/assets/a.css");
         assertThat(result.previewCss()).contains("color:red");
         assertThat(result.notes()).anyMatch(note -> note.contains("未展开"));
     }
@@ -312,6 +314,167 @@ class ThemeContextExtractorTest {
             java.util.List.of(), "");
         assertThat(context.colorMode().strategy()).isEqualTo("unknown");
         assertThat(ThemeStyleContext.unavailable().colorMode().rootStates()).isEmpty();
+    }
+
+    @Test
+    void resolvesThymeleafVersionQueryAndFallsBackToStaticHref() {
+        var reads = new ArrayList<String>();
+        var files = Map.of(
+            "templates/layout.html", """
+                <link rel="stylesheet" th:href="@{/assets/dist/style.css?v={version}(version=${theme.spec.version})}">
+                <link rel="stylesheet" th:href="@{${theme.dynamic}}" href="/assets/fallback.css">
+                """,
+            "templates/assets/dist/style.css", ":root { --ink: #123; } body { color: var(--ink); }",
+            "templates/assets/fallback.css", "body { font-family: system-ui; }");
+        var result = extractor.extract(path -> {
+            reads.add(path);
+            return files.get(path);
+        });
+        assertThat(reads).containsExactly("templates/layout.html",
+            "templates/assets/dist/style.css", "templates/assets/fallback.css");
+        assertThat(result.previewCss()).contains("--ink", "system-ui");
+    }
+
+    @Test
+    void extractsPageTemplateContentWrapperAndTypographyCss() {
+        var files = Map.of(
+            "templates/layout.html",
+            "<body><main class='layout-shell'><div th:replace='${content}'></div></main></body>",
+            "templates/page.html", """
+                <html><body>
+                <main class="page-shell"><div class="container mx-auto px-4"><article
+                  class="prose lg:prose-lg"
+                  th:classappend="${singlePage.spec.featured ? 'featured' : ''}"
+                  th:utext="${singlePage.content.content}"></article></div></main>
+                <link rel="stylesheet" th:href="@{/assets/prose.css?v={version}(version=${theme.spec.version})}">
+                </body></html>
+                """,
+            "templates/assets/prose.css", """
+                .prose { max-width: 65ch; } .prose h2 { font-size: 1.5rem; }
+                .container { padding-inline: 1rem; }
+                """);
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        var slot = result.contentSlot();
+        assertThat(slot.template()).isEqualTo("templates/page.html");
+        assertThat(slot.slot()).extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.layout-shell");
+        assertThat(slot.wrapper()).extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.page-shell", "div.container.mx-auto.px-4");
+        assertThat(slot.contentClasses()).contains("prose", "lg:prose-lg", "featured");
+        var css = result.sources().stream().filter(source -> source.kind().equals("css"))
+            .map(ThemeContextExtractor.Source::content).collect(Collectors.joining("\n"));
+        assertThat(css).contains(".prose", "font-size:1.5rem", "padding-inline");
+    }
+
+    @Test
+    void omitsWrapperUtilitiesAlreadyProvidedByTheLayoutSlot() {
+        var files = Map.of(
+            "templates/layout.html", """
+                <body><main class="mx-auto mt-6 w-full max-w-7xl px-4 lg:px-6">
+                <div th:replace="${content}"></div></main></body>
+                """,
+            "templates/page.html", """
+                <section class="mx-auto mt-6 grid max-w-7xl grid-cols-1 gap-6 px-4
+                  md:grid-cols-[1fr_18rem] lg:px-6">
+                  <div class="z-0 min-w-0"><div class="rounded-xl bg-white p-4">
+                    <article class="prose" th:utext="${singlePage.content.content}"></article>
+                  </div></div>
+                </section>
+                """);
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        assertThat(result.contentSlot().slot())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.mx-auto.mt-6.w-full.max-w-7xl.px-4.lg:px-6");
+        assertThat(result.contentSlot().wrapper())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("section.grid.grid-cols-1.gap-6.md:grid-cols-[1fr_18rem]",
+                "div.z-0.min-w-0", "div.rounded-xl.bg-white.p-4");
+        assertThat(result.contentSlot().contentClasses()).containsExactly("prose");
+    }
+
+    @Test
+    void keepsInnerWrapperUtilitiesThatCenterOrNarrowTheContent() {
+        var files = Map.of(
+            "templates/layout.html", """
+                <body><div class="flex min-h-screen flex-col"><main
+                  class="mx-auto min-h-0 w-full max-w-7xl flex-1 px-4 sm:px-6 lg:px-8">
+                <div th:replace="${content}"></div></main></div></body>
+                """,
+            "templates/page.html", """
+                <body><div class="flex min-h-screen flex-col">
+                  <main class="bg-base-100 min-h-0 flex-1">
+                    <article class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
+                      <div class="prose prose-neutral max-w-none"
+                        th:utext="${singlePage.content.content}"></div>
+                    </article>
+                  </main>
+                </div></body>
+                """);
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        assertThat(result.contentSlot().slot())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("div.flex.min-h-screen.flex-col",
+                "main.mx-auto.min-h-0.w-full.max-w-7xl.flex-1.px-4.sm:px-6.lg:px-8");
+        assertThat(result.contentSlot().wrapper())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.bg-base-100",
+                "article.mx-auto.max-w-3xl.px-4.py-10.sm:px-6.lg:px-8");
+        assertThat(result.contentSlot().contentClasses())
+            .containsExactly("prose", "prose-neutral", "max-w-none");
+    }
+
+    @Test
+    void keepsUtilityRulesForPageContentClassesWithVariants() {
+        var files = Map.of(
+            "templates/layout.html", "<div th:replace='${content}'></div>",
+            "templates/page.html", """
+                <link rel="stylesheet" href="/assets/page.css">
+                <div class="md:grid-cols-[1fr_18rem] dark:bg-slate-900"
+                  th:utext="${singlePage.content.content}"></div>
+                """,
+            "templates/assets/page.css", """
+                .md\\:grid-cols-\\[1fr_18rem\\] { display: grid; }
+                .dark\\:bg-slate-900 { background-color: #111; }
+                """);
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        assertThat(result.contentSlot().contentClasses())
+            .containsExactly("md:grid-cols-[1fr_18rem]", "dark:bg-slate-900");
+        var css = result.sources().stream().filter(source -> source.kind().equals("css"))
+            .map(ThemeContextExtractor.Source::content).collect(Collectors.joining("\n"));
+        assertThat(css).contains("display:grid", "background-color:#111");
+    }
+
+    @Test
+    void flattensCssLayersAndDetectsUiStack() {
+        var result = extractCss("""
+            @layer base { :root { --ink: #123; } body { color: var(--ink); } }
+            @layer components { .btn { padding: 0.5rem 1rem; } .card { border-radius: 0.75rem; } }
+            :root { --tw-ring-color: #abc; --b1: 100% 0 0; }
+            """);
+        assertThat(result.previewCss()).contains("--ink", "color:var(--ink)")
+            .doesNotContain("@layer");
+        assertThat(result.uiStack().frameworks()).contains("Tailwind CSS", "daisyUI");
+        assertThat(result.uiStack().componentClasses()).contains("btn", "card");
+    }
+
+    @Test
+    void briefSummarizesContentSlotAndUiStack() {
+        var context = new ThemeStyleContext("theme-earth", "Earth", "SUPPORTED",
+            java.util.List.of(new ThemeContextExtractor.Source("layout", "layout", "x")),
+            java.util.List.of(), "", ThemeStyleContext.ColorMode.unknown(),
+            new ThemeStyleContext.ContentSlot("templates/page.html",
+                java.util.List.of(new ThemeStyleContext.ContentSlot.Wrapper("main",
+                    java.util.List.of("layout-shell"), null)),
+                java.util.List.of(new ThemeStyleContext.ContentSlot.Wrapper("main",
+                    java.util.List.of("shell"), null)),
+                java.util.List.of("prose")),
+            new ThemeStyleContext.UiStack(java.util.List.of("Tailwind CSS"),
+                java.util.List.of("btn")));
+        assertThat(context.brief()).contains("theme-earth", "main.shell", ".prose",
+            "layout content slot", "main.layout-shell", "main landmark",
+            "not a landing-page container", "Tailwind CSS", "btn");
+        assertThat(ThemeStyleContext.unavailable().brief()).isEmpty();
+        assertThat(ThemeStyleContext.standalone().brief()).contains("STANDALONE");
     }
 
     private ThemeContextExtractor.Result extractCss(String css) {

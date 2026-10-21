@@ -126,6 +126,7 @@ public final class PageWorkingCopy {
     private boolean invalidTitleUpdate;
     private boolean invalidUpdate;
     private ThemeStyleContext themeSnapshot;
+    private String themeReference = "";
     private PageReferenceTools.Session references;
     private PageMemoryTools memory;
     private boolean memoryUnavailable;
@@ -296,6 +297,17 @@ public final class PageWorkingCopy {
                 }
             });
         });
+    }
+
+    /** Prefetch once per run so a compact theme brief can lead every turn. */
+    Mono<Void> prepareThemeBrief() {
+        return prepareTheme().doOnNext(context -> {
+            synchronized (this) { themeReference = context.brief(); }
+        }).onErrorResume(error -> Mono.empty()).then();
+    }
+
+    synchronized String themeReference() {
+        return themeReference;
     }
 
     public synchronized void references(PageReferenceTools.Session references) {

@@ -22,6 +22,9 @@ final class PageRunCoordinator {
 
     String owner() { return owner; }
     synchronized boolean stopping() { return stopping; }
+
+    /** Halo may restart a plugin in development mode on the same context; clear the latch. */
+    synchronized void start() { stopping = false; }
     synchronized PageRun get(String name) { return active.get(name); }
     synchronized boolean contains(String name) { return active.containsKey(name); }
 

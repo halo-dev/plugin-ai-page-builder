@@ -67,11 +67,17 @@ final class PageMcpOutputSchemas {
         var rootState = fields("mode", enumeration("light", "dark"), "selector", text(),
             "classes", array(text()), "attributes",
             Map.of("type", "object", "additionalProperties", text()));
+        var wrapper = fields("tag", text(), "classes", array(text()));
+        add(wrapper, "style", text(), false);
+        var contentSlot = fields("template", text(), "slot", array(wrapper), "wrapper",
+            array(wrapper), "contentClasses", array(text()));
+        var uiStack = fields("frameworks", array(text()), "componentClasses", array(text()));
         var schema = fields("layoutState", text(),
             "sources", array(fields("path", text(), "kind", text(), "content", text())),
             "notes", array(text()), "previewCss", text(), "colorMode",
             fields("strategy", enumeration("unknown", "explicit"),
-                "rootStates", array(rootState), "evidence", array(text())));
+                "rootStates", array(rootState), "evidence", array(text())),
+            "contentSlot", contentSlot, "uiStack", uiStack);
         add(schema, "themeName", text(), false);
         add(schema, "displayName", text(), false);
         return schema;

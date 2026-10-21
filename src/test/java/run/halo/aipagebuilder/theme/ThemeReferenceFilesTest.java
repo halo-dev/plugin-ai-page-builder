@@ -90,7 +90,8 @@ class ThemeReferenceFilesTest {
 
     @Test
     void enforcesReadByteAndOutputBudgetsAndRejectsInvalidPaginationAndThemeSwitch() throws Exception {
-        Files.writeString(root.resolve("templates/large.js"), "x".repeat(300 * 1024));
+        Files.writeString(root.resolve("templates/large.js"),
+            "x".repeat(ThemeContextService.MAX_SOURCE_BYTES + 1024));
         var result = service.readFile("theme-a", "templates/large.js", 0, 16 * 1024).block();
         assertThat((String) result.get("content")).hasSize(16 * 1024);
         assertThat(result).containsEntry("truncated", true).containsEntry("byteTruncated", true);

@@ -38,6 +38,7 @@ public class AiPageBuilderPlugin extends BasePlugin {
 
     @Override
     public void start() {
+        chats.start();
         schemeManager.register(SiteMemory.class);
         schemeManager.register(run.halo.aipagebuilder.model.PageChatCheckpoint.class, indexes ->
             indexes.add(IndexSpecs.<run.halo.aipagebuilder.model.PageChatCheckpoint, String>single("spec.pageName", String.class)
