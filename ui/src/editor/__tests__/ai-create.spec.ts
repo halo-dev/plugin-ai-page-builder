@@ -39,7 +39,13 @@ vi.mock('@vueuse/router', async () => {
 })
 // ui-shared's index pulls in pinia, which the console provides at runtime but tests lack.
 vi.mock('@halo-dev/ui-shared', () => ({
-  utils: { date: { timeAgo: () => '', format: () => '' } },
+  utils: {
+    date: {
+      timeAgo: () => '',
+      format: (_date: unknown, format: string) =>
+        format === 'YYYYMMDD-HHmmss' ? '20261021-153045' : '',
+    },
+  },
 }))
 vi.mock('@halo-dev/components', async () => {
   const { defineComponent, h } = await import('vue')
@@ -270,11 +276,11 @@ describe('page creation', () => {
       }),
     )
     const downloads: string[] = []
-    const click = vi
-      .spyOn(HTMLAnchorElement.prototype, 'click')
-      .mockImplementation(function (this: HTMLAnchorElement) {
-        downloads.push(this.download)
-      })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      downloads.push(this.download)
+    })
     const wrapper = mount(HomeView, {
       global: {
         stubs: { FormKit, SearchInput, PagePreviewCard: true, RouterLink: true },
@@ -290,7 +296,7 @@ describe('page creation', () => {
     expect(mocks.export).toHaveBeenCalledWith({ name: 'original' }, { responseType: 'blob' })
     expect(objectUrl).toHaveBeenCalledWith(expect.any(Blob))
     expect(click).toHaveBeenCalledOnce()
-    expect(downloads).toEqual([expect.stringMatching(/^original-\d{8}-\d{6}\.zip$/)])
+    expect(downloads).toEqual(['original-20261021-153045.zip'])
     click.mockRestore()
     vi.unstubAllGlobals()
     wrapper.unmount()
