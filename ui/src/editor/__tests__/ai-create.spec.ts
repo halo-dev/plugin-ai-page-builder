@@ -181,10 +181,10 @@ describe('page creation', () => {
       '_blank',
       'noopener',
     )
-    await wrapper
+    const previewButtons = wrapper
       .findAll('button')
-      .find((button) => button.text() === '预览 ↗')!
-      .trigger('click')
+      .filter((button) => button.text() === '管理员预览 ↗')
+    await previewButtons[previewButtons.length - 1]!.trigger('click')
     expect(open).toHaveBeenLastCalledWith('/preview/draft-id', '_blank', 'noopener')
     open.mockRestore()
     wrapper.unmount()
