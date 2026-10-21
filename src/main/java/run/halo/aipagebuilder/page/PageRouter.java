@@ -43,7 +43,7 @@ public class PageRouter {
                     return renderer.render(incoming, detail.page().name(),
                             detail.page().slug(), detail.page().themeLayout(), detail.document(),
                             detail.page().title(), detail.page().description(),
-                            viewer.superAdmin())
+                            viewer.superAdmin(), true)
                         // Theme layouts can render user-specific markup, and the super
                         // administrator variant strips scripts. Only anonymous responses may
                         // be shared by a CDN.

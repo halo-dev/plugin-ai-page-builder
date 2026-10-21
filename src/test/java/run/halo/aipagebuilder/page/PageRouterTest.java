@@ -45,12 +45,12 @@ class PageRouterTest {
             "draft", "published", Instant.now(), true);
         when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document), any(), any(),
-            eq(false))).thenReturn(RenderingResponse.create("test").build());
+            eq(false), eq(true))).thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
         assertThat(handler.handle(request).block().statusCode().value()).isEqualTo(200);
-        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
         when(service.findPublished("about")).thenReturn(Mono.empty());
         when(service.findPublished("about/company/child")).thenReturn(Mono.empty());
         assertThat(router.route(request("/about")).block()).isNull();
@@ -80,7 +80,7 @@ class PageRouterTest {
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document), any(), any(),
-            anyBoolean())).thenReturn(RenderingResponse.create("test").build());
+            anyBoolean(), anyBoolean())).thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
@@ -89,7 +89,7 @@ class PageRouterTest {
             AuthorityUtils.createAuthorityList("ROLE_super-role"));
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block();
-        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", true);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
 
         var impersonating = new UsernamePasswordAuthenticationToken("member", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated",
@@ -97,17 +97,17 @@ class PageRouterTest {
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating)).block();
         verify(renderer, times(2))
-            .render(request, "stable-id", "about/company", true, document, "Company", "", true);
+            .render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
 
         var member = new UsernamePasswordAuthenticationToken("member", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated"));
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)).block();
-        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
 
         handler.handle(request).block();
         verify(renderer, times(2))
-            .render(request, "stable-id", "about/company", true, document, "Company", "", false);
+            .render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
     }
 
     @Test
@@ -117,7 +117,7 @@ class PageRouterTest {
             "draft", "published", Instant.now(), true);
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
             .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
@@ -165,7 +165,7 @@ class PageRouterTest {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(List.of()), document)));
-        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
             .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
@@ -183,7 +183,7 @@ class PageRouterTest {
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block();
         verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            true);
+            true, true);
     }
 
     @Test
@@ -194,7 +194,7 @@ class PageRouterTest {
             new ThemePage.PageMember(ThemePage.MemberType.ROLE, "editors"));
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(members), document)));
-        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
             .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
@@ -207,21 +207,21 @@ class PageRouterTest {
         assertThat(aliceResponse).isNotNull();
         assertThat(aliceResponse).isNotInstanceOf(PageCacheResponse.class);
         verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            false);
+            false, true);
 
         var editor = new UsernamePasswordAuthenticationToken("bob", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_editors"));
         handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(editor)).block();
         verify(renderer, times(2)).render(request, "stable-id", "about/company", true, document,
-            "Company", "", false);
+            "Company", "", false, true);
 
         var outsider = new UsernamePasswordAuthenticationToken("carol", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated"));
         assertNotFound(handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(outsider)));
         verify(renderer, never()).render(request, "stable-id", "about/company", true, document,
-            "Company", "", true);
+            "Company", "", true, true);
     }
 
     @Test
@@ -232,14 +232,14 @@ class PageRouterTest {
             "published", Instant.now(), true);
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
             .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
         assertThat(handler.handle(request).block()).isInstanceOf(PageCacheResponse.class);
         verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            false);
+            false, true);
     }
 
     @Test
@@ -302,7 +302,7 @@ class PageRouterTest {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         when(service.findPublished("about/company"))
             .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
-        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
             .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
@@ -315,7 +315,7 @@ class PageRouterTest {
         assertThat(response).isNotNull();
         assertThat(response).isNotInstanceOf(PageCacheResponse.class);
         verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            true);
+            true, true);
     }
 
     private static PageApi.PageSummary restrictedPage(List<ThemePage.PageMember> members) {

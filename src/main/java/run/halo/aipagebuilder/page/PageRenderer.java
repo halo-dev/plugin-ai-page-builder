@@ -8,14 +8,20 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import reactor.core.publisher.Mono;
+import run.halo.app.extension.GVK;
+import run.halo.app.extension.GroupVersionKind;
 import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.app.theme.Constant;
 import run.halo.app.theme.TemplateNameResolver;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
+import run.halo.aipagebuilder.model.ThemePage;
 
 @Component
 public class PageRenderer {
+    /** Halo's tracker head processor reads these variables to emit the visit counter script. */
+    private static final GVK THEME_PAGE_GVK = ThemePage.class.getAnnotation(GVK.class);
+
     private final TemplateNameResolver templateNameResolver;
     private final PageRenderCache content;
     private final PageOrigins origins;
@@ -29,11 +35,12 @@ public class PageRenderer {
 
     public Mono<RenderingResponse> render(ServerRequest request, String name, String slug,
         boolean themeLayout, PageDocument document, String title, String description) {
-        return render(request, name, slug, themeLayout, document, title, description, false);
+        return render(request, name, slug, themeLayout, document, title, description, false, false);
     }
 
     public Mono<RenderingResponse> render(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document, String title, String description, boolean disableScripts) {
+        boolean themeLayout, PageDocument document, String title, String description,
+        boolean disableScripts, boolean trackVisit) {
         return Mono.defer(() -> {
             var rootId = "ai-page-builder-" + name;
             var compiled = content.compile(rootId, document);
@@ -49,6 +56,13 @@ public class PageRenderer {
                         .header("Cache-Control", CacheControl.noStore().getHeaderValue())
                         .modelAttribute("aiPageBuilder", pageView)
                         .modelAttribute("_templateId", "plugin:ai-page-builder:" + templateName);
+                    if (trackVisit) {
+                        response.modelAttribute("name", name)
+                            .modelAttribute("groupVersionKind",
+                                new GroupVersionKind(THEME_PAGE_GVK.group(),
+                                    THEME_PAGE_GVK.version(), THEME_PAGE_GVK.kind()))
+                            .modelAttribute("plural", THEME_PAGE_GVK.plural());
+                    }
                     // Imported pages may omit the optional description.
                     if (description != null) {
                         response.modelAttribute(Constant.META_DESCRIPTION_VARIABLE_NAME,
