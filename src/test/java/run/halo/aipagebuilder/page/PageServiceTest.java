@@ -269,6 +269,17 @@ class PageServiceTest {
     }
 
     @Test
+    void importsAccessRestrictionButNotMembers() {
+        var document = new PageDocument(2, "code", null, null, "<p>受限</p>", "", "");
+        var members = List.of(new ThemePage.PageMember(ThemePage.MemberType.USER, "alice"));
+        var archive = PageExport.zip(PageExportTest.detail(document, false, true, members));
+        var review = reviewImport(archive, AiReview.Verdict.SAFE);
+        var imported = importer.importPage(review.reviewId(), archive, "recipient", false).block();
+        assertThat(imported.page().authorizeRequired()).isTrue();
+        assertThat(imported.page().members()).isNull();
+    }
+
+    @Test
     void invalidImportedContentDoesNotCreatePageOrRevision() throws Exception {
         var files = PageArchiveTest.files();
         files.put("page.html", "<script>alert(1)</script>");
@@ -554,6 +565,20 @@ class PageServiceTest {
         assertThat(copy.page().authorizeRequired()).isTrue();
         assertThat(copy.page().members()).isEqualTo(members);
         assertThat(copy.page().publishedRevision()).isNull();
+    }
+
+    @Test
+    void cloningDropsNullMembersWithoutLeakingARevision() {
+        var original = service.create(new CreatePageRequest("original", "Original"), "admin").block();
+        var alice = new ThemePage.PageMember(ThemePage.MemberType.USER, "alice");
+        var stored = pages.get(original.page().name());
+        stored.getSpec().setAuthorizeRequired(true);
+        stored.getSpec().setMembers(java.util.Arrays.asList(alice, null));
+        var copy = service.clonePage(original.page().name(),
+            new PageApi.ClonePageRequest(original.page().version(), "copy", "Copy"), "admin").block();
+        assertThat(copy.page().members()).containsExactly(alice);
+        assertThat(pages).hasSize(2);
+        assertThat(revisions).hasSize(2);
     }
 
     @Test

@@ -59,6 +59,23 @@ class PageArchiveTest {
         assertThat(imported.document().mode()).isEqualTo("code");
         assertThat(imported.document().projectData()).isNull();
         assertThat(imported.themeLayout()).isFalse();
+        assertThat(imported.authorizeRequired()).isFalse();
+    }
+
+    @Test
+    void readsOptionalAccessRestriction() throws Exception {
+        var files = files();
+        files.put("page.json", files.get("page.json").replace("\"themeLayout\":false",
+            "\"themeLayout\":false,\"authorizeRequired\":true"));
+        assertThat(PageArchive.read(zip(files)).authorizeRequired()).isTrue();
+    }
+
+    @Test
+    void rejectsWrongAccessRestrictionType() throws Exception {
+        var files = files();
+        files.put("page.json", files.get("page.json").replace("\"themeLayout\":false",
+            "\"themeLayout\":false,\"authorizeRequired\":\"true\""));
+        assertInvalid(zip(files), "页面信息无效");
     }
 
     @Test

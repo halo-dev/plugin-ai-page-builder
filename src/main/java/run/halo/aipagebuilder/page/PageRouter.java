@@ -1,13 +1,11 @@
 package run.halo.aipagebuilder.page;
 
 import java.util.Collection;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -16,7 +14,7 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.web.reactive.function.server.RequestPredicates;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerResponse;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.reactive.resource.NoResourceFoundException;
 import reactor.core.publisher.Mono;
 import run.halo.aipagebuilder.model.ThemePage;
 
@@ -38,7 +36,9 @@ public class PageRouter {
             return service.findPublished(slug)
                 .map(detail -> incoming -> viewer().flatMap(viewer -> {
                     if (!canRead(detail.page(), viewer)) {
-                        return Mono.error(new ResponseStatusException(HttpStatus.NOT_FOUND));
+                        // Reuse the static-resource miss so restricted pages are indistinguishable
+                        // from pages that do not exist.
+                        return Mono.error(new NoResourceFoundException(incoming.uri(), slug));
                     }
                     return renderer.render(incoming, detail.page().name(),
                             detail.page().slug(), detail.page().themeLayout(), detail.document(),
@@ -87,10 +87,12 @@ public class PageRouter {
         if (viewer.username() == null || page.members() == null) {
             return false;
         }
-        return page.members().stream().filter(Objects::nonNull)
+        return page.members().stream()
+            .filter(member -> member != null && member.name() != null)
             .anyMatch(member -> member.kind() == ThemePage.MemberType.USER
                 ? viewer.username().equals(member.name())
-                : viewer.roles().contains(member.name()));
+                : member.kind() == ThemePage.MemberType.ROLE
+                    && viewer.roles().contains(member.name()));
     }
 
     private record Viewer(String username, Set<String> roles, boolean superAdmin) {

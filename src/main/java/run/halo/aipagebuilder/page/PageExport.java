@@ -16,7 +16,8 @@ final class PageExport {
     static byte[] zip(PageDetail detail) {
         var document = detail.document();
         var metadata = new PageArchive.Metadata(PageArchive.FORMAT, 1, detail.page().title(),
-            detail.page().description(), detail.page().themeLayout());
+            detail.page().description(), detail.page().themeLayout(),
+            detail.page().authorizeRequired());
         var html = "<!doctype html>\n<html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
             + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             + "<title>" + Entities.escape(detail.page().title()) + "</title>"
@@ -33,7 +34,8 @@ final class PageExport {
                 + "这是已保存草稿的 HTML/CSS/JavaScript，不含主题外壳、主题样式、附件文件、聊天或历史。\n"
                 + "可在新建页面时导入此 ZIP，创建新的未发布草稿。\n"
                 + "导入读取 page.json（format: ai-page-builder，version: 1）、page.html 正文、styles.css 和 script.js。\n"
-                + "page.json 保存 title、description、themeLayout；index.html 仅用于本地预览。\n"
+                + "page.json 保存 title、description、themeLayout、authorizeRequired；"
+                + "成员列表不随包导出。index.html 仅用于本地预览。\n"
                 + "图片、字体、相对路径和主题变量可能需要原站点环境；离线使用前请调整资源地址。\n"
                 + "主题亮暗根条件需由集成环境设置（如 html.dark），导出不会复制主题私有脚本。\n"
                 + "script.js 在直接打开或部署此源码时会执行；Console 运行预览的 iframe 沙箱不随源码包提供。\n");

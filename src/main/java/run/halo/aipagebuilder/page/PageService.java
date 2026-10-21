@@ -103,8 +103,8 @@ public class PageService {
             .then(Mono.fromCallable(() -> PageArchive.read(archive))
                 .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic()))
             .flatMap(imported -> createDocument(null, imported.document(),
-                imported.title(), imported.description(), imported.themeLayout(), false, null,
-                actor));
+                imported.title(), imported.description(), imported.themeLayout(),
+                imported.authorizeRequired(), null, actor));
     }
 
     public Mono<PageDetail> clonePage(String name, PageApi.ClonePageRequest request, String actor) {
@@ -141,7 +141,10 @@ public class PageService {
                     page.getSpec().setSlug(normalizedSlug);
                     page.getSpec().setThemeLayout(themeLayout == null || themeLayout);
                     page.getSpec().setAuthorizeRequired(authorizeRequired);
-                    page.getSpec().setMembers(members == null ? null : List.copyOf(members));
+                    // Drop malformed entries before creating the page; a null member would
+                    // otherwise fail after the revision was already written.
+                    page.getSpec().setMembers(members == null ? null
+                        : members.stream().filter(Objects::nonNull).toList());
                     applyDraft(page, created);
                     return client.create(page).flux().single()
                         .onErrorResume(error -> {

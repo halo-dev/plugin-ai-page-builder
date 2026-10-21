@@ -26,6 +26,7 @@ import org.springframework.web.reactive.function.server.HandlerStrategies;
 import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
+import org.springframework.web.reactive.resource.NoResourceFoundException;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 import run.halo.aipagebuilder.model.PageDocument;
@@ -255,6 +256,44 @@ class PageRouterTest {
         assertNotFound(handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)));
         assertNotFound(handler.handle(request));
+        verifyNoInteractions(renderer);
+    }
+
+    @Test
+    void malformedMemberKindsDoNotGrantAccess() {
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
+        var members = List.of(new ThemePage.PageMember(null, "editors"),
+            new ThemePage.PageMember(null, "alice"));
+        when(service.findPublished("about/company"))
+            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(members), document)));
+        var request = request("/about/company");
+        var handler = router.route(request).block();
+        assertThat(handler).isNotNull();
+
+        var editor = new UsernamePasswordAuthenticationToken("bob", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_editors"));
+        assertNotFound(handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(editor)));
+        var alice = new UsernamePasswordAuthenticationToken("alice", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertNotFound(handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(alice)));
+        verifyNoInteractions(renderer);
+    }
+
+    @Test
+    void restrictedPagesLookLikeMissingResources() {
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
+        when(service.findPublished("about/company"))
+            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
+        var request = request("/about/company");
+        var handler = router.route(request).block();
+        assertThat(handler).isNotNull();
+
+        assertThatThrownBy(() -> handler.handle(request).block())
+            .isInstanceOfSatisfying(NoResourceFoundException.class,
+                error -> assertThat(error.getBody().getDetail())
+                    .isEqualTo("No static resource about/company."));
         verifyNoInteractions(renderer);
     }
 
