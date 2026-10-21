@@ -50,13 +50,11 @@ function cloned(name: string) {
   cloneTarget.value = undefined
   openEditor(name)
 }
-// Published pages go straight to the public URL; drafts fall back to the theme preview.
 const { pageUrl } = usePublicSiteUrl()
+function preview(item: PageSummary) {
+  window.open(pagePreviewUrl(item.name), '_blank', 'noopener')
+}
 function open(item: PageSummary) {
-  if (!item.publishedRevision) {
-    window.open(pagePreviewUrl(item.name), '_blank', 'noopener')
-    return
-  }
   window.open(pageUrl(item.slug || item.name), '_blank', 'noopener')
 }
 const exportMutation = useMutation({
@@ -184,6 +182,7 @@ const {
         :item="item"
         :disabled="mutating"
         @open="openEditor(item.name)"
+        @preview="preview"
         @visit="open"
         @settings="openSettings"
         @update="publishUpdate"

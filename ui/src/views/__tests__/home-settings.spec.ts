@@ -68,6 +68,7 @@ vi.mock('@halo-dev/components', async () => {
       [
         'VAlert',
         'VDropdown',
+        'VDropdownDivider',
         'VDropdownItem',
         'VEmpty',
         'VLoading',

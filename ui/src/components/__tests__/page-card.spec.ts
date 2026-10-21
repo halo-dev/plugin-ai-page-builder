@@ -15,6 +15,7 @@ vi.mock('@halo-dev/components', async () => {
           h('button', { ...attrs, disabled: props.disabled }, slots.default?.()),
     }),
     VDropdown: { template: '<div><slot /><slot name="popper" /></div>' },
+    VDropdownDivider: { template: '<div />' },
     VDropdownItem: {
       props: ['disabled'],
       emits: ['click'],
@@ -73,17 +74,19 @@ function mountCard(item: PageSummary, disabled = false) {
 }
 
 describe('page card', () => {
-  it('shows draft state and the preview action for an unpublished page', () => {
+  it('shows draft state and the admin preview action for an unpublished page', () => {
     const wrapper = mountCard(summary())
     expect(wrapper.text()).toContain('未发布')
-    expect(wrapper.text()).toContain('预览 ↗')
+    expect(wrapper.text()).toContain('管理员预览')
+    expect(wrapper.text()).not.toContain('访问页面')
     expect(wrapper.text()).toContain('发布')
     expect(wrapper.text()).not.toContain('更新发布')
   })
 
-  it('shows published state and the public action for a published page', () => {
+  it('shows published state with both admin preview and public actions', () => {
     const wrapper = mountCard(summary({ publishedRevision: 'r2', hasUnpublishedChanges: true }))
     expect(wrapper.text()).toContain('有未发布修改')
+    expect(wrapper.text()).toContain('管理员预览')
     expect(wrapper.text()).toContain('访问页面 ↗')
     expect(wrapper.text()).toContain('更新发布')
     expect(wrapper.text()).toContain('取消发布')
@@ -95,15 +98,18 @@ describe('page card', () => {
   })
 
   it('emits card actions with the page summary', async () => {
-    const item = summary()
+    const item = summary({ publishedRevision: 'r2' })
     const wrapper = mountCard(item)
-    const button = wrapper.findAll('button').find((node) => node.text() === '预览 ↗')!
+    const button = wrapper.findAll('button').find((node) => node.text() === '管理员预览 ↗')!
     await button.trigger('click')
+    const visitButton = wrapper.findAll('button').find((node) => node.text() === '访问页面 ↗')!
+    await visitButton.trigger('click')
     const itemText = (text: string) => wrapper.findAll('div').find((node) => node.text() === text)!
     await itemText('设置').trigger('click')
     await itemText('克隆页面').trigger('click')
     await itemText('导出').trigger('click')
     await itemText('删除页面').trigger('click')
+    expect(wrapper.emitted('preview')).toEqual([[item]])
     expect(wrapper.emitted('visit')).toEqual([[item]])
     expect(wrapper.emitted('settings')).toEqual([[item]])
     expect(wrapper.emitted('clone')).toEqual([[item]])

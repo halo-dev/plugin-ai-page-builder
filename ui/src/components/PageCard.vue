@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { VButton, VDropdown, VDropdownItem, VStatusDot } from '@halo-dev/components'
+import {
+  VButton,
+  VDropdown,
+  VDropdownDivider,
+  VDropdownItem,
+  VStatusDot,
+} from '@halo-dev/components'
 import { utils } from '@halo-dev/ui-shared'
 import IconMore from '~icons/mingcute/more-2-line'
 import type { PageSummary } from '../api/generated'
@@ -10,6 +16,7 @@ import PublishPagePopper from './PublishPagePopper.vue'
 const props = defineProps<{ item: PageSummary; disabled?: boolean }>()
 const emit = defineEmits<{
   open: [item: PageSummary]
+  preview: [item: PageSummary]
   visit: [item: PageSummary]
   settings: [item: PageSummary]
   update: [item: PageSummary]
@@ -28,7 +35,6 @@ const status = computed(() =>
 )
 const updatedAt = computed(() => utils.date.timeAgo(props.item.updatedAt) ?? '')
 const updatedAtFull = computed(() => utils.date.format(props.item.updatedAt))
-const visitLabel = computed(() => (props.item.publishedRevision ? '访问页面 ↗' : '预览 ↗'))
 </script>
 
 <template>
@@ -55,11 +61,25 @@ const visitLabel = computed(() => (props.item.publishedRevision ? '访问页面 
         <span v-tooltip="updatedAtFull" class="text-[11px] text-gray-400">{{ updatedAt }}</span>
       </div>
       <div class="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3.5">
-        <VButton size="sm" class="flex-1" @click="emit('visit', item)">
-          {{ visitLabel }}
+        <VButton
+          v-tooltip="'在受保护模式下访问页面，内容是最新的版本，可能包含未发布修改'"
+          size="sm"
+          class="flex-1"
+          @click="emit('preview', item)"
+        >
+          管理员预览 ↗
+        </VButton>
+        <VButton
+          v-if="item.publishedRevision"
+          v-tooltip="'公开访问链接，内容为已发布版本'"
+          size="sm"
+          class="flex-1"
+          @click="emit('visit', item)"
+        >
+          访问页面 ↗
         </VButton>
         <VDropdown>
-          <VButton size="sm" :disabled="disabled" :aria-label="`${item.title}的操作`">
+          <VButton ghost size="sm" :disabled="disabled" :aria-label="`${item.title}的操作`">
             <IconMore />
           </VButton>
           <template #popper>
@@ -80,20 +100,22 @@ const visitLabel = computed(() => (props.item.publishedRevision ? '访问页面 
             <VDropdownItem v-else v-close-popper :disabled="disabled" @click="emit('update', item)">
               更新发布
             </VDropdownItem>
+            <VDropdownItem v-close-popper :disabled="disabled" @click="emit('clone', item)">
+              克隆页面
+            </VDropdownItem>
+            <VDropdownItem v-close-popper :disabled="disabled" @click="emit('export', item)">
+              导出
+            </VDropdownItem>
+            <VDropdownDivider />
             <VDropdownItem
               v-if="item.publishedRevision"
               v-close-popper
               :disabled="disabled"
+              type="danger"
               @click="emit('unpublish', item)"
             >
               取消发布
             </VDropdownItem>
-            <VDropdownItem v-close-popper :disabled="disabled" @click="emit('clone', item)">
-              克隆页面
-            </VDropdownItem>
-            <VDropdownItem v-close-popper :disabled="disabled" @click="emit('export', item)"
-              >导出</VDropdownItem
-            >
             <VDropdownItem
               v-close-popper
               type="danger"
