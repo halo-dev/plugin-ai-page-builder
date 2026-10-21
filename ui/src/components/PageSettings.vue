@@ -94,7 +94,7 @@ function submit() {
           type="checkbox"
           name="authorizeRequired"
           label="禁止公开访问"
-          help="开启后，公开链接仅超级管理员或已授权的成员可以访问，其他访客将看到 404。"
+          help="开启后，公开链接仅超级管理员可以访问，其他访客将看到 404。"
         />
       </FormKit>
     </div>
