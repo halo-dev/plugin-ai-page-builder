@@ -162,8 +162,8 @@ function refetchDetails() {
                 {{ selected.createdBy }}
               </p>
             </div>
-            <ApbSegmented v-model="view" :options="viewOptions" />
             <ApbSegmented v-if="view === 'preview'" v-model="device" :options="deviceOptions" />
+            <ApbSegmented v-model="view" :options="viewOptions" />
             <div class="flex items-center gap-1">
               <button
                 type="button"
