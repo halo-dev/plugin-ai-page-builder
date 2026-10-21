@@ -131,6 +131,15 @@ class PageRendererTest {
     }
 
     @Test
+    void importedPagesWithoutADescriptionOmitTheSeoVariable() {
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder-standalone")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder-standalone"));
+        var response = (RenderingResponse) renderer.render(request, "about", "about/company",
+            false, document, "About", null).block();
+        assertThat(response.model()).doesNotContainKey("seoMetaDescription");
+    }
+
+    @Test
     void superAdministratorViewsStripScriptsAndFlagTheTemplate() {
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
