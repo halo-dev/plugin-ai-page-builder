@@ -21,9 +21,9 @@ public final class PageApi {
         }
     }
 
-    @Schema(name = "ClonePageRequest", requiredProperties = {"version", "slug", "title"})
+    @Schema(name = "ClonePageRequest", requiredProperties = {"version", "title"})
     public record ClonePageRequest(Long version,
-        @Schema(pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
+        @Schema(nullable = true, pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
             maxLength = 200) String slug, String title) { }
 
     @Schema(name = "UpdatePagePropertiesRequest", requiredProperties = {"version"},

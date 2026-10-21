@@ -108,8 +108,6 @@ public class PageService {
 
     public Mono<PageDetail> clonePage(String name, PageApi.ClonePageRequest request, String actor) {
         return mutate(name, request.version(), source -> draftDetail(source).flatMap(detail -> {
-            // Clone still requires an explicit slug even though create accepts a blank one.
-            PagePaths.validate(request.slug());
             var original = detail.document();
             var copy = new PageDocument(original.js().isEmpty() ? 1 : 2, "code", null, null,
                 original.html(), original.css(), original.js());
