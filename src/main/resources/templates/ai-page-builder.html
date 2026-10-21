@@ -3,7 +3,6 @@
       th:replace="~{layout :: html(head=~{::pageHead}, content=~{::pageBody})}">
 <th:block th:fragment="pageHead">
   <title th:text="${aiPageBuilder.title}"></title>
-  <meta name="description" th:content="${aiPageBuilder.description}">
   <style th:utext="${aiPageBuilder.css}"></style>
 </th:block>
 <th:block th:fragment="pageBody">

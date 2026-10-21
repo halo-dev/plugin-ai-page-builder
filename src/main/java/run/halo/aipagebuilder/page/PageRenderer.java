@@ -9,6 +9,7 @@ import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import reactor.core.publisher.Mono;
 import run.halo.app.infra.ExternalUrlSupplier;
+import run.halo.app.theme.Constant;
 import run.halo.app.theme.TemplateNameResolver;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
@@ -42,12 +43,19 @@ public class PageRenderer {
                 compiled.css(), scriptBlocked);
             var templateName = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";
             return templateNameResolver.resolveTemplateNameOrDefault(request.exchange(), templateName)
-                .flatMap(template -> RenderingResponse.create(template)
-                    .header("Content-Type", MediaType.TEXT_HTML_VALUE)
-                    .header("Cache-Control", CacheControl.noStore().getHeaderValue())
-                    .modelAttribute("aiPageBuilder", pageView)
-                    .modelAttribute("_templateId", "plugin:ai-page-builder:" + templateName)
-                    .build());
+                .flatMap(template -> {
+                    var response = RenderingResponse.create(template)
+                        .header("Content-Type", MediaType.TEXT_HTML_VALUE)
+                        .header("Cache-Control", CacheControl.noStore().getHeaderValue())
+                        .modelAttribute("aiPageBuilder", pageView)
+                        .modelAttribute("_templateId", "plugin:ai-page-builder:" + templateName);
+                    // Imported pages may omit the optional description.
+                    if (description != null) {
+                        response.modelAttribute(Constant.META_DESCRIPTION_VARIABLE_NAME,
+                            description);
+                    }
+                    return response.build();
+                });
         });
     }
 

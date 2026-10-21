@@ -59,7 +59,9 @@ class PageRendererTest {
         var response = (RenderingResponse) renderer.render(request, "about", "about/company", true, document, "About", "Description").block();
         assertThat(response.name()).isEqualTo("plugin:ai-page-builder:ai-page-builder");
         assertThat(response.headers().getCacheControl()).isEqualTo("no-store");
-        assertThat(response.model()).containsOnlyKeys("aiPageBuilder", "_templateId");
+        assertThat(response.model()).containsOnlyKeys("aiPageBuilder", "seoMetaDescription",
+            "_templateId");
+        assertThat(response.model().get("seoMetaDescription")).isEqualTo("Description");
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(view.rootId()).isEqualTo("ai-page-builder-about");
         assertThat(view.slug()).isEqualTo("about/company");
@@ -80,7 +82,8 @@ class PageRendererTest {
             .render(request, "about", "about/company", true, interactive, "About", "Description").block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(response.name()).isEqualTo("theme:custom-ai-page-builder");
-        assertThat(response.model()).containsOnlyKeys("aiPageBuilder", "_templateId");
+        assertThat(response.model()).containsOnlyKeys("aiPageBuilder", "seoMetaDescription",
+            "_templateId");
         assertThat(view.css()).contains("#ai-page-builder-about p", "html.dark #ai-page-builder-about p");
         assertThat(view.html()).startsWith(interactive.html());
         var body = Jsoup.parseBodyFragment(view.html()).body();
@@ -125,6 +128,15 @@ class PageRendererTest {
         assertThat(response.name()).isEqualTo("plugin:ai-page-builder:ai-page-builder-standalone");
         assertThat(response.model().get("_templateId"))
             .isEqualTo("plugin:ai-page-builder:ai-page-builder-standalone");
+    }
+
+    @Test
+    void importedPagesWithoutADescriptionOmitTheSeoVariable() {
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder-standalone")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder-standalone"));
+        var response = (RenderingResponse) renderer.render(request, "about", "about/company",
+            false, document, "About", null).block();
+        assertThat(response.model()).doesNotContainKey("seoMetaDescription");
     }
 
     @Test
