@@ -154,7 +154,7 @@ class FoundationBridgeTest {
         var chunks = bridge.chat("model", java.util.List.of(), "change", copy).collectList().block();
         assertThat(chunks).extracting(value -> value.get("type")).containsExactly("text-delta");
         assertThat(request.get().getTools()).extracting(tool -> tool.getName())
-            .containsExactly("get_theme_context", "read_current_page", "set_page_slug", "update_page_title", "rename_session", "patch_current_page", "update_current_page",
+            .containsExactly("get_theme_context", "read_current_page", "set_page_slug", "update_page_title", "update_page_description", "rename_session", "patch_current_page", "update_current_page",
                 "ask_user", "list_theme_files", "read_theme_file", "list_posts", "list_single_pages",
                 "list_ai_pages", "read_ai_page", "get_site_profile", "get_navigation", "read_content", "search_attachments",
                 "fetch_webpage", "search_public_apis", "get_public_api");

@@ -106,6 +106,8 @@ final class PageRun {
         this.copy = new PageWorkingCopy(base.document(), policy, themeContext,
             base.page().slug(), base.page().publishedRevision() != null);
         this.copy.title(base.page().title());
+        this.copy.description(base.page().description());
+        this.copy.existingDescription(base.page().description());
         this.copy.identify(base.page().name(), sessionId, request.runId(), request.modelName());
         this.copy.annotations(request.annotations() == null ? List.of() : request.annotations());
     }

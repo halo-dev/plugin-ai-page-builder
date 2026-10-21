@@ -414,6 +414,21 @@ class PageServiceTest {
     }
 
     @Test
+    void aiSavePersistsDescriptionWithoutANewContentRevision() {
+        var created = service.create(new CreatePageRequest("about", "About"), "admin").block();
+        var saved = service.saveAi(created.page().name(), created.page().version(),
+            created.document(), "admin", "run-description", created.page().draftRevision(),
+            null, null, " 了解我们的公司与团队。 ").block();
+        assertThat(saved.page().description()).isEqualTo(" 了解我们的公司与团队。 ");
+        assertThat(saved.page().draftRevision()).isEqualTo(created.page().draftRevision());
+        assertThat(saved.page().title()).isEqualTo("About");
+        assertThat(saved.page().slug()).isEqualTo("about");
+        assertThat(revisions).hasSize(1);
+        assertThat(service.committedAiRun(created.page().name(), "run-description").block())
+            .isEqualTo(new ThemePage.AiCommit("run-description", null));
+    }
+
+    @Test
     void pathOnlyAiSaveIsPersistedAndCanBeReconciled() {
         var created = service.create(new CreatePageRequest(null, "About"), "admin").block();
         var saved = service.saveAi(created.page().name(), created.page().version(), created.document(),

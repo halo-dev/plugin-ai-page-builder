@@ -190,18 +190,28 @@ public class PageService {
 
     public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
         String actor, String runId, String baseRevision, String slug, String title) {
+        return saveAi(name, version, document, actor, runId, baseRevision, slug, title, null);
+    }
+
+    public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
+        String actor, String runId, String baseRevision, String slug, String title,
+        String description) {
         return mutate(name, version, page -> {
             if (baseRevision != null && !baseRevision.equals(page.getSpec().getDraftRevision())) {
                 return Mono.error(conflict("Page changed; reload before saving"));
             }
             contentPolicy.validate(document);
-            if (title != null) validateProperties(title, page.getSpec().getDescription());
+            if (title != null || description != null) {
+                validateProperties(title == null ? page.getSpec().getTitle() : title,
+                    description == null ? page.getSpec().getDescription() : description);
+            }
             if (slug != null && (page.getSpec().getSlug() != null
                 || page.getSpec().getPublishedRevision() != null)) {
                 return Mono.error(conflict("已有访问路径或已发布的页面不能由 AI 更改路径"));
             }
             Supplier<Mono<PageDetail>> write = () -> {
                 if (title != null) page.getSpec().setTitle(title);
+                if (description != null) page.getSpec().setDescription(description);
                 if (slug != null) page.getSpec().setSlug(slug);
                 page.getSpec().setLastAiCommit(new ThemePage.AiCommit(runId, null));
                 page.getSpec().setUpdatedAt(Instant.now());
