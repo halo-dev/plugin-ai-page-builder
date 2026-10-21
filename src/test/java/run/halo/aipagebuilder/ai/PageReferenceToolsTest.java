@@ -185,6 +185,17 @@ class PageReferenceToolsTest {
     }
 
     @Test
+    void acceptsThemeReadOffsetsUpToTheAdvertisedLimit() {
+        when(themes.activeThemeName()).thenReturn(Mono.just("a"));
+        when(themes.readFile("a", "templates/main.css", ThemeContextService.MAX_SOURCE_BYTES,
+            16)).thenReturn(Mono.just(Map.of("content", "")));
+        var result = tools.session(null, true).readThemeFile(Map.of("themeName", "a",
+            "path", "templates/main.css", "offset", ThemeContextService.MAX_SOURCE_BYTES,
+            "limit", 16)).block();
+        assertThat(result).containsEntry("content", "");
+    }
+
+    @Test
     void dispatchesFetchWebpageToWebReferenceTools() {
         var arguments = Map.<String, Object>of("url", "https://example.org/reference");
         var result = Map.<String, Object>of("text", "Reference content");

@@ -19,6 +19,12 @@ import type { Source } from './source';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { ThemeColorMode } from './theme-color-mode';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ThemeContentSlot } from './theme-content-slot';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ThemeUiStack } from './theme-ui-stack';
 
 /**
  * 
@@ -32,6 +38,12 @@ export interface ThemeStyleContext {
      * @memberof ThemeStyleContext
      */
     'colorMode': ThemeColorMode;
+    /**
+     * 
+     * @type {ThemeContentSlot}
+     * @memberof ThemeStyleContext
+     */
+    'contentSlot': ThemeContentSlot;
     /**
      * 
      * @type {string}
@@ -68,5 +80,11 @@ export interface ThemeStyleContext {
      * @memberof ThemeStyleContext
      */
     'themeName'?: string;
+    /**
+     * 
+     * @type {ThemeUiStack}
+     * @memberof ThemeStyleContext
+     */
+    'uiStack': ThemeUiStack;
 }
 

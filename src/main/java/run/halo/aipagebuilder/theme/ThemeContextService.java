@@ -20,6 +20,7 @@ import run.halo.aipagebuilder.content.ContentPolicy;
 
 @Service
 public class ThemeContextService {
+    public static final int MAX_SOURCE_BYTES = 1024 * 1024;
     private final ReactiveExtensionClient client;
     private final ThemeContextExtractor extractor;
 
@@ -91,17 +92,18 @@ public class ThemeContextService {
     }
 
     public Mono<Map<String, Object>> readFile(String themeName, String path, int offset, int limit) {
-        if (offset < 0 || offset > 256 * 1024 || limit < 1 || limit > 16 * 1024) {
+        if (offset < 0 || offset > MAX_SOURCE_BYTES || limit < 1 || limit > 16 * 1024) {
             return Mono.error(new IllegalArgumentException("Invalid source pagination"));
         }
         return withTheme(themeName, root -> {
             var file = sourcePath(root, path, true);
             byte[] bytes;
             try (var input = Files.newInputStream(file)) {
-                bytes = input.readNBytes(256 * 1024 + 1);
+                bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
             }
-            var byteTruncated = bytes.length > 256 * 1024;
-            var source = new String(bytes, 0, Math.min(bytes.length, 256 * 1024), StandardCharsets.UTF_8);
+            var byteTruncated = bytes.length > MAX_SOURCE_BYTES;
+            var source = new String(bytes, 0, Math.min(bytes.length, MAX_SOURCE_BYTES),
+                StandardCharsets.UTF_8);
             var start = Math.min(offset, source.length());
             var end = Math.min(start + limit, source.length());
             var summary = path + " · " + (start == 0 && !byteTruncated && end == source.length()
@@ -208,12 +210,45 @@ public class ThemeContextService {
         var declared = Path.of(status.getLocation());
         if (!declared.isAbsolute()) return ThemeStyleContext.unavailable();
         var root = declared.toRealPath();
-        var result = extractor.extract(relative -> read(root, relative), name);
+        var pageTemplate = pageTemplate(root, theme);
+        var result = extractor.extract(relative -> read(root, relative), name, pageTemplate);
         var notes = new ArrayList<>(result.notes());
         notes.add("先读取 layout.html 及其引用，检查 content 插槽祖先已有的宽度、padding 和 margin，避免重复添加外层留白。");
         notes.add("同时读取亮色与暗色规则及切换脚本；主题源码仅供参考，不执行其中的模板、HTML 或 JavaScript。");
+        if (!result.contentSlot().wrapper().isEmpty()
+            || !result.contentSlot().contentClasses().isEmpty()) {
+            notes.add("已读取主题页面模板 " + result.contentSlot().template()
+                + " 的正文容器，仅用于文章页参考；生成的落地页不要复制其 wrapper 链或正文类名。");
+        }
         return new ThemeStyleContext(name, displayName, state, result.sources(), notes,
-            result.previewCss(), result.colorMode());
+            result.previewCss(), result.colorMode(), result.contentSlot(), result.uiStack());
+    }
+
+    /**
+     * The generated page is a regular single page, so Halo renders it with page.html. The post
+     * template is a last-resort content-slot reference for themes that reuse post markup.
+     */
+    private static String pageTemplate(Path root, Theme theme) {
+        var candidates = new ArrayList<String>();
+        candidates.add("templates/page.html");
+        candidates.add("templates/post.html");
+        var spec = theme.getSpec();
+        var custom = spec == null ? null : spec.getCustomTemplates();
+        if (custom != null && custom.getPage() != null) {
+            for (var descriptor : custom.getPage()) {
+                var file = descriptor.getFile();
+                if (file == null || file.isBlank()) continue;
+                candidates.add(file.startsWith("templates/") ? file : "templates/" + file);
+            }
+        }
+        try {
+            for (var candidate : candidates) {
+                if (Files.isRegularFile(root.resolve(candidate))) return candidate;
+            }
+        } catch (RuntimeException ignored) {
+            // Invalid custom template paths simply fall back to no page template.
+        }
+        return null;
     }
 
     // The extractor provides only local HTML/CSS paths. Never follow a theme reference to another directory.
@@ -229,12 +264,67 @@ public class ThemeContextService {
             var file = root.resolve(path).toRealPath();
             if (!file.startsWith(templates) || !Files.isRegularFile(file)) return null;
             try (var input = Files.newInputStream(file)) {
-                var bytes = input.readNBytes(256 * 1024 + 1);
-                if (bytes.length > 256 * 1024) return null;
-                return new String(bytes, StandardCharsets.UTF_8);
+                var bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
+                if (bytes.length <= MAX_SOURCE_BYTES) {
+                    return new String(bytes, StandardCharsets.UTF_8);
+                }
+                // Large compiled CSS still carries the base rules we need; parse the prefix
+                // instead of discarding the whole file. Keep the length at the cap so callers
+                // can still tell the source was truncated.
+                var text = new String(bytes, 0, MAX_SOURCE_BYTES, StandardCharsets.UTF_8);
+                if (!relative.endsWith(".css")) return text;
+                var prefix = cssPrefix(text);
+                return prefix + " ".repeat(MAX_SOURCE_BYTES - prefix.length());
             }
         } catch (IOException | IllegalArgumentException error) {
             return null;
         }
+    }
+
+    /**
+     * Cut a truncated stylesheet at the last complete top-level rule. A hard byte cut can land
+     * inside a comment, string or nested block, which makes the CSS parser reject the entire
+     * prefix; the rules before that point are still useful reference data.
+     */
+    private static String cssPrefix(String text) {
+        int end = text.length();
+        int depth = 0;
+        int lastRule = -1;
+        char quote = 0;
+        boolean comment = false;
+        for (int index = 0; index < end; index++) {
+            char current = text.charAt(index);
+            char next = index + 1 < end ? text.charAt(index + 1) : 0;
+            if (comment) {
+                if (current == '*' && next == '/') {
+                    comment = false;
+                    index++;
+                }
+                continue;
+            }
+            if (quote != 0) {
+                if (current == '\\') {
+                    index++;
+                } else if (current == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (current == '\\') {
+                // Outside strings a backslash still escapes the next character, e.g. .x\{y.
+                index++;
+            } else if (current == '/' && next == '*') {
+                comment = true;
+                index++;
+            } else if (current == '"' || current == '\'') {
+                quote = current;
+            } else if (current == '{') {
+                depth++;
+            } else if (current == '}' && depth > 0) {
+                depth--;
+                if (depth == 0) lastRule = index;
+            }
+        }
+        return lastRule < 0 ? "" : text.substring(0, lastRule + 1);
     }
 }

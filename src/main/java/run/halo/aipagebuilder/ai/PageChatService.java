@@ -296,6 +296,10 @@ public class PageChatService {
         });
     }
 
+    public void start() {
+        runs.start();
+    }
+
     @jakarta.annotation.PreDestroy
     public void stop() {
         runs.stop((name, run) ->
@@ -373,7 +377,7 @@ public class PageChatService {
         var timeoutSignal = Sinks.<Void>empty();
         var timeout = run.copy.timeBudget.deadline(RUN_TIMEOUT, AiGenerationException.Reason.RUN_TIMEOUT)
             .doOnError(timeoutSignal::tryEmitError).subscribe();
-        return run.persistCheckpoint().then(Mono.defer(() ->
+        return run.copy.prepareThemeBrief().then(run.persistCheckpoint()).then(Mono.defer(() ->
                 run.is(PageRun.State.INTERRUPTED) ? run.finish(null) : converse(name, run, history,
                 run.request.prompt(), timeoutSignal.asMono())))
             .onErrorResume(error -> {

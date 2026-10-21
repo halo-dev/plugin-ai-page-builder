@@ -57,7 +57,10 @@ models/site-url-response.ts
 models/source.ts
 models/test-operation.ts
 models/theme-color-mode.ts
+models/theme-content-slot.ts
+models/theme-content-wrapper.ts
 models/theme-root-state.ts
 models/theme-style-context.ts
+models/theme-ui-stack.ts
 models/update-page-properties-request.ts
 models/validate-page-content-request.ts
