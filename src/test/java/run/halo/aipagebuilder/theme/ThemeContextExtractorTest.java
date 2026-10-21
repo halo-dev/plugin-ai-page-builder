@@ -528,6 +528,31 @@ class ThemeContextExtractorTest {
     }
 
     @Test
+    void preservesInlineStylesFromDifferentFragmentsOfTheSameFile() {
+        var files = Map.of(
+            "templates/layout.html", """
+                <html><body>
+                <div th:replace="~{page :: first}"></div>
+                <div th:replace="~{page :: second}"></div>
+                <main th:insert="${content}"></main>
+                </body></html>
+                """,
+            "templates/page.html", """
+                <section th:fragment="first"><style>body{color:red}</style></section>
+                <style media="print">body{color:black}</style>
+                <section th:fragment="second"><style>body{color:blue}</style></section>
+                <article th:utext="${singlePage.content.content}"></article>
+                """);
+        for (var pageTemplate : new String[] {null, "templates/page.html"}) {
+            var result = extractor.extract(files::get, "sample", pageTemplate);
+            assertThat(result.sources().stream().filter(source -> source.kind().equals("css"))
+                .map(ThemeContextExtractor.Source::content))
+                .containsExactly("body{color:red}", "body{color:blue}");
+            assertThat(result.previewCss()).isEqualTo("body{color:red}body{color:blue}");
+        }
+    }
+
+    @Test
     void reportsActualMainLandmarkWithoutAssumingHeaderAlignment() {
         for (var main : java.util.List.of("<main>", "<div role='main'>")) {
             var closing = main.startsWith("<main") ? "</main>" : "</div>";
@@ -544,6 +569,24 @@ class ThemeContextExtractorTest {
         assertThat(extractor.extract(path -> "<main th:replace='${content}'></main>")
             .contentSlot().mainLandmark()).isEqualTo("absent");
         assertThat(extractor.extract(path -> "<main></main>").contentSlot().mainLandmark()).isEqualTo("unknown");
+    }
+
+    @Test
+    void keepsHtmlVoidElementsOutsideTheContentSlotAncestry() {
+        for (var tag : java.util.List.of("img", "input", "br", "hr", "meta", "link")) {
+            var result = extractor.extract(path -> """
+                <html><head><meta charset="UTF-8">
+                <th:block th:if="${head != null}"><th:block th:replace="${head}" /></th:block>
+                </head><body><input class="drawer-toggle" th:if="${toggle}">
+                <main class="shell"><%s class="decoration" th:if="${show}">
+                <div class="content-column"><th:block th:replace="${content}" /></div>
+                </main></body></html>
+                """.formatted(tag));
+            assertThat(result.contentSlot().mainLandmark()).as(tag).isEqualTo("present");
+            assertThat(result.contentSlot().slot())
+                .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+                .as(tag).containsExactly("main.shell", "div.content-column");
+        }
     }
 
     @Test

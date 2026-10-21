@@ -28,6 +28,7 @@ import java.util.regex.Pattern;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Element;
 import org.jsoup.parser.Parser;
+import org.jsoup.parser.Tag;
 import run.halo.aipagebuilder.content.ContentPolicy;
 
 /** Extracts untrusted reference data; never resolves a theme, reads files or evaluates Thymeleaf. */
@@ -218,6 +219,8 @@ public class ThemeContextExtractor {
                 return;
             }
             var document = Jsoup.parse(text);
+            // Keep file-wide identities before selecting or pruning individual fragments.
+            var inlineStyles = document.select("style");
             Element root = document;
             if (fragment != null) {
                 root = null;
@@ -278,7 +281,7 @@ public class ThemeContextExtractor {
                 }
                 if (element.normalName().equals("style")) {
                     var inlineStyle = element.data();
-                    var stylePath = path + "#style-" + elements.indexOf(element);
+                    var stylePath = path + "#style-" + (inlineStyles.indexOf(element) + 1);
                     references.add(() -> inlineStyle(stylePath, inlineStyle));
                     element.remove();
                     continue;
@@ -324,7 +327,12 @@ public class ThemeContextExtractor {
             if (text == null) return List.of();
             // Preserve literal Thymeleaf ancestry. The HTML parser moves th:block out of
             // head and can incorrectly wrap the body in a conditional head fragment.
-            var document = Jsoup.parse(text, Parser.xmlParser());
+            var parser = Parser.xmlParser();
+            // HTML void elements never wrap the following content, even without '/>'.
+            parser.tagSet().onNewTag(tag -> {
+                if (Tag.valueOf(tag.normalName()).isEmpty()) tag.set(Tag.Void);
+            });
+            var document = Jsoup.parse(text, parser);
             Element placeholder = null;
             for (var element : document.getAllElements()) {
                 if (element.attr("th:replace").contains("${content}")
@@ -454,15 +462,15 @@ public class ThemeContextExtractor {
                             ? element.attr("href") : element.attr("th:href")));
                 }
             }
-            int styleIndex = 0;
-            for (var element : document.select("style")) {
+            var inlineStyles = document.select("style");
+            for (var element : inlineStyles) {
                 if (!element.attr("media").isBlank()) {
                     omitted(path, "conditional_stylesheet",
                         "带 media 条件的 style 未展开 " + element.attr("media"));
                     continue;
                 }
                 var inline = element.data();
-                var stylePath = path + "#style-" + (++styleIndex);
+                var stylePath = path + "#style-" + (inlineStyles.indexOf(element) + 1);
                 pageStyles.add(() -> inlineStyle(stylePath, inline));
             }
             return new ThemeStyleContext.ContentSlot(path, slot, List.copyOf(adjusted),
