@@ -215,9 +215,10 @@ public class ThemeContextService {
         var notes = new ArrayList<>(result.notes());
         notes.add("先读取 layout.html 及其引用，检查 content 插槽祖先已有的宽度、padding 和 margin，避免重复添加外层留白。");
         notes.add("同时读取亮色与暗色规则及切换脚本；主题源码仅供参考，不执行其中的模板、HTML 或 JavaScript。");
-        if (!result.contentSlot().template().isBlank()) {
+        if (!result.contentSlot().wrapper().isEmpty()
+            || !result.contentSlot().contentClasses().isEmpty()) {
             notes.add("已读取主题页面模板 " + result.contentSlot().template()
-                + " 的正文容器；生成页面需在 layout 插槽内补齐同等的 wrapper 链和正文类名。");
+                + " 的正文容器，仅用于文章页参考；生成的落地页不要复制其 wrapper 链或正文类名。");
         }
         return new ThemeStyleContext(name, displayName, state, result.sources(), notes,
             result.previewCss(), result.colorMode(), result.contentSlot(), result.uiStack());
@@ -264,13 +265,66 @@ public class ThemeContextService {
             if (!file.startsWith(templates) || !Files.isRegularFile(file)) return null;
             try (var input = Files.newInputStream(file)) {
                 var bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
+                if (bytes.length <= MAX_SOURCE_BYTES) {
+                    return new String(bytes, StandardCharsets.UTF_8);
+                }
                 // Large compiled CSS still carries the base rules we need; parse the prefix
-                // instead of discarding the whole file.
-                return new String(bytes, 0, Math.min(bytes.length, MAX_SOURCE_BYTES),
-                    StandardCharsets.UTF_8);
+                // instead of discarding the whole file. Keep the length at the cap so callers
+                // can still tell the source was truncated.
+                var text = new String(bytes, 0, MAX_SOURCE_BYTES, StandardCharsets.UTF_8);
+                if (!relative.endsWith(".css")) return text;
+                var prefix = cssPrefix(text);
+                return prefix + " ".repeat(MAX_SOURCE_BYTES - prefix.length());
             }
         } catch (IOException | IllegalArgumentException error) {
             return null;
         }
+    }
+
+    /**
+     * Cut a truncated stylesheet at the last complete top-level rule. A hard byte cut can land
+     * inside a comment, string or nested block, which makes the CSS parser reject the entire
+     * prefix; the rules before that point are still useful reference data.
+     */
+    private static String cssPrefix(String text) {
+        int end = text.length();
+        int depth = 0;
+        int lastRule = -1;
+        char quote = 0;
+        boolean comment = false;
+        for (int index = 0; index < end; index++) {
+            char current = text.charAt(index);
+            char next = index + 1 < end ? text.charAt(index + 1) : 0;
+            if (comment) {
+                if (current == '*' && next == '/') {
+                    comment = false;
+                    index++;
+                }
+                continue;
+            }
+            if (quote != 0) {
+                if (current == '\\') {
+                    index++;
+                } else if (current == quote) {
+                    quote = 0;
+                }
+                continue;
+            }
+            if (current == '\\') {
+                // Outside strings a backslash still escapes the next character, e.g. .x\{y.
+                index++;
+            } else if (current == '/' && next == '*') {
+                comment = true;
+                index++;
+            } else if (current == '"' || current == '\'') {
+                quote = current;
+            } else if (current == '{') {
+                depth++;
+            } else if (current == '}' && depth > 0) {
+                depth--;
+                if (depth == 0) lastRule = index;
+            }
+        }
+        return lastRule < 0 ? "" : text.substring(0, lastRule + 1);
     }
 }

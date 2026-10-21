@@ -99,7 +99,8 @@ public class PageReferenceTools {
             return Mono.defer(() -> {
                 var requested = required(arguments, "themeName", 253);
                 var path = required(arguments, "path", 512);
-                int offset = integer(arguments, "offset", 0, 0, 256 * 1024);
+                int offset = integer(arguments, "offset", 0, 0,
+                    ThemeContextService.MAX_SOURCE_BYTES);
                 int limit = integer(arguments, "limit", 8192, 1, MAX_SOURCE_CHARS);
                 return pinnedTheme().flatMap(name -> name.equals(requested)
                     ? themes.readFile(name, path, offset, limit)

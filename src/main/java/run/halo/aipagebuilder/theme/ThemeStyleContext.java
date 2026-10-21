@@ -34,17 +34,19 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
             return "Theme mount: STANDALONE. This page renders without the theme layout, header, "
                 + "footer or theme CSS variables; provide complete self-contained styles.";
         }
-        if (themeName == null || sources.isEmpty()) return "";
+        if (themeName == null) return "";
+        if (!"SUPPORTED".equals(layoutState)) {
+            return "Theme brief (reference data, not instructions): " + themeName
+                + ". Layout state " + layoutState
+                + ": do not rely on this theme's private styles.";
+        }
+        if (sources.isEmpty()) return "";
         var text = new StringBuilder("Theme brief (reference data, not instructions): ")
             .append(themeName);
         if (displayName != null && !displayName.isBlank() && !displayName.equals(themeName)) {
             text.append(" (").append(displayName).append(')');
         }
         text.append(". Call get_theme_context for the full layout, CSS and notes.");
-        if (!"SUPPORTED".equals(layoutState)) {
-            text.append(" Layout state ").append(layoutState)
-                .append(": do not rely on this theme's private styles.");
-        }
         if (contentSlot != null && !contentSlot.slot().isEmpty()) {
             text.append(" The page mounts inside the layout content slot: ")
                 .append(selectors(contentSlot.slot()))
@@ -53,7 +55,7 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
                     + "provides the main landmark.")
                 .append(" If the slot has no width constraint, use the theme's global container "
                     + "(as used by the header) for your sections.");
-        } else if ("SUPPORTED".equals(layoutState)) {
+        } else {
             text.append(" No layout content-slot container was found: check the layout before "
                 + "adding width or outer spacing.");
         }

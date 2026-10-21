@@ -47,11 +47,12 @@ public class ThemeContextExtractor {
     private static final Pattern CLASS_NAME = Pattern.compile(
         "!?[A-Za-z_][A-Za-z0-9_:\\[\\].%()#,/'-]{0,127}");
     private static final Pattern STRING_LITERAL = Pattern.compile("'([^']*)'|\"([^\"]*)\"");
+    // Article typography (prose, markdown-body, ...) is deliberately excluded: it must not be
+    // suggested as landing-page component vocabulary.
     private static final Pattern COMPONENT_CLASS = Pattern.compile(
         "\\.(btn|card|badge|alert|input|select|textarea|table|tabs|tab|hero|navbar|menu|dropdown"
             + "|modal|breadcrumb|pagination|toast|tooltip|progress|avatar|chip|tag|panel|divider"
-            + "|stat|steps|timeline|collapse|drawer|prose|prose-content|markdown-body"
-            + "|tailwind-typography|article-content|post-content|entry-content|rich-text)"
+            + "|stat|steps|timeline|collapse|drawer)"
             + "(?![A-Za-z0-9_-])");
     private static final Map<String, Pattern> UI_FRAMEWORKS = new LinkedHashMap<>();
     static {
@@ -297,8 +298,11 @@ public class ThemeContextExtractor {
                 }
             }
             if (placeholder == null) return List.of();
+            // th:insert keeps the host element around the inserted content; th:replace
+            // swaps the host out, so only its ancestors wrap the content.
             var chain = new ArrayList<ThemeStyleContext.ContentSlot.Wrapper>();
-            var parent = placeholder.parent();
+            var parent = placeholder.hasAttr("th:insert") && !placeholder.hasAttr("th:replace")
+                ? placeholder : placeholder.parent();
             while (parent != null && chain.size() < WRAPPER_LIMIT
                 && !Set.of("body", "html", "#root").contains(parent.normalName())) {
                 var classes = elementClasses(parent);
@@ -323,9 +327,13 @@ public class ThemeContextExtractor {
          */
         private ThemeStyleContext.ContentSlot pageTemplate(String path,
             List<ThemeStyleContext.ContentSlot.Wrapper> slot) {
-            if (path == null) return ThemeStyleContext.ContentSlot.empty();
+            if (path == null) {
+                return new ThemeStyleContext.ContentSlot("", slot, List.of(), List.of());
+            }
             var text = read(path);
-            if (text == null) return ThemeStyleContext.ContentSlot.empty();
+            if (text == null) {
+                return new ThemeStyleContext.ContentSlot(path, slot, List.of(), List.of());
+            }
             var document = Jsoup.parse(text);
             Element content = null;
             int best = -1;
@@ -338,8 +346,8 @@ public class ThemeContextExtractor {
                 }
             }
             if (content == null) {
-                note(path + "：未找到正文内容节点，无法确定主题页面容器");
-                return ThemeStyleContext.ContentSlot.empty();
+                note(path + "：未找到正文内容节点，跳过文章页容器参考");
+                return new ThemeStyleContext.ContentSlot(path, slot, List.of(), List.of());
             }
             var wrapper = new ArrayList<ThemeStyleContext.ContentSlot.Wrapper>();
             var parent = content.parent();

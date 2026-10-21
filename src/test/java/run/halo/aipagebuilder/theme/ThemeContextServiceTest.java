@@ -25,10 +25,29 @@ class ThemeContextServiceTest {
         Files.writeString(templates.resolve("layout.html"), "<main>safe</main>");
         Files.writeString(root.resolve("outside.html"), "private");
         Files.createSymbolicLink(templates.resolve("linked.html"), root.resolve("outside.html"));
-        Files.writeString(templates.resolve("large.css"), "x".repeat(ThemeContextService.MAX_SOURCE_BYTES + 1));
+        var rules = "a{b:c}".repeat((ThemeContextService.MAX_SOURCE_BYTES - 80) / 6);
+        Files.writeString(templates.resolve("large.css"),
+            rules + "a{b:c}".repeat(10) + "/*" + "x".repeat(100));
+        Files.writeString(templates.resolve("string.css"),
+            rules + "a{b:c}".repeat(10) + "a{content:'}" + "x".repeat(100));
+        Files.writeString(templates.resolve("media.css"),
+            rules + "a{b:c}".repeat(10) + "@media x{a{b:c}" + "x".repeat(100));
+        var escaped = ".brace\\{name{color:red}";
+        var escapeRules = "a{b:c}".repeat(
+            (ThemeContextService.MAX_SOURCE_BYTES - escaped.length()) / 6);
+        Files.writeString(templates.resolve("escape.css"), escaped + escapeRules + "a{b:c}");
         assertThat(ThemeContextService.read(theme, "templates/layout.html")).isEqualTo("<main>safe</main>");
-        assertThat(ThemeContextService.read(theme, "templates/large.css"))
-            .hasSize(ThemeContextService.MAX_SOURCE_BYTES);
+        // A hard byte cut inside a comment, string or nested block would make the parser reject
+        // the prefix; the length stays at the cap so callers can still report the truncation.
+        assertThat(ThemeContextService.read(theme, "templates/large.css")).startsWith(rules)
+            .doesNotContain("/*").hasSize(ThemeContextService.MAX_SOURCE_BYTES);
+        assertThat(ThemeContextService.read(theme, "templates/string.css")).startsWith(rules)
+            .doesNotContain("content").hasSize(ThemeContextService.MAX_SOURCE_BYTES);
+        assertThat(ThemeContextService.read(theme, "templates/media.css")).startsWith(rules)
+            .doesNotContain("@media").hasSize(ThemeContextService.MAX_SOURCE_BYTES);
+        // An escaped brace in a selector must not be counted as a block opener.
+        assertThat(ThemeContextService.read(theme, "templates/escape.css"))
+            .startsWith(escaped + escapeRules).hasSize(ThemeContextService.MAX_SOURCE_BYTES);
         for (var name : new String[] {"../outside.html", "templates/../../outside.html", "templates/linked.html",
             "/outside.html", "templates/theme.yaml", "templates/missing.css"}) {
             assertThat(ThemeContextService.read(theme, name)).isNull();
@@ -73,6 +92,8 @@ class ThemeContextServiceTest {
                 ThemeStyleContext.ContentSlot.Wrapper::selector)
             .containsExactly("main.shell", "div.content-wrap");
         assertThat(context.contentSlot().contentClasses()).containsExactly("prose");
+        assertThat(context.notes()).anyMatch(note -> note.contains("仅用于文章页参考"))
+            .noneMatch(note -> note.contains("补齐"));
         assertThat(context.brief()).contains("main.shell", "div.content-wrap", ".prose");
         for (var state : java.util.List.of(run.halo.app.core.extension.Theme.PageLayoutState.MISSING,
             run.halo.app.core.extension.Theme.PageLayoutState.INVALID)) {

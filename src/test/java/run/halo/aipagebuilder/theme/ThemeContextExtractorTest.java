@@ -477,6 +477,88 @@ class ThemeContextExtractorTest {
         assertThat(ThemeStyleContext.standalone().brief()).contains("STANDALONE");
     }
 
+    @Test
+    void keepsLayoutSlotWhenThePageTemplateHasNoContentNode() {
+        var files = Map.of(
+            "templates/layout.html",
+            "<body><main class='layout-shell'><div th:replace='${content}'></div></main></body>",
+            "templates/page.html", "<html><body><p>no content node</p></body></html>");
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        assertThat(result.contentSlot().template()).isEqualTo("templates/page.html");
+        assertThat(result.contentSlot().slot())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.layout-shell");
+        assertThat(result.contentSlot().wrapper()).isEmpty();
+    }
+
+    @Test
+    void keepsLayoutSlotWhenThePageTemplateCannotBeRead() {
+        var files = Map.of("templates/layout.html",
+            "<body><main class='layout-shell'><div th:replace='${content}'></div></main></body>");
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        assertThat(result.contentSlot().template()).isEqualTo("templates/page.html");
+        assertThat(result.contentSlot().slot())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.layout-shell");
+    }
+
+    @Test
+    void excludesAClassedReplaceHostFromTheSlot() {
+        var files = Map.of(
+            "templates/layout.html", """
+                <body><main class="layout-shell"><div class="slot-host"
+                  th:replace="${content}"></div></main></body>
+                """,
+            "templates/page.html", """
+                <html><body><article class="prose"
+                  th:utext="${singlePage.content.content}"></article></body></html>
+                """);
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        assertThat(result.contentSlot().slot())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.layout-shell");
+    }
+
+    @Test
+    void keepsLayoutSlotWithoutAPageTemplate() {
+        var files = Map.of("templates/layout.html",
+            "<body><main class='layout-shell'><div th:replace='${content}'></div></main></body>");
+        var result = extractor.extract(files::get, null, null);
+        assertThat(result.contentSlot().slot())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.layout-shell");
+    }
+
+    @Test
+    void includesTheInsertHostElementAsTheSlotContainer() {
+        var files = Map.of(
+            "templates/layout.html",
+            "<body><main class='mx-auto max-w-7xl px-4' th:insert='${content}'></main></body>",
+            "templates/page.html", """
+                <html><body><article class="prose"
+                  th:utext="${singlePage.content.content}"></article></body></html>
+                """);
+        var result = extractor.extract(files::get, null, "templates/page.html");
+        assertThat(result.contentSlot().slot())
+            .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+            .containsExactly("main.mx-auto.max-w-7xl.px-4");
+    }
+
+    @Test
+    void doesNotOfferArticleTypographyAsComponentClasses() {
+        var result = extractCss(
+            ".prose{max-width:65ch}.markdown-body{margin:0}.rich-text{line-height:1.6}.btn{padding:1rem}");
+        assertThat(result.uiStack().componentClasses()).contains("btn")
+            .doesNotContain("prose", "markdown-body", "rich-text");
+    }
+
+    @Test
+    void briefWarnsWhenTheLayoutIsNotSupported() {
+        var context = new ThemeStyleContext("theme-x", "X", "INVALID",
+            java.util.List.of(), java.util.List.of(), "");
+        assertThat(context.brief()).contains("INVALID", "do not rely");
+    }
+
     private ThemeContextExtractor.Result extractCss(String css) {
         return extractor.extract(Map.of("templates/layout.html", "<link href='/assets/main.css'>",
             "templates/assets/main.css", css)::get);
