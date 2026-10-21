@@ -58,6 +58,12 @@ function open(item: PageSummary) {
   }
   window.open(pageUrl(item.slug || item.name), '_blank', 'noopener')
 }
+function exportFileName(slug: string) {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `${slug}-${stamp}.zip`
+}
 const exportMutation = useMutation({
   mutationFn: async (item: PageSummary) => {
     const data = (await aiPageBuilderApi.exportPage({ name: item.name }, { responseType: 'blob' }))
@@ -68,7 +74,7 @@ const exportMutation = useMutation({
     const url = URL.createObjectURL(new Blob([data], { type: 'application/zip' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = `${slug}.zip`
+    link.download = exportFileName(slug)
     document.body.append(link)
     link.click()
     link.remove()

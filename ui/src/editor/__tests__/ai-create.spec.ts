@@ -269,7 +269,12 @@ describe('page creation', () => {
         revokeObjectURL: vi.fn<(url: string) => void>(),
       }),
     )
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const downloads: string[] = []
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloads.push(this.download)
+      })
     const wrapper = mount(HomeView, {
       global: {
         stubs: { FormKit, SearchInput, PagePreviewCard: true, RouterLink: true },
@@ -285,6 +290,7 @@ describe('page creation', () => {
     expect(mocks.export).toHaveBeenCalledWith({ name: 'original' }, { responseType: 'blob' })
     expect(objectUrl).toHaveBeenCalledWith(expect.any(Blob))
     expect(click).toHaveBeenCalledOnce()
+    expect(downloads).toEqual([expect.stringMatching(/^original-\d{8}-\d{6}\.zip$/)])
     click.mockRestore()
     vi.unstubAllGlobals()
     wrapper.unmount()
