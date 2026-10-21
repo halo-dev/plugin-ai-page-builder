@@ -104,7 +104,7 @@ class PageRouterTest {
     }
 
     @Test
-    void onlyVisitorsReceiveCacheValidators() {
+    void onlyAnonymousVisitorsReceiveCacheValidators() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
             "draft", "published", Instant.now(), true);
@@ -122,6 +122,12 @@ class PageRouterTest {
             AuthorityUtils.createAuthorityList("ROLE_super-role"));
         assertThat(handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block())
+            .isNotInstanceOf(PageCacheResponse.class);
+
+        var member = new UsernamePasswordAuthenticationToken("member", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertThat(handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)).block())
             .isNotInstanceOf(PageCacheResponse.class);
     }
 

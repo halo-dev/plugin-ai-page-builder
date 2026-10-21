@@ -3,9 +3,7 @@ package run.halo.aipagebuilder.page;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -20,21 +18,22 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import org.springframework.web.reactive.result.view.ViewResolver;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 class PageCacheResponseTest {
-    private static final Instant LAST_MODIFIED = Instant.parse("2026-01-02T03:04:05Z");
-
     @Test
     void addsBodyDerivedValidatorsAndKeepsTheBody() {
+        var body = "<p>中文</p>";
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about"));
-        write(exchange, "<p>About</p>");
+        write(exchange, body);
         var headers = exchange.getResponse().getHeaders();
         assertThat(headers.getETag()).matches("\"[0-9a-f]{64}\"");
         assertThat(headers.getCacheControl()).isEqualTo("no-cache");
-        assertThat(headers.getLastModified()).isEqualTo(LAST_MODIFIED.toEpochMilli());
-        assertThat(headers.getContentLength()).isEqualTo("<p>About</p>".length());
-        assertThat(exchange.getResponse().getBodyAsString().block()).isEqualTo("<p>About</p>");
+        assertThat(headers.getLastModified()).isEqualTo(-1);
+        assertThat(headers.getContentLength())
+            .isEqualTo(body.getBytes(StandardCharsets.UTF_8).length);
+        assertThat(exchange.getResponse().getBodyAsString().block()).isEqualTo(body);
     }
 
     @Test
@@ -62,30 +61,44 @@ class PageCacheResponseTest {
     }
 
     @Test
-    void changingTheBodyChangesTheEtagAndIfModifiedSinceIsIgnoredWhenItDoesNotMatch() {
+    void malformedIfNoneMatchIsIgnored() {
+        for (var value : List.of("abc", "\"\"")) {
+            var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
+                .header(HttpHeaders.IF_NONE_MATCH, value));
+            write(exchange, "<p>About</p>");
+            assertThat(exchange.getResponse().getStatusCode()).as(value)
+                .isEqualTo(HttpStatus.OK);
+        }
+    }
+
+    @Test
+    void commasInsideAnOpaqueTagDoNotBecomeWildcards() {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
+            .header(HttpHeaders.IF_NONE_MATCH, "\"x,*,y\""));
+        write(exchange, "<p>About</p>");
+        assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void changingTheBodyChangesTheEtag() {
         var stale = etagOf("<p>Old</p>");
         assertThat(etagOf("<p>New</p>")).isNotEqualTo(stale);
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-            .header(HttpHeaders.IF_NONE_MATCH, stale)
-            .header(HttpHeaders.IF_MODIFIED_SINCE, httpDate()));
+            .header(HttpHeaders.IF_NONE_MATCH, stale));
         write(exchange, "<p>New</p>");
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(exchange.getResponse().getBodyAsString().block()).isEqualTo("<p>New</p>");
     }
 
     @Test
-    void ifModifiedSinceRevalidatesOnlyWithoutIfNoneMatch() {
-        var fresh = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-            .header(HttpHeaders.IF_MODIFIED_SINCE, httpDate()));
-        write(fresh, "<p>About</p>");
-        assertThat(fresh.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
-
-        var stale = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-            .header(HttpHeaders.IF_MODIFIED_SINCE,
-                DateTimeFormatter.RFC_1123_DATE_TIME.format(
-                    LAST_MODIFIED.minusSeconds(1).atZone(ZoneOffset.UTC))));
-        write(stale, "<p>About</p>");
-        assertThat(stale.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
+    void incrementalRenderingStillGetsValidators() {
+        var body = "<p>中文</p>";
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about"));
+        write(exchange, body, true);
+        assertThat(exchange.getResponse().getHeaders().getETag()).matches("\"[0-9a-f]{64}\"");
+        assertThat(exchange.getResponse().getHeaders().getContentLength())
+            .isEqualTo(body.getBytes(StandardCharsets.UTF_8).length);
+        assertThat(exchange.getResponse().getBodyAsString().block()).isEqualTo(body);
     }
 
     private String etagOf(String html) {
@@ -94,13 +107,12 @@ class PageCacheResponseTest {
         return exchange.getResponse().getHeaders().getETag();
     }
 
-    private static String httpDate() {
-        return DateTimeFormatter.RFC_1123_DATE_TIME
-            .format(LAST_MODIFIED.atZone(ZoneOffset.UTC));
+    private void write(MockServerWebExchange exchange, String html) {
+        write(exchange, html, false);
     }
 
-    private void write(MockServerWebExchange exchange, String html) {
-        new PageCacheResponse(html(html), LAST_MODIFIED).writeTo(exchange, context()).block();
+    private void write(MockServerWebExchange exchange, String html, boolean flush) {
+        new PageCacheResponse(html(html, flush)).writeTo(exchange, context()).block();
     }
 
     private ServerResponse.Context context() {
@@ -118,10 +130,15 @@ class PageCacheResponseTest {
     }
 
     /** The renderer's own no-store header must be replaced for visitor responses. */
-    private static ServerResponse html(String body) {
+    private static ServerResponse html(String body, boolean flush) {
+        var bytes = body.getBytes(StandardCharsets.UTF_8);
         var headers = new HttpHeaders();
         headers.setContentType(MediaType.TEXT_HTML);
         headers.setCacheControl("no-store");
+        // Date validation cannot track theme changes, so it must be dropped.
+        headers.set(HttpHeaders.LAST_MODIFIED, "Wed, 21 Oct 2015 07:28:00 GMT");
+        // The renderer may set a length; a 304 must drop it.
+        headers.setContentLength(bytes.length);
         return new ServerResponse() {
             @Override
             public HttpStatusCode statusCode() {
@@ -142,9 +159,14 @@ class PageCacheResponseTest {
             public Mono<Void> writeTo(ServerWebExchange exchange, Context context) {
                 exchange.getResponse().setStatusCode(statusCode());
                 exchange.getResponse().getHeaders().putAll(headers);
-                var buffer = exchange.getResponse().bufferFactory()
-                    .wrap(body.getBytes(StandardCharsets.UTF_8));
-                return exchange.getResponse().writeWith(Mono.just(buffer));
+                var factory = exchange.getResponse().bufferFactory();
+                if (!flush) {
+                    return exchange.getResponse().writeWith(Mono.just(factory.wrap(bytes)));
+                }
+                var half = bytes.length / 2;
+                return exchange.getResponse().writeAndFlushWith(Flux.just(
+                    Mono.just(factory.wrap(Arrays.copyOfRange(bytes, 0, half))),
+                    Mono.just(factory.wrap(Arrays.copyOfRange(bytes, half, bytes.length)))));
             }
         };
     }

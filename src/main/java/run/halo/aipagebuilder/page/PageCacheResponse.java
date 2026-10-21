@@ -2,9 +2,8 @@ package run.halo.aipagebuilder.page;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
-import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.List;
 import org.reactivestreams.Publisher;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -21,17 +20,15 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * Makes a published page revalidate with its CDN: the ETag hashes the rendered body, so theme
- * and property changes invalidate it without a page republish. Super administrator responses
- * are deliberately not wrapped because they render a different, script-free document.
+ * Lets a CDN revalidate a published page against the rendered body. The ETag covers theme and
+ * property changes that happen without a page republish. Only anonymous responses are wrapped:
+ * authenticated pages can render user-specific theme markup and must not be shared.
  */
 final class PageCacheResponse implements ServerResponse {
     private final ServerResponse delegate;
-    private final Instant lastModified;
 
-    PageCacheResponse(ServerResponse delegate, Instant lastModified) {
+    PageCacheResponse(ServerResponse delegate) {
         this.delegate = delegate;
-        this.lastModified = lastModified;
     }
 
     @Override
@@ -66,49 +63,42 @@ final class PageCacheResponse implements ServerResponse {
             }
 
             private Mono<Void> complete(DataBuffer buffer, HttpHeaders requestHeaders) {
-                final byte[] bytes;
-                try {
-                    bytes = new byte[buffer.readableByteCount()];
-                    buffer.read(bytes);
-                } finally {
-                    DataBufferUtils.release(buffer);
-                }
-                var etag = '"' + sha256(bytes) + '"';
+                var etag = '"' + sha256(buffer) + '"';
                 var headers = getHeaders();
                 headers.setCacheControl(CacheControl.noCache().getHeaderValue());
+                // The page timestamp does not track theme changes, so date validation is unsafe.
+                headers.remove(HttpHeaders.LAST_MODIFIED);
                 headers.setETag(etag);
-                if (lastModified != null) {
-                    headers.setLastModified(lastModified);
-                }
                 if (notModified(requestHeaders, etag)) {
                     headers.remove(HttpHeaders.CONTENT_LENGTH);
+                    DataBufferUtils.release(buffer);
                     getDelegate().setStatusCode(HttpStatus.NOT_MODIFIED);
                     return getDelegate().setComplete();
                 }
-                headers.setContentLength(bytes.length);
-                return getDelegate().writeWith(Mono.just(bufferFactory().wrap(bytes)));
+                headers.setContentLength(buffer.readableByteCount());
+                return getDelegate().writeWith(Mono.just(buffer));
             }
         };
         return delegate.writeTo(exchange.mutate().response(response).build(), context);
     }
 
-    private boolean notModified(HttpHeaders requestHeaders, String etag) {
-        var ifNoneMatch = requestHeaders.getIfNoneMatch();
-        if (!ifNoneMatch.isEmpty()) {
-            // RFC 9110: If-None-Match wins over If-Modified-Since even when it does not match.
-            return ifNoneMatch.stream().flatMap(value -> Arrays.stream(value.split(",")))
-                .map(String::trim)
-                .anyMatch(candidate -> "*".equals(candidate) || candidate.equals(etag)
-                    || ("W/" + etag).equals(candidate));
+    private static boolean notModified(HttpHeaders requestHeaders, String etag) {
+        final List<String> candidates;
+        try {
+            candidates = requestHeaders.getIfNoneMatch();
+        } catch (IllegalArgumentException malformed) {
+            // Malformed validators must be ignored, not fail the already rendered response.
+            return false;
         }
-        var since = requestHeaders.getIfModifiedSince();
-        return lastModified != null && since >= 0
-            && lastModified.getEpochSecond() <= since / 1000;
+        return candidates.stream().anyMatch(candidate -> "*".equals(candidate)
+            || candidate.equals(etag) || ("W/" + etag).equals(candidate));
     }
 
-    private static String sha256(byte[] value) {
+    private static String sha256(DataBuffer buffer) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
+            var digest = MessageDigest.getInstance("SHA-256");
+            digest.update(buffer.asByteBuffer(buffer.readPosition(), buffer.readableByteCount()));
+            return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException(error);
         }
