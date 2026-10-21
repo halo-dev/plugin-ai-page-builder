@@ -2,6 +2,7 @@ package run.halo.aipagebuilder.model;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
+import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 import run.halo.app.extension.AbstractExtension;
@@ -18,6 +19,14 @@ public class ThemePage extends AbstractExtension {
     /** A successful AI save may change properties without producing a content revision. */
     public record AiCommit(String runId, String revision) { }
 
+    @Schema(name = "PageMemberType")
+    public enum MemberType {
+        USER, ROLE
+    }
+
+    @Schema(name = "PageMember")
+    public record PageMember(MemberType kind, String name) { }
+
     @Data
     public static class Spec {
         @Schema(pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
@@ -26,6 +35,10 @@ public class ThemePage extends AbstractExtension {
         private String title;
         private String description;
         private boolean themeLayout = true;
+        /** Restricts the published page to the super administrator and listed members. */
+        private boolean authorizeRequired;
+        /** Users and roles allowed to read a restricted page; empty means super administrator only. */
+        private List<PageMember> members;
         private String draftRevision;
         private String publishedRevision;
         /** Written with the page CAS; older runs are recorded in conversation history. */

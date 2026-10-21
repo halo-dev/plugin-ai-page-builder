@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PageMember } from './page-member';
 
 /**
  * 
@@ -20,6 +23,12 @@
  * @interface PageSummary
  */
 export interface PageSummary {
+    /**
+     * 
+     * @type {boolean}
+     * @memberof PageSummary
+     */
+    'authorizeRequired': boolean;
     /**
      * 
      * @type {string}
@@ -38,6 +47,12 @@ export interface PageSummary {
      * @memberof PageSummary
      */
     'hasUnpublishedChanges': boolean;
+    /**
+     * 
+     * @type {Array<PageMember>}
+     * @memberof PageSummary
+     */
+    'members'?: Array<PageMember> | null;
     /**
      * 
      * @type {string}

@@ -239,8 +239,14 @@ public class PageService {
             validateProperties(title, description);
             var slug = request.slug() == null ? spec.getSlug() : request.slug();
             var layout = request.themeLayout() == null ? spec.isThemeLayout() : request.themeLayout();
+            var authorizeRequired = request.authorizeRequired() == null
+                ? spec.isAuthorizeRequired() : request.authorizeRequired();
+            var members = request.members() == null ? spec.getMembers() : request.members();
+            validateMembers(members);
             if (Objects.equals(title, spec.getTitle()) && Objects.equals(description, spec.getDescription())
-                && Objects.equals(slug, spec.getSlug()) && layout == spec.isThemeLayout()) {
+                && Objects.equals(slug, spec.getSlug()) && layout == spec.isThemeLayout()
+                && authorizeRequired == spec.isAuthorizeRequired()
+                && Objects.equals(members, spec.getMembers())) {
                 return draftDetail(page);
             }
             Supplier<Mono<PageDetail>> write = () -> {
@@ -248,6 +254,8 @@ public class PageService {
                 spec.setDescription(description);
                 spec.setSlug(slug);
                 spec.setThemeLayout(layout);
+                spec.setAuthorizeRequired(authorizeRequired);
+                spec.setMembers(members);
                 spec.setUpdatedAt(Instant.now());
                 return client.update(page).flatMap(this::draftDetail);
             };
@@ -262,6 +270,21 @@ public class PageService {
         }
         if (description != null && description.length() > 1000) {
             throw badRequest("页面描述不能超过 1000 个字符");
+        }
+    }
+
+    static void validateMembers(List<ThemePage.PageMember> members) {
+        if (members == null) {
+            return;
+        }
+        if (members.size() > 100) {
+            throw badRequest("页面访问成员不能超过 100 个");
+        }
+        for (var member : members) {
+            if (member == null || member.kind() == null || member.name() == null
+                || member.name().isBlank() || member.name().length() > 200) {
+                throw badRequest("页面访问成员须包含有效的类型和名称");
+            }
         }
     }
 
@@ -514,7 +537,8 @@ public class PageService {
         var spec = page.getSpec();
         var name = page.getMetadata().getName();
         return new PageSummary(name, spec.getSlug(), spec.getTitle(), spec.getDescription(),
-            page.getMetadata().getVersion(), page.getSpec().isThemeLayout(), spec.getDraftRevision(),
+            page.getMetadata().getVersion(), page.getSpec().isThemeLayout(),
+            spec.isAuthorizeRequired(), spec.getMembers(), spec.getDraftRevision(),
             spec.getPublishedRevision(),
             spec.getUpdatedAt(), !Objects.equals(spec.getDraftRevision(), spec.getPublishedRevision()));
     }

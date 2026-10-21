@@ -13,7 +13,7 @@ import run.halo.aipagebuilder.model.PageDocument;
 class PageExportTest {
     static PageApi.PageDetail detail(PageDocument document, boolean themeLayout) {
         return new PageApi.PageDetail(new PageApi.PageSummary("original-id", "original-path",
-            "<unsafe & title>", "Description", 8L, themeLayout, "draft", "published",
+            "<unsafe & title>", "Description", 8L, themeLayout, false, null, "draft", "published",
             java.time.Instant.now(), true), document);
     }
 

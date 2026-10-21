@@ -19,6 +19,7 @@ const buffer = reactive({
   description: props.page.description || '',
   slug: props.page.slug ?? '',
   themeLayout: props.page.themeLayout,
+  authorizeRequired: props.page.authorizeRequired,
 })
 const form = useTemplateRef<{ node: { submit: () => void } }>('form')
 const modal = useTemplateRef<InstanceType<typeof VModal>>('modal')
@@ -31,6 +32,8 @@ watch(
       buffer.description = page.description || ''
     if (buffer.slug === (previous.slug ?? '')) buffer.slug = page.slug ?? ''
     if (buffer.themeLayout === previous.themeLayout) buffer.themeLayout = page.themeLayout
+    if (buffer.authorizeRequired === previous.authorizeRequired)
+      buffer.authorizeRequired = page.authorizeRequired
   },
 )
 function submit() {
@@ -40,6 +43,8 @@ function submit() {
   if (buffer.description !== (props.page.description || '')) patch.description = buffer.description
   if (buffer.slug !== (props.page.slug ?? '')) patch.slug = buffer.slug
   if (buffer.themeLayout !== props.page.themeLayout) patch.themeLayout = buffer.themeLayout
+  if (buffer.authorizeRequired !== props.page.authorizeRequired)
+    patch.authorizeRequired = buffer.authorizeRequired
   emit('apply', patch)
 }
 </script>
@@ -83,6 +88,13 @@ function submit() {
           name="themeLayout"
           label="复用主题布局"
           help="关闭后页面独立渲染，不套用主题的页头页尾与基础样式。"
+        />
+        <FormKit
+          v-model="buffer.authorizeRequired"
+          type="checkbox"
+          name="authorizeRequired"
+          label="禁止公开访问"
+          help="开启后，公开链接只有超级管理员可以访问，其他访客将看到 404。"
         />
       </FormKit>
     </div>

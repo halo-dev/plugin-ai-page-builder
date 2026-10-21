@@ -71,7 +71,7 @@ class PageEndpointTest {
 
     private static PageDetail detail(PageDocument document) {
         return new PageDetail(new PageApi.PageSummary("about", "company/about-us", "About", "",
-            1L, true, "draft", null, java.time.Instant.now(), true), document);
+            1L, true, false, null, "draft", null, java.time.Instant.now(), true), document);
     }
 
     private static ServerRequest request(String path) {
@@ -276,7 +276,7 @@ class PageEndpointTest {
 
     @Test
     void slugUpdateUsesStableIdentifierAndVersionedBody() {
-        var input = new PageApi.UpdatePagePropertiesRequest(4L, null, null, "company/about-us", null);
+        var input = new PageApi.UpdatePagePropertiesRequest(4L, null, null, "company/about-us", null, null, null);
         var document = new PageDocument(1, "code", null, null, "", "");
         when(service.updateProperties("about", input)).thenReturn(Mono.just(detail(document)));
         var request = ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest

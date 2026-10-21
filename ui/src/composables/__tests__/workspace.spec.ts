@@ -101,6 +101,7 @@ const page = {
     slug: 'one',
     version: 1,
     themeLayout: true,
+    authorizeRequired: false,
     description: '',
     updatedAt: '',
     hasUnpublishedChanges: false,
@@ -568,6 +569,25 @@ describe('workspace integration', () => {
     wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
     await flushPromises()
     expect(wrapper.emitted('apply')).toEqual([[{ themeLayout: false }]])
+    wrapper.unmount()
+  })
+  it('submits the restricted access toggle with the form', async () => {
+    const wrapper = mount(PageSettings, {
+      props: {
+        page: page.page,
+        disabled: false,
+        published: false,
+      },
+      global: globals,
+    })
+    const field = wrapper
+      .findAllComponents({ name: 'FormKit' })
+      .find((input) => input.attributes('name') === 'authorizeRequired')!
+    field.vm.$emit('update:modelValue', true)
+    await flushPromises()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    expect(wrapper.emitted('apply')).toEqual([[{ authorizeRequired: true }]])
     wrapper.unmount()
   })
   it('submits all edited properties together without mutating the page', async () => {

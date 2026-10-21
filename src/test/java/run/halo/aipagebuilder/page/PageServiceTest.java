@@ -213,7 +213,7 @@ class PageServiceTest {
         var published = service.publish(created.page().name(), created.page().version()).block();
         var changed = service.updateProperties(created.page().name(),
             new PageApi.UpdatePagePropertiesRequest(published.page().version(), "New title",
-                "New description", "company", false)).block();
+                "New description", "company", false, null, null)).block();
         var live = service.published("company").block();
         assertThat(live.page().title()).isEqualTo("New title");
         assertThat(live.page().description()).isEqualTo("New description");
@@ -474,7 +474,7 @@ class PageServiceTest {
     void aiCannotReplaceAnExistingOrConcurrentlySetPath() {
         var created = service.create(new CreatePageRequest(null, "Original"), "admin").block();
         var manual = service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "manual-path", null)).block();
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "manual-path", null, null, null)).block();
         for (var version : java.util.List.of(created.page().version(), manual.page().version())) {
             assertThatThrownBy(() -> service.saveAi(created.page().name(), version, document("Changed"),
                 "admin", "run-path", created.page().draftRevision(), "about", null).block())
@@ -575,14 +575,44 @@ class PageServiceTest {
         service.create(new CreatePageRequest("occupied", "Other"), "admin").block();
         assertConflict(() -> service.updateProperties(created.page().name(),
             new PageApi.UpdatePagePropertiesRequest(created.page().version(), "New", "Changed",
-                "occupied", false)).block());
+                "occupied", false, null, null)).block());
         assertBadRequest(() -> service.updateProperties(created.page().name(),
             new PageApi.UpdatePagePropertiesRequest(created.page().version(), " ", null,
-                "new-path", false)).block());
+                "new-path", false, null, null)).block());
         assertBadRequest(() -> service.updateProperties(created.page().name(),
             new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, "x".repeat(1001),
-                null, null)).block());
+                null, null, null, null)).block());
         assertThat(service.get(created.page().name()).block()).isEqualTo(created);
+    }
+
+    @Test
+    void restrictedAccessPropertiesPersistAndAllowMemberLists() {
+        var created = service.create(new CreatePageRequest("secret", "Secret"), "admin").block();
+        var members = List.of(
+            new ThemePage.PageMember(ThemePage.MemberType.USER, "alice"),
+            new ThemePage.PageMember(ThemePage.MemberType.ROLE, "editors"));
+        var restricted = service.updateProperties(created.page().name(),
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, null, null,
+                true, members)).block();
+        assertThat(restricted.page().authorizeRequired()).isTrue();
+        assertThat(restricted.page().members()).isEqualTo(members);
+
+        var renamed = service.updateProperties(created.page().name(),
+            new PageApi.UpdatePagePropertiesRequest(restricted.page().version(), "Renamed", null,
+                null, null, null, null)).block();
+        assertThat(renamed.page().authorizeRequired()).isTrue();
+        assertThat(renamed.page().members()).isEqualTo(members);
+
+        assertBadRequest(() -> service.updateProperties(created.page().name(),
+            new PageApi.UpdatePagePropertiesRequest(renamed.page().version(), null, null, null, null,
+                null, List.of(new ThemePage.PageMember(ThemePage.MemberType.USER, " ")))).block());
+        assertThat(service.get(created.page().name()).block().page().members()).isEqualTo(members);
+
+        var cleared = service.updateProperties(created.page().name(),
+            new PageApi.UpdatePagePropertiesRequest(renamed.page().version(), null, null, null, null,
+                false, List.of())).block();
+        assertThat(cleared.page().authorizeRequired()).isFalse();
+        assertThat(cleared.page().members()).isEmpty();
     }
 
     @Test
@@ -596,7 +626,7 @@ class PageServiceTest {
         assertThat(saved.page().hasUnpublishedChanges()).isFalse();
         assertThat(revisions).hasSize(1);
         service.updateProperties(created.page().name(), new PageApi.UpdatePagePropertiesRequest(
-            saved.page().version(), "Manual", null, null, null)).block();
+            saved.page().version(), "Manual", null, null, null, null, null)).block();
         assertThat(service.committedAiRun(created.page().name(), "rename-run").block())
             .isEqualTo(new ThemePage.AiCommit("rename-run", null));
     }
@@ -664,7 +694,7 @@ class PageServiceTest {
         var created = service.create(new CreatePageRequest("about", "About"), "admin").block();
         var published = service.publish(created.page().name(), created.page().version()).block();
         var renamed = service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(published.page().version(), null, null, "company/about-us", null)).block();
+            new PageApi.UpdatePagePropertiesRequest(published.page().version(), null, null, "company/about-us", null, null, null)).block();
         assertThat(renamed.page().name()).isEqualTo(created.page().name());
         assertThat(renamed.page().draftRevision()).isEqualTo(published.page().draftRevision());
         assertThat(renamed.page().publishedRevision()).isEqualTo(published.page().publishedRevision());
@@ -676,7 +706,7 @@ class PageServiceTest {
         assertThat(service.published("company/about-us").block().page().name())
             .isEqualTo(created.page().name());
         assertConflict(() -> service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(published.page().version(), null, null, "stale", null)).block());
+            new PageApi.UpdatePagePropertiesRequest(published.page().version(), null, null, "stale", null, null, null)).block());
     }
 
     @Test
@@ -684,10 +714,10 @@ class PageServiceTest {
         var created = service.create(new CreatePageRequest("about", "About"), "admin").block();
         service.create(new CreatePageRequest("occupied", "Occupied"), "admin").block();
         assertConflict(() -> service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "occupied", null)).block());
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "occupied", null, null, null)).block());
         failUpdate = true;
         assertConflict(() -> service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "new-path", null)).block());
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "new-path", null, null, null)).block());
         assertThat(service.get(created.page().name()).block().page().slug()).isEqualTo("about");
         assertThat(revisions).hasSize(2);
     }
@@ -697,7 +727,7 @@ class PageServiceTest {
         var created = service.create(new CreatePageRequest("about", "About"), "admin").block();
         assertThat(created.page().themeLayout()).isTrue();
         var updated = service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, null, false)).block();
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, null, false, null, null)).block();
         assertThat(updated.page().themeLayout()).isFalse();
         assertThat(updated.page().name()).isEqualTo(created.page().name());
         assertThat(updated.page().draftRevision()).isEqualTo(created.page().draftRevision());
@@ -705,7 +735,7 @@ class PageServiceTest {
         assertThat(updated.document()).isEqualTo(created.document());
         assertThat(revisions).hasSize(1);
         assertConflict(() -> service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, null, true)).block());
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, null, true, null, null)).block());
     }
 
     @Test
@@ -741,7 +771,7 @@ class PageServiceTest {
             assertBadRequest(() -> service.clonePage(name,
                 new PageApi.ClonePageRequest(created.page().version(), slug, "Core"), "admin").block());
             assertBadRequest(() -> service.updateProperties(name,
-                new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, slug, null)).block());
+                new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, slug, null, null, null)).block());
             pages.get(name).getSpec().setSlug(slug);
             assertBadRequest(() -> service.publish(name, created.page().version()).block());
             assertThat(pages.get(name).getSpec().getPublishedRevision()).isNull();
@@ -757,7 +787,7 @@ class PageServiceTest {
         var published = service.publish(created.page().name(), created.page().version()).block();
         assertThat(service.published("categories").block().page().name()).isEqualTo(created.page().name());
         var renamed = service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(published.page().version(), null, null, "about/company", null)).block();
+            new PageApi.UpdatePagePropertiesRequest(published.page().version(), null, null, "about/company", null, null, null)).block();
         assertThat(service.findPublished("categories").block()).isNull();
         assertThat(service.published("about/company").block().page().name()).isEqualTo(renamed.page().name());
     }
@@ -780,7 +810,7 @@ class PageServiceTest {
         var created = service.create(new CreatePageRequest("about", "About"), "admin").block();
         when(client.update(any(ThemePage.class))).thenReturn(Mono.error(new DuplicateKeyException("slug")));
         assertConflict(() -> service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "new-path", null)).block());
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "new-path", null, null, null)).block());
         assertThat(service.get(created.page().name()).block().page().slug()).isEqualTo("about");
         assertThat(revisions).hasSize(1);
     }
@@ -794,7 +824,7 @@ class PageServiceTest {
             .block());
         assertThat(pages.get(created.page().name()).getSpec().getPublishedRevision()).isNull();
         var renamed = service.updateProperties(created.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "about", null)).block();
+            new PageApi.UpdatePagePropertiesRequest(created.page().version(), null, null, "about", null, null, null)).block();
         var published = service.publish(renamed.page().name(), renamed.page().version()).block();
         assertThat(published.page().publishedRevision()).isNotNull();
         assertThat(service.published("about").block().page().name()).isEqualTo(created.page().name());
@@ -852,10 +882,10 @@ class PageServiceTest {
             }));
         });
         var renamed = service.updateProperties(first.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(first.page().version(), null, null, "same", null)).toFuture();
+            new PageApi.UpdatePagePropertiesRequest(first.page().version(), null, null, "same", null, null, null)).toFuture();
         assertThat(renamed).isNotDone();
         assertConflict(() -> service.updateProperties(second.page().name(),
-            new PageApi.UpdatePagePropertiesRequest(second.page().version(), null, null, "same", null)).block());
+            new PageApi.UpdatePagePropertiesRequest(second.page().version(), null, null, "same", null, null, null)).block());
         assertConflict(() -> service.create(new CreatePageRequest("same", "Third"), "admin").block());
         commit.tryEmitEmpty();
         assertThat(renamed.join().page().slug()).isEqualTo("same");
