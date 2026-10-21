@@ -27,8 +27,12 @@ public class PageRouter {
             return service.findPublished(slug)
                 .map(detail -> incoming -> isSuperAdmin()
                     .flatMap(superAdmin -> renderer.render(incoming, detail.page().name(),
-                        detail.page().slug(), detail.page().themeLayout(), detail.document(), detail.page().title(), detail.page().description(),
-                        superAdmin)));
+                            detail.page().slug(), detail.page().themeLayout(), detail.document(),
+                            detail.page().title(), detail.page().description(), superAdmin)
+                        // The super administrator variant strips scripts, so it must not share
+                        // a cache entry with the visitor response.
+                        .map(response -> superAdmin ? (ServerResponse) response
+                            : new PageCacheResponse(response, detail.page().updatedAt()))));
         };
     }
 
