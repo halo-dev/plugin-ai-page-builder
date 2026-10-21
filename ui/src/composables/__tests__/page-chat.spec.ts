@@ -214,6 +214,28 @@ describe('persistent page chat', () => {
     ])
     expect(state.messages.value[2]?.parts).toEqual([{ type: 'text', text: 'Latest streamed text' }])
   })
+  it('inserts a live steer before the streaming assistant message', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    // The live assistant id comes from the server stream, not `${runId}-assistant`.
+    sdk.setMessages([
+      { id: 'prompt', role: 'user', parts: [{ type: 'text', id: 'p', text: '设计页面' }] },
+      {
+        id: '9f3c-live',
+        role: 'assistant',
+        parts: [{ type: 'text', id: 't', text: '第一段' }],
+        metadata: { runId: 'waiting' },
+      },
+    ])
+    sdk.setMessages.mockClear()
+    sdk.options.onData({
+      type: 'data-steer',
+      data: { runId: 'waiting', index: 0, text: '补充要求' },
+    })
+    const raw = sdk.setMessages.mock.lastCall?.[0] as UIMessage[]
+    expect(raw.map((message) => message.id)).toEqual(['prompt', 'waiting-steer-0', '9f3c-live'])
+  })
   it('does not report an accepted steer as failed when history refresh fails', async () => {
     waitingConversation()
     const state = setup()
