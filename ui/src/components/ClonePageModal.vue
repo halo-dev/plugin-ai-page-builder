@@ -4,7 +4,7 @@ import { Toast, VButton, VModal, VSpace } from '@halo-dev/components'
 import { useMutation } from '@tanstack/vue-query'
 import { aiPageBuilderApi } from '../api/clients'
 import { errorMessage } from '../utils/error'
-import { slugValidation } from '../utils/slug'
+import { slugOptionalValidation } from '../utils/slug'
 import { pageKeys, queryClient } from '../lib/query-client'
 import type { PageSummary } from '../api/generated'
 const props = defineProps<{ page: PageSummary }>()
@@ -57,8 +57,8 @@ function clone() {
         name="slug"
         label="新访问路径"
         placeholder="company/about-copy"
-        help="使用小写字母、数字和连字符，支持 / 分隔的多级路径，不含首尾斜线。"
-        :validation="slugValidation"
+        help="使用小写字母、数字和连字符，支持 / 分隔的多级路径，不含首尾斜线。留空则稍后在页面设置中填写。"
+        :validation="slugOptionalValidation"
         :maxlength="200"
       />
     </FormKit>

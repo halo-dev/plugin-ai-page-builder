@@ -25,7 +25,7 @@ export interface ClonePageRequest {
      * @type {string}
      * @memberof ClonePageRequest
      */
-    'slug': string;
+    'slug'?: string | null;
     /**
      * 
      * @type {string}

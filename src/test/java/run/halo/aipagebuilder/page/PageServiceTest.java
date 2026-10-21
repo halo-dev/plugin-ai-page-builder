@@ -808,12 +808,13 @@ class PageServiceTest {
     }
 
     @Test
-    void cloneStillRequiresAnExplicitSlug() {
+    void cloneAcceptsBlankSlugLikeCreate() {
         var created = service.create(new CreatePageRequest(null, "Untitled"), "admin").block();
-        assertBadRequest(() -> service.clonePage(created.page().name(),
-            new PageApi.ClonePageRequest(created.page().version(), null, "Copy"), "admin").block());
-        assertThat(pages).hasSize(1);
-        assertThat(revisions).hasSize(1);
+        var copy = service.clonePage(created.page().name(),
+            new PageApi.ClonePageRequest(created.page().version(), "", "Copy"), "admin").block();
+        assertThat(copy.page().slug()).isNull();
+        assertThat(pages).hasSize(2);
+        assertThat(revisions).hasSize(2);
     }
 
     @Test
