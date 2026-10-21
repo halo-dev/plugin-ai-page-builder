@@ -32,6 +32,16 @@ vi.mock('@halo-dev/components', async () => {
   }
 })
 
+// ui-shared's index pulls in pinia, which the console provides at runtime but tests lack.
+vi.mock('@halo-dev/ui-shared', () => ({
+  utils: {
+    date: {
+      timeAgo: (value: string) => `timeAgo:${value}`,
+      format: (value: string) => `format:${value}`,
+    },
+  },
+}))
+
 const SlotStub = defineComponent({
   setup:
     (_, { slots }) =>
@@ -57,7 +67,7 @@ function mountCard(item: PageSummary, disabled = false) {
     props: { item, disabled },
     global: {
       stubs: { RouterLink: true, PagePreviewCard: true, PublishPagePopper: SlotStub },
-      directives: { 'close-popper': {} },
+      directives: { 'close-popper': {}, tooltip: {} },
     },
   })
 }
@@ -77,6 +87,11 @@ describe('page card', () => {
     expect(wrapper.text()).toContain('访问页面 ↗')
     expect(wrapper.text()).toContain('更新发布')
     expect(wrapper.text()).toContain('取消发布')
+  })
+
+  it('shows the relative update time on the card', () => {
+    const wrapper = mountCard(summary({ updatedAt: '2026-10-16T10:15:09Z' }))
+    expect(wrapper.text()).toContain('timeAgo:2026-10-16T10:15:09Z')
   })
 
   it('emits card actions with the page summary', async () => {

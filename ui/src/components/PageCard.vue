@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { VButton, VDropdown, VDropdownItem, VStatusDot } from '@halo-dev/components'
+import { utils } from '@halo-dev/ui-shared'
 import IconMore from '~icons/mingcute/more-2-line'
 import type { PageSummary } from '../api/generated'
 import PagePreviewCard from './PagePreviewCard.vue'
@@ -25,9 +26,8 @@ const status = computed(() =>
       : { state: 'success' as const, text: '已发布' }
     : { state: 'default' as const, text: '未发布' },
 )
-const updatedAt = computed(() =>
-  props.item.updatedAt ? new Date(props.item.updatedAt).toLocaleDateString() : '',
-)
+const updatedAt = computed(() => utils.date.timeAgo(props.item.updatedAt) ?? '')
+const updatedAtFull = computed(() => utils.date.format(props.item.updatedAt))
 const visitLabel = computed(() => (props.item.publishedRevision ? '访问页面 ↗' : '预览 ↗'))
 </script>
 
@@ -52,7 +52,7 @@ const visitLabel = computed(() => (props.item.publishedRevision ? '访问页面 
       </p>
       <div class="mt-3.5 flex items-center justify-between gap-2">
         <VStatusDot :state="status.state" :text="status.text" />
-        <span class="text-[11px] text-gray-400">{{ updatedAt }}</span>
+        <span v-tooltip="updatedAtFull" class="text-[11px] text-gray-400">{{ updatedAt }}</span>
       </div>
       <div class="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3.5">
         <VButton size="sm" class="flex-1" @click="emit('visit', item)">
