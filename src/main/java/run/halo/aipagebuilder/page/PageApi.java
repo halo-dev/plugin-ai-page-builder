@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
 import run.halo.aipagebuilder.model.PageDocument;
+import run.halo.aipagebuilder.model.ThemePage;
 
 public final class PageApi {
     private PageApi() {
@@ -32,7 +33,9 @@ public final class PageApi {
         @Schema(maxLength = 200) String title,
         @Schema(maxLength = 1000) String description,
         @Schema(pattern = "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$",
-            maxLength = 200) String slug, Boolean themeLayout) { }
+            maxLength = 200) String slug, Boolean themeLayout, Boolean authorizeRequired,
+        @Schema(nullable = true, description = "Users and roles allowed to read a restricted page")
+        List<ThemePage.PageMember> members) { }
 
     @Schema(name = "SiteUrlResponse", requiredProperties = {"baseUrl"})
     public record SiteUrlResponse(String baseUrl) { }
@@ -50,11 +53,13 @@ public final class PageApi {
     }
 
     @Schema(name = "PageSummary", requiredProperties = {"name", "title", "description",
-        "version", "themeLayout", "draftRevision", "updatedAt", "hasUnpublishedChanges"})
+        "version", "themeLayout", "authorizeRequired", "draftRevision", "updatedAt",
+        "hasUnpublishedChanges"})
     public record PageSummary(String name,
         @Schema(nullable = true) String slug, String title,
         @Schema(nullable = true) String description,
-        Long version, boolean themeLayout, String draftRevision,
+        Long version, boolean themeLayout, boolean authorizeRequired,
+        @Schema(nullable = true) List<ThemePage.PageMember> members, String draftRevision,
         @Schema(nullable = true) String publishedRevision,
         Instant updatedAt,
         boolean hasUnpublishedChanges) {

@@ -101,7 +101,7 @@ public final class PageMcpToolProvider implements McpToolProvider {
             case "update_page_properties" -> pages.updateProperties(string(args, "name"),
                 new PageApi.UpdatePagePropertiesRequest(version(args), (String) args.get("title"),
                     (String) args.get("description"), (String) args.get("slug"),
-                    (Boolean) args.get("themeLayout"))).map(this::summary);
+                    (Boolean) args.get("themeLayout"), null, null)).map(this::summary);
             case "update_page", "patch_page" -> edit(args, actor, tool.equals("patch_page"));
             case "preview_page" -> preview(args, actor);
             case "publish_page" -> pages.publish(string(args, "name"), version(args),

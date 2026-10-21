@@ -31,6 +31,7 @@ export * from './page-chat-usage';
 export * from './page-detail';
 export * from './page-document';
 export * from './page-list';
+export * from './page-member';
 export * from './page-summary';
 export * from './remove-operation';
 export * from './rename-page-chat-session-request';

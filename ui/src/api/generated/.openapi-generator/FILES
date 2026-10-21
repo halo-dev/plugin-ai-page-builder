@@ -44,6 +44,7 @@ models/page-chat-usage.ts
 models/page-detail.ts
 models/page-document.ts
 models/page-list.ts
+models/page-member.ts
 models/page-summary.ts
 models/remove-operation.ts
 models/rename-page-chat-session-request.ts

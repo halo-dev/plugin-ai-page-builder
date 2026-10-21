@@ -103,7 +103,7 @@ class PageMcpToolProviderTest {
         assertThat(call("get_theme_context", Map.of()).error()).isFalse();
         var p = current.page();
         when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(new PageApi.PageSummary(
-            p.name(), p.slug(), p.title(), p.description(), p.version(), false, p.draftRevision(),
+            p.name(), p.slug(), p.title(), p.description(), p.version(), false, false, null, p.draftRevision(),
             p.publishedRevision(), p.updatedAt(), p.hasUnpublishedChanges()), current.document())));
         assertThat(call("get_theme_context", Map.of("name", "page")).structuredContent())
             .containsEntry("layoutState", "STANDALONE");
@@ -112,7 +112,7 @@ class PageMcpToolProviderTest {
     @Test
     void outputsAllowOmittedNullsAndEmptyPagesWithoutLeakingEditorData() {
         var document = new PageDocument(1, "code", null, null, "", "");
-        var page = new PageApi.PageSummary("page", null, "Title", null, 4L, true, "draft", null,
+        var page = new PageApi.PageSummary("page", null, "Title", null, 4L, true, false, null, "draft", null,
             Instant.now(), true);
         when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(pages.create(any(), any())).thenReturn(Mono.just(new PageApi.PageDetail(page,
@@ -244,7 +244,7 @@ class PageMcpToolProviderTest {
         assertThat(call("update_page_properties", Map.of("name", "page", "expectedVersion", 4,
             "title", "Renamed", "description", "", "slug", "new-path", "themeLayout", false)).error()).isFalse();
         verify(pages).updateProperties("page", new PageApi.UpdatePagePropertiesRequest(
-            4L, "Renamed", "", "new-path", false));
+            4L, "Renamed", "", "new-path", false, null, null));
         verify(pages, never()).save(any(), any(), any());
         call("update_page", Map.of("name", "page", "expectedVersion", 4, "html", "<h1>Before</h1>"));
         assertThat(savedDocument()).isEqualTo(current.document());
@@ -288,7 +288,7 @@ class PageMcpToolProviderTest {
         verify(pages, never()).save(any(), any(), any());
         var p = current.page();
         when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(new PageApi.PageSummary(
-            p.name(), p.slug(), p.title(), p.description(), p.version(), false, p.draftRevision(),
+            p.name(), p.slug(), p.title(), p.description(), p.version(), false, false, null, p.draftRevision(),
             p.publishedRevision(), p.updatedAt(), p.hasUnpublishedChanges()), current.document())));
         clearInvocations(themes);
         assertThat(call("update_page", args).error()).isFalse();
@@ -400,7 +400,7 @@ class PageMcpToolProviderTest {
 
     private static PageApi.PageDetail detail(PageDocument document) {
         return new PageApi.PageDetail(new PageApi.PageSummary("page", "about", "Title",
-            "Description", 4L, true, "draft", "live", Instant.now(), true), document);
+            "Description", 4L, true, false, null, "draft", "live", Instant.now(), true), document);
     }
 
     private static Map<String, Object> draftArgs() {

@@ -26,9 +26,10 @@ final class PageArchive {
     private PageArchive() { }
 
     record Metadata(String format, int version, String title, String description,
-                    boolean themeLayout) { }
+                    boolean themeLayout, boolean authorizeRequired) { }
 
-    record ImportedPage(PageDocument document, String title, String description, boolean themeLayout) { }
+    record ImportedPage(PageDocument document, String title, String description, boolean themeLayout,
+                        boolean authorizeRequired) { }
 
     static ImportedPage read(byte[] bytes) {
         if (bytes.length > MAX_BYTES) {
@@ -55,7 +56,9 @@ final class PageArchive {
         }
         if (!metadata.path("title").isString()
             || !metadata.path("themeLayout").isBoolean()
-            || (metadata.hasNonNull("description") && !metadata.get("description").isString())) {
+            || (metadata.hasNonNull("description") && !metadata.get("description").isString())
+            || (metadata.hasNonNull("authorizeRequired")
+                && !metadata.get("authorizeRequired").isBoolean())) {
             throw invalid("page.json 的页面信息无效");
         }
         var document = new PageDocument(2, "code", null, null,
@@ -63,7 +66,10 @@ final class PageArchive {
         var title = metadata.get("title").stringValue();
         var description = metadata.path("description").asString(null);
         PageService.validateProperties(title, description);
-        return new ImportedPage(document, title, description, metadata.get("themeLayout").booleanValue());
+        var authorizeRequired = metadata.hasNonNull("authorizeRequired")
+            && metadata.get("authorizeRequired").booleanValue();
+        return new ImportedPage(document, title, description,
+            metadata.get("themeLayout").booleanValue(), authorizeRequired);
     }
 
     private static Map<String, String> readEntries(byte[] bytes) {

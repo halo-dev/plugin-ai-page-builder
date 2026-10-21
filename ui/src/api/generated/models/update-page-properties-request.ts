@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { PageMember } from './page-member';
 
 /**
  * Page properties take effect immediately. Omitted fields remain unchanged.
@@ -22,10 +25,22 @@
 export interface UpdatePagePropertiesRequest {
     /**
      * 
+     * @type {boolean}
+     * @memberof UpdatePagePropertiesRequest
+     */
+    'authorizeRequired'?: boolean;
+    /**
+     * 
      * @type {string}
      * @memberof UpdatePagePropertiesRequest
      */
     'description'?: string;
+    /**
+     * Users and roles allowed to read a restricted page
+     * @type {Array<PageMember>}
+     * @memberof UpdatePagePropertiesRequest
+     */
+    'members'?: Array<PageMember> | null;
     /**
      * 
      * @type {string}
