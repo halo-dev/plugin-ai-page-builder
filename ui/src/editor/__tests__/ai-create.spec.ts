@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import HomeView from '../../views/HomeView.vue'
 import CreatePageView from '../../views/CreatePageView.vue'
 import { queryClient } from '../../lib/query-client'
-import { slugValidation } from '../../utils/slug'
+import { slugOptionalValidation, slugValidation } from '../../utils/slug'
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn<(...args: unknown[]) => unknown>(),
@@ -234,11 +234,11 @@ describe('page creation', () => {
       .findAllComponents(FormKit)
       .find((item) => item.props('modelValue')?.slug === '')!
     expect(
-      wrapper
+      form
         .findAllComponents(FormKit)
         .find((field) => field.props('name') === 'slug')!
         .props('validation'),
-    ).toEqual(slugValidation)
+    ).toEqual(slugOptionalValidation)
     form.vm.$emit('update:modelValue', { title: 'Copy', slug: 'company/about-copy' })
     await flushPromises()
     form.vm.$emit('submit')
