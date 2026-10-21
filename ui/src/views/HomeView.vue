@@ -12,6 +12,7 @@ import {
   VPageHeader,
   VPagination,
 } from '@halo-dev/components'
+import { utils } from '@halo-dev/ui-shared'
 import IconAddCircle from '~icons/mingcute/add-circle-line'
 import IconFileAi from '~icons/tabler/file-ai'
 import { aiPageBuilderApi, pagePreviewUrl } from '../api/clients'
@@ -68,7 +69,7 @@ const exportMutation = useMutation({
     const url = URL.createObjectURL(new Blob([data], { type: 'application/zip' }))
     const link = document.createElement('a')
     link.href = url
-    link.download = `${slug}.zip`
+    link.download = `${slug}-${utils.date.format(new Date(), 'YYYYMMDD-HHmmss')}.zip`
     document.body.append(link)
     link.click()
     link.remove()
