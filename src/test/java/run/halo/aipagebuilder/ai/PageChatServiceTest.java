@@ -403,7 +403,7 @@ class PageChatServiceTest {
     void titleOnlyCommitEmitsUpdatedPageWithoutClaimingANewContentRevision() {
         var base = fixture.base.page();
         var renamed = new PageApi.PageDetail(new PageApi.PageSummary(base.name(), base.slug(),
-            "Renamed", base.description(), 2L, base.themeLayout(), base.draftRevision(),
+            "Renamed", base.description(), 2L, base.themeLayout(), false, null, base.draftRevision(),
             base.publishedRevision(), Instant.now(), base.hasUnpublishedChanges()), fixture.base.document());
         when(pages.saveAi(eq("page"), eq(1L), eq(fixture.base.document()), eq("admin"),
             eq(runId), eq("old-revision"), isNull(), eq("Renamed"), isNull()))
@@ -423,7 +423,7 @@ class PageChatServiceTest {
     void descriptionOnlyCommitEmitsUpdatedPageWithoutClaimingANewContentRevision() {
         var base = fixture.base.page();
         var described = new PageApi.PageDetail(new PageApi.PageSummary(base.name(), base.slug(),
-            base.title(), "了解我们的公司与团队。", 2L, base.themeLayout(), base.draftRevision(),
+            base.title(), "了解我们的公司与团队。", 2L, base.themeLayout(), false, null, base.draftRevision(),
             base.publishedRevision(), Instant.now(), base.hasUnpublishedChanges()), fixture.base.document());
         when(pages.saveAi(eq("page"), eq(1L), eq(fixture.base.document()), eq("admin"),
             eq(runId), eq("old-revision"), isNull(), isNull(), eq("了解我们的公司与团队。")))
@@ -444,7 +444,7 @@ class PageChatServiceTest {
     void agentCannotOverwriteAnExistingDescriptionWithoutExplicitReplacement() {
         var base = fixture.base.page();
         var described = new PageApi.PageDetail(new PageApi.PageSummary(base.name(), base.slug(),
-            base.title(), "用户手写的描述", 1L, base.themeLayout(), base.draftRevision(),
+            base.title(), "用户手写的描述", 1L, base.themeLayout(), false, null, base.draftRevision(),
             base.publishedRevision(), Instant.now(), base.hasUnpublishedChanges()),
             fixture.base.document());
         when(pages.get("page")).thenReturn(Mono.just(described));
@@ -631,7 +631,7 @@ class PageChatServiceTest {
         var base = fixture.base.page();
         when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(
             new PageApi.PageSummary(base.name(), null, base.title(), base.description(), base.version(),
-                base.themeLayout(), base.draftRevision(), null, base.updatedAt(), true),
+                base.themeLayout(), false, null, base.draftRevision(), null, base.updatedAt(), true),
             fixture.base.document())));
     }
 
@@ -1880,7 +1880,7 @@ class PageChatServiceTest {
         final PageApi.PageDetail base = page("old-revision", 1L, "old");
         final PageApi.PageDetail changed = page("new-revision", 2L, "new");
         private static PageApi.PageDetail page(String revision, Long version, String text) {
-            return new PageApi.PageDetail(new PageApi.PageSummary("page", "page", "Title", "", version, true,
+            return new PageApi.PageDetail(new PageApi.PageSummary("page", "page", "Title", "", version, true, false, null,
                 revision, null, Instant.now(), true), new PageDocument(1, "code", "", Map.of(),
                 "<p>" + text + "</p>", ""));
         }

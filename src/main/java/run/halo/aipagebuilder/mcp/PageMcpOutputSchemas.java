@@ -31,10 +31,13 @@ final class PageMcpOutputSchemas {
 
     private static Map<String, Object> summary(boolean detail) {
         var schema = fields("name", text(), "title", text(), "version", integer(),
-            "themeLayout", Map.of("type", "boolean"), "draftRevision", text(),
+            "themeLayout", Map.of("type", "boolean"),
+            "authorizeRequired", Map.of("type", "boolean"), "draftRevision", text(),
             "updatedAt", timestamp(), "hasUnpublishedChanges", Map.of("type", "boolean"));
         add(schema, "slug", text(), false);
         add(schema, "description", text(), false);
+        add(schema, "members",
+            array(fields("kind", enumeration("USER", "ROLE"), "name", text())), false);
         add(schema, "publishedRevision", text(), false);
         if (detail) {
             add(schema, "mode", enumeration("visual", "code"), true);

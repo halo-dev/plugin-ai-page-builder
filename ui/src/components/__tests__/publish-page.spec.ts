@@ -101,6 +101,7 @@ function detail(version = 1, title = '关于我们', slug: string | null = 'abou
       slug,
       version,
       themeLayout: true,
+      authorizeRequired: false,
       draftRevision: `r${version}`,
       updatedAt: '2026-10-16T00:00:00Z',
       hasUnpublishedChanges: true,

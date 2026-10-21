@@ -101,6 +101,7 @@ const page = {
     slug: 'one',
     version: 1,
     themeLayout: true,
+    authorizeRequired: false,
     description: '',
     updatedAt: '',
     hasUnpublishedChanges: false,
@@ -570,6 +571,25 @@ describe('workspace integration', () => {
     expect(wrapper.emitted('apply')).toEqual([[{ themeLayout: false }]])
     wrapper.unmount()
   })
+  it('submits the restricted access toggle with the form', async () => {
+    const wrapper = mount(PageSettings, {
+      props: {
+        page: page.page,
+        disabled: false,
+        published: false,
+      },
+      global: globals,
+    })
+    const field = wrapper
+      .findAllComponents({ name: 'FormKit' })
+      .find((input) => input.attributes('name') === 'authorizeRequired')!
+    field.vm.$emit('update:modelValue', true)
+    await flushPromises()
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
+    expect(wrapper.emitted('apply')).toEqual([[{ authorizeRequired: true }]])
+    wrapper.unmount()
+  })
   it('submits all edited properties together without mutating the page', async () => {
     const wrapper = mount(PageSettings, {
       props: { page: page.page, disabled: false, published: false },
@@ -581,6 +601,7 @@ describe('workspace integration', () => {
       slug: 'new-path',
       description: 'New description',
       themeLayout: false,
+      authorizeRequired: true,
     })) {
       fields
         .find((field) => field.attributes('name') === name)!
@@ -596,6 +617,7 @@ describe('workspace integration', () => {
           slug: 'new-path',
           description: 'New description',
           themeLayout: false,
+          authorizeRequired: true,
         },
       ],
     ])
@@ -611,12 +633,18 @@ describe('workspace integration', () => {
       .findAllComponents({ name: 'FormKit' })
       .find((field) => field.attributes('name') === 'title')!
       .vm.$emit('update:modelValue', 'Buffered')
+    wrapper
+      .findAllComponents({ name: 'FormKit' })
+      .find((field) => field.attributes('name') === 'authorizeRequired')!
+      .vm.$emit('update:modelValue', true)
     await flushPromises()
     await wrapper.setProps({
       page: { ...page.page, version: 2, slug: 'remote-path', description: 'Remote description' },
     })
     wrapper.findComponent({ ref: 'form' }).vm.$emit('submit')
-    expect(wrapper.emitted('apply')).toEqual([[{ title: 'Buffered' }]])
+    expect(wrapper.emitted('apply')).toEqual([
+      [{ title: 'Buffered', authorizeRequired: true }],
+    ])
     wrapper.unmount()
   })
   it('emits an empty settings patch when a legacy description is untouched', async () => {

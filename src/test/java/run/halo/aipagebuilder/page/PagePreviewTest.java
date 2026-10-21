@@ -112,7 +112,7 @@ class PagePreviewTest {
             .isNotFound();
         var old = page("a", 1L);
         var differentRevision = new PageApi.PageSummary(old.name(), old.slug(), old.title(), "", 1L,
-            true, "other", null, old.updatedAt(), true);
+            true, false, null, "other", null, old.updatedAt(), true);
         when(pages.get("a")).thenReturn(Mono.just(new PageApi.PageDetail(differentRevision, null)));
         client.get().uri(PagePreviewStore.PATH + ticket.token()).exchange().expectStatus()
             .isNotFound();
@@ -236,7 +236,7 @@ class PagePreviewTest {
     }
 
     private static PageApi.PageSummary page(String name, Long version) {
-        return new PageApi.PageSummary(name, "about", "Title", "", version, true,
+        return new PageApi.PageSummary(name, "about", "Title", "", version, true, false, null,
             "draft", null, Instant.EPOCH, true);
     }
 

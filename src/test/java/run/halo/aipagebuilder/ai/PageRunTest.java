@@ -432,7 +432,7 @@ class PageRunTest {
 
     private static PageApi.PageDetail page(String revision, Long version, String text) {
         return new PageApi.PageDetail(
-            new PageApi.PageSummary("page", "page", "Title", "", version, true, revision, null,
+            new PageApi.PageSummary("page", "page", "Title", "", version, true, false, null, revision, null,
                 Instant.now(), true),
             new PageDocument(1, "code", "", Map.of(), "<p>" + text + "</p>", ""));
     }
