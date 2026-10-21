@@ -94,7 +94,7 @@ public class PageService {
     public Mono<PageDetail> create(CreatePageRequest request, String actor) {
         return createDocument(request.slug(),
             new PageDocument(1, "code", "", Map.of(), "", ""),
-            request.title(), "", request.themeLayout(), actor);
+            request.title(), "", request.themeLayout(), false, null, actor);
     }
 
     public Mono<PageDetail> importPage(String reviewId, byte[] archive, String actor,
@@ -103,7 +103,8 @@ public class PageService {
             .then(Mono.fromCallable(() -> PageArchive.read(archive))
                 .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic()))
             .flatMap(imported -> createDocument(null, imported.document(),
-                imported.title(), imported.description(), imported.themeLayout(), actor));
+                imported.title(), imported.description(), imported.themeLayout(), false, null,
+                actor));
     }
 
     public Mono<PageDetail> clonePage(String name, PageApi.ClonePageRequest request, String actor) {
@@ -112,13 +113,14 @@ public class PageService {
             var copy = new PageDocument(original.js().isEmpty() ? 1 : 2, "code", null, null,
                 original.html(), original.css(), original.js());
             return createDocument(request.slug(), copy, request.title(), source.getSpec().getDescription(),
-                source.getSpec().isThemeLayout(), actor);
+                source.getSpec().isThemeLayout(), source.getSpec().isAuthorizeRequired(),
+                source.getSpec().getMembers(), actor);
         }));
     }
 
     private Mono<PageDetail> createDocument(String slug, PageDocument document, String title,
-        String description, Boolean themeLayout,
-        String actor) {
+        String description, Boolean themeLayout, boolean authorizeRequired,
+        List<ThemePage.PageMember> members, String actor) {
         return Mono.defer(() -> {
             // Normalize blank slugs so callers cannot persist an empty string.
             final var normalizedSlug = slug == null || slug.isBlank() ? null : slug;
@@ -138,6 +140,8 @@ public class PageService {
                     page.getSpec().setDescription(description);
                     page.getSpec().setSlug(normalizedSlug);
                     page.getSpec().setThemeLayout(themeLayout == null || themeLayout);
+                    page.getSpec().setAuthorizeRequired(authorizeRequired);
+                    page.getSpec().setMembers(members == null ? null : List.copyOf(members));
                     applyDraft(page, created);
                     return client.create(page).flux().single()
                         .onErrorResume(error -> {

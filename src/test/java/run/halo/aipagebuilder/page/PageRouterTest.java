@@ -201,8 +201,10 @@ class PageRouterTest {
 
         var alice = new UsernamePasswordAuthenticationToken("alice", "password",
             AuthorityUtils.createAuthorityList("ROLE_authenticated"));
-        handler.handle(request)
+        var aliceResponse = handler.handle(request)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(alice)).block();
+        assertThat(aliceResponse).isNotNull();
+        assertThat(aliceResponse).isNotInstanceOf(PageCacheResponse.class);
         verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
             false);
 
@@ -219,6 +221,62 @@ class PageRouterTest {
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(outsider)));
         verify(renderer, never()).render(request, "stable-id", "about/company", true, document,
             "Company", "", true);
+    }
+
+    @Test
+    void unrestrictedPagesStayPublicEvenWithMembers() {
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
+        var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
+            false, List.of(new ThemePage.PageMember(ThemePage.MemberType.USER, "alice")), "draft",
+            "published", Instant.now(), true);
+        when(service.findPublished("about/company"))
+            .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+            .thenReturn(RenderingResponse.create("test").build());
+        var request = request("/about/company");
+        var handler = router.route(request).block();
+        assertThat(handler).isNotNull();
+        assertThat(handler.handle(request).block()).isInstanceOf(PageCacheResponse.class);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
+            false);
+    }
+
+    @Test
+    void restrictedPagesWithoutMembersRejectSignedInUsers() {
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
+        when(service.findPublished("about/company"))
+            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
+        var request = request("/about/company");
+        var handler = router.route(request).block();
+        assertThat(handler).isNotNull();
+
+        var member = new UsernamePasswordAuthenticationToken("member", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertNotFound(handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)));
+        assertNotFound(handler.handle(request));
+        verifyNoInteractions(renderer);
+    }
+
+    @Test
+    void impersonatingAdministratorsReadRestrictedPages() {
+        var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
+        when(service.findPublished("about/company"))
+            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
+        when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean()))
+            .thenReturn(RenderingResponse.create("test").build());
+        var request = request("/about/company");
+        var handler = router.route(request).block();
+        assertThat(handler).isNotNull();
+
+        var impersonating = new UsernamePasswordAuthenticationToken("member", "password",
+            AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_PREVIOUS_ADMINISTRATOR"));
+        var response = handler.handle(request)
+            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating)).block();
+        assertThat(response).isNotNull();
+        assertThat(response).isNotInstanceOf(PageCacheResponse.class);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
+            true);
     }
 
     private static PageApi.PageSummary restrictedPage(List<ThemePage.PageMember> members) {

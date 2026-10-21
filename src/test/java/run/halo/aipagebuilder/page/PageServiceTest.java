@@ -541,6 +541,22 @@ class PageServiceTest {
     }
 
     @Test
+    void cloningARestrictedPageKeepsItsAccessSettings() {
+        var original = service.create(new CreatePageRequest("original", "Original"), "admin").block();
+        var members = List.of(
+            new ThemePage.PageMember(ThemePage.MemberType.USER, "alice"),
+            new ThemePage.PageMember(ThemePage.MemberType.ROLE, "editors"));
+        var restricted = service.updateProperties(original.page().name(),
+            new PageApi.UpdatePagePropertiesRequest(original.page().version(), null, null, null, null,
+                true, members)).block();
+        var copy = service.clonePage(original.page().name(),
+            new PageApi.ClonePageRequest(restricted.page().version(), "copy", "Copy"), "admin").block();
+        assertThat(copy.page().authorizeRequired()).isTrue();
+        assertThat(copy.page().members()).isEqualTo(members);
+        assertThat(copy.page().publishedRevision()).isNull();
+    }
+
+    @Test
     void staleVersionIsRejectedBeforeCreatingRevision() {
         var created = service.create(new CreatePageRequest("about", "Original"), "admin").block();
         assertConflict(() -> service.save(created.page().name(), new SavePageRequest(0L, document("New"),
