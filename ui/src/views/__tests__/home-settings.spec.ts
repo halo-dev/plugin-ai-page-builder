@@ -46,6 +46,10 @@ vi.mock('@vueuse/router', async () => {
       ref(key in mocks.routeQuery ? mocks.routeQuery[key] : defaultValue),
   }
 })
+// ui-shared's index pulls in pinia, which the console provides at runtime but tests lack.
+vi.mock('@halo-dev/ui-shared', () => ({
+  utils: { date: { timeAgo: () => '', format: () => '' } },
+}))
 vi.mock('@halo-dev/components', async () => {
   const { defineComponent, h } = await import('vue')
   const box = (name: string) =>
