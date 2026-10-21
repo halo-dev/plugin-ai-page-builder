@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
 import type { PageDocument } from '../api/generated'
-import DiffEditor from './DiffEditor.vue'
+
+const DiffEditor = defineAsyncComponent(() => import('./DiffEditor.vue'))
 
 defineProps<{
   before: Pick<PageDocument, 'html' | 'css' | 'js'>
