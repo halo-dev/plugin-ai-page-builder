@@ -17,6 +17,7 @@ import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.SystemSetting;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
+import run.halo.aipagebuilder.theme.ThemeContextExtractor.SourceText;
 
 @Service
 public class ThemeContextService {
@@ -152,8 +153,6 @@ public class ThemeContextService {
             StandardCharsets.UTF_8), bytes.length > MAX_SOURCE_BYTES);
     }
 
-    private record SourceText(String text, boolean byteTruncated) { }
-
     private Mono<Map<String, Object>> withTheme(String name, SourceAction action) {
         return activeThemeName().filter(name::equals)
             .switchIfEmpty(Mono.error(new IllegalStateException("Active theme changed")))
@@ -249,7 +248,7 @@ public class ThemeContextService {
         if (!declared.isAbsolute()) return ThemeStyleContext.unavailable();
         var root = declared.toRealPath();
         var pageTemplate = pageTemplate(root, theme);
-        var result = extractor.extract(relative -> read(root, relative), name, pageTemplate);
+        var result = extractor.extractSources(relative -> read(root, relative), name, pageTemplate);
         var notes = new ArrayList<>(result.notes());
         notes.add("先读取 layout.html 及其引用，检查 content 插槽祖先已有的宽度、padding 和 margin，避免重复添加外层留白。");
         notes.add("同时读取亮色与暗色规则及切换脚本；主题源码仅供参考，不执行其中的模板、HTML 或 JavaScript。");
@@ -291,7 +290,7 @@ public class ThemeContextService {
     }
 
     // The extractor provides only local HTML/CSS paths. Never follow a theme reference to another directory.
-    static String read(Path root, String relative) {
+    static SourceText read(Path root, String relative) {
         try {
             if (relative == null || relative.contains("\\") || relative.contains("\u0000")) return null;
             var path = Path.of(relative);
@@ -305,15 +304,13 @@ public class ThemeContextService {
             try (var input = Files.newInputStream(file)) {
                 var bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
                 if (bytes.length <= MAX_SOURCE_BYTES) {
-                    return new String(bytes, StandardCharsets.UTF_8);
+                    return new SourceText(new String(bytes, StandardCharsets.UTF_8), false);
                 }
                 // Large compiled CSS still carries the base rules we need; parse the prefix
-                // instead of discarding the whole file. Keep the length at the cap so callers
-                // can still tell the source was truncated.
+                // instead of discarding the whole file. Report byte truncation independently
+                // of the decoded character count or the length of the complete CSS prefix.
                 var text = new String(bytes, 0, MAX_SOURCE_BYTES, StandardCharsets.UTF_8);
-                if (!relative.endsWith(".css")) return text;
-                var prefix = cssPrefix(text);
-                return prefix + " ".repeat(MAX_SOURCE_BYTES - prefix.length());
+                return new SourceText(relative.endsWith(".css") ? cssPrefix(text) : text, true);
             }
         } catch (IOException | IllegalArgumentException error) {
             return null;

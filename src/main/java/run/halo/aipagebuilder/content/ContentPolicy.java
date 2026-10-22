@@ -40,7 +40,7 @@ public class ContentPolicy {
         "section", "small", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td",
         "tfoot", "th", "thead", "time", "tr", "u", "ul");
     private static final Set<String> ATTRIBUTES = Set.of("id", "class", "title", "style", "lang",
-        "dir", "role", "tabindex", "hidden", "href", "target", "rel", "src", "alt", "width",
+        "dir", "role", "tabindex", "hidden", "inert", "href", "target", "rel", "src", "alt", "width",
         "height", "loading", "decoding", "colspan", "rowspan", "scope", "start", "reversed",
         "type", "open", "datetime", "cite", "span", "disabled");
     private static final Pattern CSS_URL = Pattern.compile("(?i)url\\(\\s*(['\"]?)(.*?)\\1\\s*\\)");
@@ -62,6 +62,11 @@ public class ContentPolicy {
                     + "@namespace, @font-face, @keyframes, nested selectors or escape characters.",
                 "Use min-width/max-width media queries instead of range comparisons with <. "
                     + "scroll-behavior and overscroll-behavior are supported.",
+                "Wrap arithmetic inside clamp(), min() and max() in calc(), for example "
+                    + "clamp(1.85rem, calc(1.25rem + 2.1vw), 2.5rem).",
+                "Closed drawers must not be keyboard-focusable: use hidden, visibility:hidden "
+                    + "or inert, not only transforms or aria-hidden. Remove inert when opening "
+                    + "or showing a persistent desktop sidebar; restore focus when closing.",
                 "JavaScript validation checks size and transport, not runtime safety. "
                     + "Published JavaScript executes in the site DOM.",
                 "Do not implement forms or text inputs through JavaScript workarounds.",
@@ -226,7 +231,7 @@ public class ContentPolicy {
                 .setCustomErrorHandler(new ThrowingCSSParseErrorHandler())
                 .setCustomExceptionHandler(
                     error -> parseProblem.compareAndSet(null, error.getMessage())));
-            require(sheet != null, "CSS 语法无效" + detail(parseProblem.get()));
+            require(sheet != null, cssSyntaxError(css, parseProblem.get()));
             require(sheet.getAllImportRules().isEmpty() && sheet.getAllNamespaceRules().isEmpty(),
                 "不支持 CSS @import 或 @namespace");
             validateRules(sheet, 0);
@@ -235,8 +240,16 @@ public class ContentPolicy {
             throw error;
         } catch (RuntimeException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "CSS 语法无效" + detail(error.getMessage()));
+                cssSyntaxError(css, error.getMessage()));
         }
+    }
+
+    private static String cssSyntaxError(String css, String message) {
+        var hint = Pattern.compile("(?i)\\b(?:clamp|min|max)\\s*\\(").matcher(css).find()
+            ? "；若 clamp()/min()/max() 参数包含算术，请使用 calc() 包裹，例如 "
+                + "clamp(1.85rem, calc(1.25rem + 2.1vw), 2.5rem)"
+            : "";
+        return "CSS 语法无效" + detail(message) + hint;
     }
 
     private static String detail(String message) {
@@ -257,7 +270,7 @@ public class ContentPolicy {
                 for (var declaration : style.getAllDeclarations()) {
                     var selector = style.getSelectorAtIndex(0)
                         .getAsCSSString(new CSSWriter().getSettings(), 0);
-                    require(!Set.of("behavior", "-moz-binding").contains(
+                    require(!Set.of("behavior", "_behavior", "-ms-behavior", "-moz-binding").contains(
                         declaration.getProperty().toLowerCase(Locale.ROOT)),
                         "不支持的 CSS 属性：" + declaration.getProperty()
                             + "（选择器：" + selector + "），请移除此声明");

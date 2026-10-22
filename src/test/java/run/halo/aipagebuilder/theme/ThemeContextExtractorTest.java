@@ -572,6 +572,102 @@ class ThemeContextExtractorTest {
     }
 
     @Test
+    void doesNotInferMountAncestryFromForwardedOrConditionalContent() {
+        for (var expression : java.util.List.of("~{modules/shell :: shell(${content})}",
+            "${enabled} ? ${content} : ~{other :: body}",
+            "~{modules/shell :: shell(${ content })}")) {
+            for (var attribute : java.util.List.of("th:replace", "th:insert")) {
+                var result = extractor.extract(Map.of("templates/layout.html",
+                    "<html th:fragment='html(head, content)'><body><main class='outer'><div "
+                        + attribute + "=\"" + expression + "\"></div></main></body></html>")::get);
+                assertThat(result.contentSlot().mainLandmark()).isEqualTo("unknown");
+                assertThat(result.contentSlot().slot()).isEmpty();
+                assertThat(result.coverage().gaps()).anyMatch(gap ->
+                    gap.reason().equals("unresolved_slot"));
+            }
+        }
+    }
+
+    @Test
+    void acceptsWhitespaceInDirectContentExpressions() {
+        for (var expression : java.util.List.of("${content}", " ${ content } ", "~{${content}}",
+            " ~{ ${ content } } ")) {
+            var result = extractor.extract(path ->
+                "<main th:insert='" + expression + "'></main>");
+            assertThat(result.contentSlot().mainLandmark()).isEqualTo("present");
+            assertThat(result.coverage().gaps())
+                .noneMatch(gap -> gap.reason().equals("unresolved_fragment"));
+        }
+    }
+
+    @Test
+    void acceptsDirectHeadAndFootParametersWithoutMissingFragmentGaps() {
+        for (var parameter : java.util.List.of("head", "foot")) {
+            for (var expression : java.util.List.of("${ " + parameter + " }",
+                "~{ ${ " + parameter + " } }")) {
+                var result = extractor.extract(Map.of("templates/layout.html",
+                    "<html><head><th:block th:replace='" + expression + "'/></head>"
+                        + "<body><main th:insert='${content}'></main></body></html>")::get);
+                assertThat(result.coverage().gaps())
+                    .noneMatch(gap -> gap.reason().equals("unresolved_fragment"));
+            }
+        }
+    }
+
+    @Test
+    void doesNotInferSlotConstraintsThroughRemovalInstructions() {
+        for (var removal : java.util.List.of("tag", "all", "body", "all-but-first", "${removal}")) {
+            for (var slot : java.util.List.of("<th:block th:replace='${content}'/>", "")) {
+                var result = extractor.extract(Map.of("templates/layout.html",
+                    "<html><body><main class='shell' style='max-width:600px;padding:24px'"
+                        + " th:remove='" + removal + "'"
+                        + (slot.isEmpty() ? " th:insert='${content}'" : "")
+                        + ">" + slot + "</main></body></html>")::get);
+                assertThat(result.contentSlot().mainLandmark()).isEqualTo("unknown");
+                assertThat(result.contentSlot().slot()).isEmpty();
+                assertThat(result.coverage().gaps())
+                    .anyMatch(gap -> gap.reason().equals("unresolved_slot"));
+            }
+        }
+    }
+
+    @Test
+    void excludesVirtualBlocksButKeepsTheirConditionsAndRealAncestors() {
+        for (var host : java.util.List.of("<th:block th:replace='${content}'/>", "")) {
+            var block = "<th:block role='main' class='virtual' style='max-width:600px;padding:24px'"
+                + (host.isEmpty() ? " th:insert='${content}'" : "") + ">" + host + "</th:block>";
+            var bare = extractor.extract(Map.of("templates/layout.html", block)::get);
+            assertThat(bare.contentSlot().mainLandmark()).isEqualTo("absent");
+            assertThat(bare.contentSlot().slot()).isEmpty();
+            var wrapped = extractor.extract(Map.of("templates/layout.html",
+                "<main class='real' th:remove='none'>" + block + "</main>")::get);
+            assertThat(wrapped.contentSlot().mainLandmark()).isEqualTo("present");
+            assertThat(wrapped.contentSlot().slot())
+                .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+                .containsExactly("main.real");
+            var conditional = extractor.extract(Map.of("templates/layout.html",
+                "<th:block th:if='${enabled}'><main>" + block + "</main></th:block>")::get);
+            assertThat(conditional.contentSlot().mainLandmark()).isEqualTo("unknown");
+        }
+    }
+
+    @Test
+    void doesNotClaimAncestorsWhenHtmlImplicitlyClosesThem() {
+        for (var layout : java.util.List.of(
+            "<p class='intro' style='max-width:10px'>Intro<div class='shell'>"
+                + "<th:block th:replace='${content}'></th:block></div>",
+            "<ul><li class='intro' style='max-width:10px'>Intro<li class='shell'>"
+                + "<th:block th:replace='${content}'></th:block></li></ul>")) {
+            var result = extractor.extract(path ->
+                "<html th:fragment='html(head, content)'><body>" + layout + "</body></html>");
+            assertThat(result.contentSlot().mainLandmark()).isEqualTo("unknown");
+            assertThat(result.contentSlot().slot()).isEmpty();
+            assertThat(result.coverage().gaps()).anyMatch(gap ->
+                gap.reason().equals("ambiguous_slot"));
+        }
+    }
+
+    @Test
     void keepsHtmlVoidElementsOutsideTheContentSlotAncestry() {
         for (var tag : java.util.List.of("img", "input", "br", "hr", "meta", "link")) {
             var result = extractor.extract(path -> """
@@ -586,6 +682,24 @@ class ThemeContextExtractorTest {
             assertThat(result.contentSlot().slot())
                 .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
                 .as(tag).containsExactly("main.shell", "div.content-column");
+        }
+    }
+
+    @Test
+    void keepsSelfClosingTemplateSiblingsOutsideTheContentSlotAncestry() {
+        for (var tag : java.util.List.of("th:block", "div", "halo:header")) {
+            var result = extractor.extract(path -> """
+                <html><head><th:block th:if="${head != null}">
+                <th:block th:replace="${head}" /></th:block></head><body>
+                <%s th:replace="~{modules/header}" />
+                <main class="shell"><th:block th:replace="${content}" /></main>
+                <th:block th:replace="~{modules/footer}" /></body></html>
+                """.formatted(tag));
+            assertThat(result.contentSlot().mainLandmark()).as(tag).isEqualTo("present");
+            assertThat(result.contentSlot().slot())
+                .extracting(ThemeStyleContext.ContentSlot.Wrapper::selector)
+                .containsExactly("main.shell");
+            assertThat(result.coverage().gaps()).noneMatch(gap -> gap.reason().contains("slot"));
         }
     }
 

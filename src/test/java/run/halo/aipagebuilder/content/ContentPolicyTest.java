@@ -45,6 +45,42 @@ class ContentPolicyTest {
             .doesNotThrowAnyException();
     }
 
+    @Test
+    void preservesInertDrawerAndItsFocusControls() {
+        var html = "<aside inert aria-hidden='true'><button tabindex='-1'>关闭</button></aside>";
+        assertThatCode(() -> policy.validateHtml(html)).doesNotThrowAnyException();
+        var drawer = org.jsoup.Jsoup.parseBodyFragment(policy.sanitizeHtml(html))
+            .selectFirst("aside");
+        assertThat(drawer.hasAttr("inert")).isTrue();
+        assertThat(drawer.attr("aria-hidden")).isEqualTo("true");
+        assertThat(drawer.selectFirst("button").attr("tabindex")).isEqualTo("-1");
+        assertThat((List<String>) policy.capabilities().get("htmlAttributes")).contains("inert");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "clamp(1.85rem, calc(1.25rem + 2.1vw), 2.5rem)",
+        "min(90vw, calc(100% - 2rem))", "max(1rem, calc(2vw + 0.5rem))"
+    })
+    void acceptsAndRendersCompatibleMathExpressions(String value) {
+        var css = ".heading {font-size:" + value + "}";
+        assertThatCode(() -> policy.validateCss(css)).doesNotThrowAnyException();
+        assertThat(policy.renderCss(css, "page-test")).contains("#page-test .heading", "calc(");
+        assertThatCode(() -> policy.validateHtml("<h1 style='font-size:" + value + "'>标题</h1>"))
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void explainsHowToRepairBareClampArithmeticWithoutRewritingIt() {
+        var css = ".heading {font-size:clamp(1.85rem, 1.25rem + 2.1vw, 2.5rem)}";
+        assertThatThrownBy(() -> policy.validateCss(css))
+            .isInstanceOf(ResponseStatusException.class)
+            .hasMessageContaining("CSS 语法无效：").hasMessageContaining("line")
+            .hasMessageContaining("calc(1.25rem + 2.1vw)");
+        assertThatThrownBy(() -> policy.validateCss(".heading {color:}"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageNotContaining("calc(");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         "<script>alert(1)</script>", "<img src=x onerror=alert(1)>",
@@ -82,7 +118,8 @@ class ContentPolicyTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"behavior", "BEHAVIOR", "-moz-binding", "-MOZ-BINDING"})
+    @ValueSource(strings = {"behavior", "BEHAVIOR", "-moz-binding", "-MOZ-BINDING",
+        "-ms-behavior", "-MS-BEHAVIOR", "_behavior", "_BEHAVIOR"})
     void rejectsActualExecutablePropertiesWithRepairLocation(String property) {
         var declaration = property + " /* gap */ : url('/legacy.htc');";
         for (var css : List.of(".unsafe {" + declaration + "}",
