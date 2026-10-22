@@ -3,6 +3,7 @@ import {
   computed,
   defineAsyncComponent,
   onBeforeUnmount,
+  onMounted,
   shallowRef,
   useTemplateRef,
   watch,
@@ -99,7 +100,17 @@ async function annotate(target: AnnotationTarget, comment: string) {
     Toast.info(errorMessage(e))
   }
 }
-const { themeContext, rootStates, rootState, previewModeIcon, cyclePreviewMode } = useThemePreview()
+const {
+  themeContext,
+  rootStates,
+  rootState,
+  previewModeIcon,
+  cyclePreviewMode,
+  refreshThemeContext,
+} = useThemePreview()
+// The site theme can change in another tab while this editor stays open; reload the
+// identity the mismatch banner compares against whenever the tab regains focus.
+onMounted(() => window.addEventListener('focus', refreshThemeContext))
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
@@ -169,6 +180,7 @@ useEditorShortcuts({
 })
 onBeforeUnmount(() => {
   loadId++
+  window.removeEventListener('focus', refreshThemeContext)
 })
 async function reload() {
   if (locked.value) return
@@ -183,7 +195,11 @@ async function reload() {
 }
 async function saveDraft() {
   try {
-    if (await save()) Toast.success('草稿已保存')
+    if (await save()) {
+      // The saved revision snapshots the current theme, so drop any stale identity.
+      refreshThemeContext()
+      Toast.success('草稿已保存')
+    }
   } catch (e) {
     Toast.error(errorMessage(e))
   }

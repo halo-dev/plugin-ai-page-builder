@@ -408,7 +408,8 @@ describe('workspace integration', () => {
       name: 'one',
       savePageRequest: { version: 1, document: edited, source: 'manual' },
     })
-    expect(mocks.themeContext).toHaveBeenCalledTimes(1)
+    // Saving refreshes the theme identity used by the mismatch banner.
+    expect(mocks.themeContext).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
   it('keeps native chat undo while page undo remains unified', async () => {

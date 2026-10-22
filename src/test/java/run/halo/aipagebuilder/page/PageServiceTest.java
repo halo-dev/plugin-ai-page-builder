@@ -1051,6 +1051,11 @@ class PageServiceTest {
             .isEqualTo(earth);
         assertThat(revisions.get(saved.page().draftRevision()).getSpec().getTheme())
             .isEqualTo(earth);
+
+        var aiSaved = service.saveAi(name, saved.page().version(), document("AI"), "owner",
+            "run-1", saved.page().draftRevision(), null, null).block();
+        assertThat(revisions.get(aiSaved.page().draftRevision()).getSpec().getTheme())
+            .isEqualTo(earth);
     }
 
     @Test
@@ -1075,6 +1080,7 @@ class PageServiceTest {
         var earthRevision = created.page().draftRevision();
         var published = service.publish(name, created.page().version(), earthRevision).block();
         assertThat(published.page().publishedTheme()).isEqualTo(earth);
+        assertThat(service.get(name).block().revisionTheme()).isEqualTo(earth);
 
         when(themes.activeThemeIdentity()).thenReturn(Mono.just(nebula));
         var saved = service.save(name, new SavePageRequest(published.page().version(),
@@ -1086,6 +1092,10 @@ class PageServiceTest {
             .isEqualTo(nebula);
         assertThat(revisions.get(restored.page().draftRevision()).getSpec().getTheme())
             .isEqualTo(earth);
+
+        var unpublished = service.unpublish(name, restored.page().version()).block();
+        assertThat(unpublished.page().publishedRevision()).isNull();
+        assertThat(unpublished.page().publishedTheme()).isNull();
     }
 
     @Test
