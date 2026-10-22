@@ -753,6 +753,115 @@ class PageChatServiceTest {
             fixture.base.document())));
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void pendingSlugLookupEndsOnCancellationOrDeadline(boolean resume, boolean timeout) {
+        var clock = reactor.test.scheduler.VirtualTimeScheduler.getOrSet();
+        var lookup = Sinks.<Void>empty();
+        try {
+            usePageWithoutPath();
+            var request = request();
+            if (resume) {
+                when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                    PageWorkingCopy copy = i.getArgument(3);
+                    return copy.setSlug(Map.of("slug", "activity"))
+                        .then(copy.update(Map.of("html", "<p>Preserve me</p>")))
+                        .thenMany(Flux.error(new AiGenerationException(
+                            AiGenerationException.Reason.TRUNCATED)));
+                });
+                service.start("page", request, "admin").block().blockLast();
+                request = resumeRequest(service.checkpoint("page", "page", "admin").block(),
+                    UUID.randomUUID().toString());
+            }
+            clearInvocations(gateway);
+            var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+            when(pages.checkSlugAvailable(anyString(), anyString()))
+                .thenReturn(lookup.asMono().doOnCancel(() -> cancelled.set(true)));
+            doAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                return copy.setSlug(Map.of("slug", "activity")).thenMany(Flux.empty());
+            }).when(gateway).chat(anyString(), any(), anyString(), any());
+            var events = service.start("page", request, "admin").block().collectList().toFuture();
+            assertThat(events).isNotDone();
+            if (timeout) {
+                clock.advanceTimeBy(java.time.Duration.ofMinutes(10));
+            } else {
+                service.cancel("page", request.runId()).block();
+            }
+            assertThat(events).isDone();
+            assertThat(cancelled).isTrue();
+            assertThat(service.runs().contains("page")).isFalse();
+            assertThat(service.result("page", request.runId()).block().status())
+                .isEqualTo(timeout ? "incomplete" : "cancelled");
+            if (resume) verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
+                anyString(), any(), any(), any());
+            if (resume && timeout) {
+                assertThat(service.checkpoint("page", "page", "admin").block().document().html())
+                    .isEqualTo("<p>Preserve me</p>");
+            }
+        } finally {
+            lookup.tryEmitEmpty();
+            service.stop();
+            reactor.test.scheduler.VirtualTimeScheduler.reset();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void slugLookupFailureRequiresRepairBeforeCommit(boolean resume, boolean repair) {
+        usePageWithoutPath();
+        var request = request();
+        if (resume) {
+            when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                return copy.setSlug(Map.of("slug", "activity"))
+                    .thenMany(Flux.error(new AiGenerationException(
+                        AiGenerationException.Reason.TRUNCATED)));
+            });
+            service.start("page", request, "admin").block().blockLast();
+            request = resumeRequest(service.checkpoint("page", "page", "admin").block(),
+                UUID.randomUUID().toString());
+            when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(request.runId()),
+                eq("old-revision"), any(), any(), any())).thenReturn(Mono.just(fixture.changed));
+        }
+        clearInvocations(pages);
+        when(pages.checkSlugAvailable(anyString(), anyString()))
+            .thenReturn(Mono.error(new IllegalStateException("lookup unavailable")), Mono.empty());
+        doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            // The provider turns tool RuntimeExceptions into tool results and may still STOP.
+            return copy.update(Map.of("html", "<p>Before lookup failure</p>"))
+                .then(resume ? Mono.empty() : copy.setSlug(Map.of("slug", "activity")))
+                .onErrorResume(RuntimeException.class, error -> Mono.empty())
+                .then(Mono.defer(() -> {
+                    assertThat(checkpoints.values()).singleElement().satisfies(checkpoint ->
+                        assertThat(checkpoint.getSpec().isInvalidSlugUpdate()).isTrue());
+                    return repair ? copy.setSlug(Map.of("slug", "activity")) : Mono.empty();
+                }))
+                .then(copy.update(Map.of("html", "<p>Final requested content</p>")))
+                .onErrorResume(RuntimeException.class, error -> Mono.empty())
+                .thenMany(Flux.empty());
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+
+        service.start("page", request, "admin").block().blockLast();
+
+        assertThat(service.result("page", request.runId()).block().status())
+            .isEqualTo(repair ? "completed" : "failed");
+        verify(pages, times(repair ? 2 : 1)).checkSlugAvailable("activity", "page");
+        if (repair) {
+            verify(pages).saveAi(eq("page"), eq(1L),
+                org.mockito.ArgumentMatchers.argThat(document ->
+                    "<p>Final requested content</p>".equals(document.html())),
+                eq("admin"), eq(request.runId()), eq("old-revision"), eq("activity"), any(), any());
+        } else {
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
+                anyString(), any(), any(), any());
+            assertThat(service.checkpoint("page", "page", "admin").block().document().html())
+                .isEqualTo("<p>Final requested content</p>");
+        }
+    }
+
     @Test
     void tenMinuteDeadlineStopsAnActiveStreamWithoutSavingStagedChanges() {
         var clock = reactor.test.scheduler.VirtualTimeScheduler.getOrSet();

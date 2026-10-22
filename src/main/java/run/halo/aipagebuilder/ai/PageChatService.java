@@ -379,9 +379,13 @@ public class PageChatService {
         var timeout = run.copy.timeBudget.deadline(RUN_TIMEOUT, AiGenerationException.Reason.RUN_TIMEOUT)
             .doOnError(timeoutSignal::tryEmitError).subscribe();
         return run.copy.prepareThemeBrief().then(run.copy.validateRestoredSlug())
-            .then(run.persistCheckpoint()).then(Mono.defer(() ->
-                run.is(PageRun.State.INTERRUPTED) ? run.finish(null) : converse(name, run, history,
-                run.request.prompt(), timeoutSignal.asMono())))
+            .takeUntilOther(timeoutSignal.asMono())
+            .takeUntilOther(run.cancel.asMono())
+            .then(Mono.defer(() ->
+                run.is(PageRun.State.CANCELLED) || run.is(PageRun.State.INTERRUPTED)
+                    ? run.finish(null)
+                    : run.persistCheckpoint().then(Mono.defer(() -> converse(name, run, history,
+                        run.request.prompt(), timeoutSignal.asMono())))))
             .onErrorResume(error -> {
                 if (run.terminalPersisted()) return Mono.error(error);
                 if (run.saveStarted()

@@ -210,33 +210,47 @@ class PageWorkingCopyTest {
         var copy = copy("<p>old</p>", "");
         var lookup = reactor.core.publisher.Sinks.<Void>empty();
         var writes = new AtomicInteger();
-        copy.slugAvailability(slug -> lookup.asMono());
+        var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+        copy.slugAvailability(slug -> lookup.asMono().doOnCancel(() -> cancelled.set(true)));
         copy.checkpoint(() -> Mono.fromRunnable(writes::incrementAndGet));
         var pending = copy.setSlug(Map.of("slug", "activity")).toFuture();
         var closing = copy.closeEdits().toFuture();
-        assertThat(closing).isNotDone();
+        assertThat(closing).isDone();
+        assertThat(pending).isCompletedWithValue(null);
+        assertThat(cancelled).isTrue();
 
         lookup.tryEmitEmpty();
 
-        assertThatThrownBy(pending::join).hasCauseInstanceOf(IllegalStateException.class);
         closing.join();
         assertThat(copy.slug()).isNull();
         assertThat(writes).hasValue(0);
     }
 
     @Test
-    void slugLookupFailureDoesNotAcknowledgeOrStageAnUncheckedPath() {
+    void slugLookupFailureIsDurablyInvalidAndAllowsLaterEditsAndRetry() {
         var copy = copy("<p>old</p>", "");
         copy.setSlug(Map.of("slug", "previous")).block();
         var writes = new AtomicInteger();
         copy.checkpoint(() -> Mono.fromRunnable(writes::incrementAndGet));
         copy.slugAvailability(slug -> Mono.error(new IllegalStateException("lookup unavailable")));
 
-        assertThatThrownBy(() -> copy.setSlug(Map.of("slug", "activity")).block())
-            .hasMessage("lookup unavailable");
+        assertThat(copy.setSlug(Map.of("slug", "activity")).block())
+            .containsEntry("valid", false).containsEntry("staged", false);
 
         assertThat(copy.slug()).isEqualTo("previous");
-        assertThat(writes).hasValue(0);
+        assertThat(writes).hasValue(1);
+        assertThat(copy.hasInvalidSlugUpdate()).isTrue();
+        assertThat(copy.checkpointFailed()).isFalse();
+        assertThat(copy.update(Map.of("html", "<p>new</p>")).block())
+            .containsEntry("valid", true);
+        assertThat(copy.hasInvalidUpdate()).isTrue();
+
+        copy.slugAvailability(slug -> Mono.empty());
+        assertThat(copy.setSlug(Map.of("slug", "activity")).block())
+            .containsEntry("valid", true);
+        assertThat(copy.slug()).isEqualTo("activity");
+        assertThat(copy.hasInvalidUpdate()).isFalse();
+        assertThat(writes).hasValue(3);
     }
 
     @Test

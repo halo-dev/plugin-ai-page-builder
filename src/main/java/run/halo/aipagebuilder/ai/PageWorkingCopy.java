@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import run.halo.aipagebuilder.theme.ThemeStyleContext;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
@@ -23,6 +24,7 @@ public final class PageWorkingCopy {
     private java.util.function.Supplier<String> taskContext = () -> "";
     private java.util.function.Function<String, Mono<Void>> slugAvailability = slug -> Mono.empty();
     private Mono<Void> edits = Mono.empty();
+    private final Sinks.Empty<Void> editsClosed = Sinks.empty();
     private boolean closed;
     private boolean checkpointFailed;
     private final long startedNanos = System.nanoTime();
@@ -91,7 +93,9 @@ public final class PageWorkingCopy {
                     synchronized (this) {
                         if (closed) return Mono.error(new IllegalStateException("Run has ended"));
                     }
-                    return preparation.flatMap(prepared -> {
+                    // Closing a run cancels read-only preparation, but an edit that has already
+                    // staged data must still finish its durable checkpoint.
+                    return preparation.takeUntilOther(editsClosed.asMono()).flatMap(prepared -> {
                         final Map<String, Object> output;
                         synchronized (this) {
                             if (closed) return Mono.error(new IllegalStateException("Run has ended"));
@@ -108,9 +112,14 @@ public final class PageWorkingCopy {
         });
     }
 
-    synchronized Mono<Void> closeEdits() {
-        closed = true;
-        return edits.onErrorComplete();
+    Mono<Void> closeEdits() {
+        final Mono<Void> pending;
+        synchronized (this) {
+            closed = true;
+            pending = edits;
+        }
+        editsClosed.tryEmitEmpty();
+        return pending.onErrorComplete();
     }
 
     synchronized boolean checkpointFailed() { return checkpointFailed; }
@@ -446,7 +455,8 @@ public final class PageWorkingCopy {
             .onErrorResume(ResponseStatusException.class, error ->
                 error.getStatusCode().value() == 409
                     ? Mono.just(java.util.Objects.requireNonNullElse(error.getReason(), "访问路径不可用"))
-                    : Mono.error(error));
+                    : Mono.error(error))
+            .onErrorReturn(RuntimeException.class, "访问路径检查失败，请重试 set_page_slug 后再继续");
     }
 
     Mono<Void> validateRestoredSlug() {
