@@ -14,6 +14,8 @@ tasks.register('pnpmBuild', PnpmTask) {
     inputs.files(fileTree(
         dir: layout.projectDirectory,
         includes: ['*.cjs', '*.ts', '*.js', '*.json', '*.yaml']))
+    inputs.file(layout.projectDirectory.file(
+        '../src/main/resources/static/modern-normalize-3.0.1.css'))
     outputs.dir(layout.buildDirectory.dir('dist'))
 }
 
