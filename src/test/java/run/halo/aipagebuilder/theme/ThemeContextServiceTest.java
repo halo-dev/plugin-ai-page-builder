@@ -9,6 +9,8 @@ import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import reactor.core.publisher.Mono;
 import run.halo.app.extension.ConfigMap;
 import run.halo.app.extension.ReactiveExtensionClient;
@@ -36,21 +38,61 @@ class ThemeContextServiceTest {
         var escapeRules = "a{b:c}".repeat(
             (ThemeContextService.MAX_SOURCE_BYTES - escaped.length()) / 6);
         Files.writeString(templates.resolve("escape.css"), escaped + escapeRules + "a{b:c}");
-        assertThat(ThemeContextService.read(theme, "templates/layout.html")).isEqualTo("<main>safe</main>");
+        assertThat(ThemeContextService.read(theme, "templates/layout.html").text()).isEqualTo("<main>safe</main>");
         // A hard byte cut inside a comment, string or nested block would make the parser reject
-        // the prefix; the length stays at the cap so callers can still report the truncation.
-        assertThat(ThemeContextService.read(theme, "templates/large.css")).startsWith(rules)
-            .doesNotContain("/*").hasSize(ThemeContextService.MAX_SOURCE_BYTES);
-        assertThat(ThemeContextService.read(theme, "templates/string.css")).startsWith(rules)
-            .doesNotContain("content").hasSize(ThemeContextService.MAX_SOURCE_BYTES);
-        assertThat(ThemeContextService.read(theme, "templates/media.css")).startsWith(rules)
-            .doesNotContain("@media").hasSize(ThemeContextService.MAX_SOURCE_BYTES);
+        // the prefix; truncation is reported separately from the usable prefix length.
+        assertThat(ThemeContextService.read(theme, "templates/large.css").text()).startsWith(rules)
+            .doesNotContain("/*").hasSizeLessThanOrEqualTo(ThemeContextService.MAX_SOURCE_BYTES);
+        assertThat(ThemeContextService.read(theme, "templates/string.css").text()).startsWith(rules)
+            .doesNotContain("content").hasSizeLessThanOrEqualTo(ThemeContextService.MAX_SOURCE_BYTES);
+        assertThat(ThemeContextService.read(theme, "templates/media.css").text()).startsWith(rules)
+            .doesNotContain("@media").hasSizeLessThanOrEqualTo(ThemeContextService.MAX_SOURCE_BYTES);
+        for (var name : new String[] {"large.css", "string.css", "media.css", "escape.css"}) {
+            assertThat(ThemeContextService.read(theme, "templates/" + name).byteTruncated()).isTrue();
+        }
+        assertThat(ThemeContextService.read(theme, "templates/layout.html").byteTruncated()).isFalse();
         // An escaped brace in a selector must not be counted as a block opener.
-        assertThat(ThemeContextService.read(theme, "templates/escape.css"))
-            .startsWith(escaped + escapeRules).hasSize(ThemeContextService.MAX_SOURCE_BYTES);
+        assertThat(ThemeContextService.read(theme, "templates/escape.css").text())
+            .startsWith(escaped + escapeRules).hasSizeLessThanOrEqualTo(ThemeContextService.MAX_SOURCE_BYTES);
         for (var name : new String[] {"../outside.html", "templates/../../outside.html", "templates/linked.html",
             "/outside.html", "templates/theme.yaml", "templates/missing.css"}) {
             assertThat(ThemeContextService.read(theme, name)).isNull();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"x", "中"})
+    void reportsByteTruncationForHtmlAndCssWithoutGuessingFromCharacterCount(String filler)
+        throws Exception {
+        Files.createDirectories(root.resolve("templates/assets"));
+        var themeRoot = root.toRealPath();
+        var extractor = new ThemeContextExtractor(new ContentPolicy());
+        for (var extension : new String[] {"html", "css"}) {
+            var path = extension.equals("html") ? "templates/layout.html" : "templates/assets/large.css";
+            if (extension.equals("css")) {
+                Files.writeString(root.resolve("templates/layout.html"),
+                    "<link href='/assets/large.css'><main th:insert='${content}'></main>");
+            }
+            var prefix = extension.equals("html")
+                ? "<html th:fragment='html(head, content)'><body><main th:insert='${content}'></main><!--"
+                : "body{color:red}/*";
+            var bytes = filler.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            var ending = extension.equals("html") ? "--></body></html>" : "*/";
+            var remaining = ThemeContextService.MAX_SOURCE_BYTES - prefix.length() - ending.length();
+            var exact = prefix + filler.repeat(remaining / bytes) + "x".repeat(remaining % bytes)
+                + ending;
+            for (var suffix : new String[] {"", "tail"}) {
+                Files.writeString(root.resolve(path), exact + suffix);
+                var source = ThemeContextService.read(themeRoot, path);
+                assertThat(source.byteTruncated()).isEqualTo(!suffix.isEmpty());
+                var result = extractor.extractSources(file -> ThemeContextService.read(themeRoot, file),
+                    null, null);
+                assertThat(result.coverage().gaps().stream()
+                    .anyMatch(gap -> gap.reason().equals("file_truncated")))
+                    .as("%s / %s / suffix=%s", extension, filler, suffix)
+                    .isEqualTo(!suffix.isEmpty());
+                if (extension.equals("css")) assertThat(result.previewCss()).contains("color:red");
+            }
         }
     }
 

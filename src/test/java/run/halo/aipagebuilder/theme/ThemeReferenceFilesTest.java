@@ -105,4 +105,63 @@ class ThemeReferenceFilesTest {
         assertThatThrownBy(() -> service.readFile("theme-a", "templates/large.js", 0, 10).block())
             .isInstanceOf(IllegalStateException.class).hasMessageContaining("changed");
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void searchesMinifiedSourcesWithLiteralQueriesAndUtf16Offsets() throws Exception {
+        var source = "/*中文😀*/" + ".btn{color:red}".repeat(80) + ".BTN{color:blue}";
+        Files.writeString(root.resolve("templates/assets/main.css"), source);
+        var first = service.searchFile("theme-a", "templates/assets/main.css", ".btn", 0, 2).block();
+        var matches = (java.util.List<Map<String, Object>>) first.get("matches");
+        assertThat(matches).hasSize(2);
+        assertThat(matches.getFirst().get("offset")).isEqualTo(source.indexOf(".btn"));
+        assertThat(first).containsEntry("hasMore", true).containsEntry("byteTruncated", false);
+        var next = service.searchFile("theme-a", "templates/assets/main.css", ".btn",
+            (int) first.get("nextOffset"), 20).block();
+        var nextMatches = (java.util.List<Map<String, Object>>) next.get("matches");
+        assertThat(nextMatches.getFirst().get("offset"))
+            .isEqualTo(source.indexOf(".btn", (int) first.get("nextOffset")));
+        for (var match : nextMatches) {
+            var text = (String) match.get("text");
+            assertThat(text.length()).isLessThanOrEqualTo(512);
+            assertThat(text).isEqualTo(source.substring((int) match.get("start"), (int) match.get("end")));
+            var read = service.readFile("theme-a", "templates/assets/main.css",
+                (int) match.get("start"), (int) match.get("end") - (int) match.get("start")).block();
+            assertThat(read.get("content")).isEqualTo(text);
+        }
+        var absent = service.searchFile("theme-a", "templates/assets/main.css", ".btn.*", 0, 10).block();
+        assertThat(absent).containsEntry("matches", java.util.List.of()).containsEntry("hasMore", false)
+            .containsEntry("byteTruncated", false);
+        var upper = service.searchFile("theme-a", "templates/assets/main.css", ".BTN", 0, 10).block();
+        assertThat((java.util.List<?>) upper.get("matches")).hasSize(1);
+    }
+
+    @Test
+    void searchReportsUnsearchedTailAndEnforcesTheSameFileBoundary() throws Exception {
+        Files.writeString(root.resolve("templates/large.js"),
+            "x".repeat(ThemeContextService.MAX_SOURCE_BYTES) + "needle");
+        var result = service.searchFile("theme-a", "templates/large.js", "needle", 0, 10).block();
+        assertThat(result).containsEntry("matches", java.util.List.of()).containsEntry("hasMore", false)
+            .containsEntry("byteTruncated", true)
+            .containsEntry("scannedCharacters", ThemeContextService.MAX_SOURCE_BYTES);
+        Files.writeString(root.resolve("outside.js"), "needle");
+        Files.writeString(root.resolve("templates/config.yaml"), "needle");
+        Files.createSymbolicLink(root.resolve("templates/linked.js"), root.resolve("outside.js"));
+        for (var path : java.util.List.of("../outside.js", "/outside.js", "templates/../outside.js",
+            "templates/linked.js", "templates/config.yaml", "templates/.secret.js")) {
+            assertThatThrownBy(() -> service.searchFile("theme-a", path, "needle", 0, 10).block())
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        for (var query : java.util.List.of("", " ", "x".repeat(201))) {
+            assertThatThrownBy(() -> service.searchFile("theme-a", "templates/large.js", query, 0, 10).block())
+                .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThatThrownBy(() -> service.searchFile("theme-a", "templates/large.js", "x", -1, 10).block())
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.searchFile("theme-a", "templates/large.js", "x", 0, 21).block())
+            .isInstanceOf(IllegalArgumentException.class);
+        config.setData(Map.of("theme", "{\"active\":\"theme-b\"}"));
+        assertThatThrownBy(() -> service.searchFile("theme-a", "templates/large.js", "x", 0, 10).block())
+            .isInstanceOf(IllegalStateException.class).hasMessageContaining("changed");
+    }
 }

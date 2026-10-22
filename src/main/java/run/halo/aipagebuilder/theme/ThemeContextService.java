@@ -17,6 +17,7 @@ import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.SystemSetting;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
+import run.halo.aipagebuilder.theme.ThemeContextExtractor.SourceText;
 
 @Service
 public class ThemeContextService {
@@ -96,14 +97,9 @@ public class ThemeContextService {
             return Mono.error(new IllegalArgumentException("Invalid source pagination"));
         }
         return withTheme(themeName, root -> {
-            var file = sourcePath(root, path, true);
-            byte[] bytes;
-            try (var input = Files.newInputStream(file)) {
-                bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
-            }
-            var byteTruncated = bytes.length > MAX_SOURCE_BYTES;
-            var source = new String(bytes, 0, Math.min(bytes.length, MAX_SOURCE_BYTES),
-                StandardCharsets.UTF_8);
+            var read = readSource(root, path);
+            var source = read.text();
+            var byteTruncated = read.byteTruncated();
             var start = Math.min(offset, source.length());
             var end = Math.min(start + limit, source.length());
             var summary = path + " · " + (start == 0 && !byteTruncated && end == source.length()
@@ -114,6 +110,47 @@ public class ThemeContextService {
                 "nextOffset", end, "truncated", byteTruncated || end < source.length(),
                 "byteTruncated", byteTruncated, "summary", summary);
         });
+    }
+
+    public Mono<Map<String, Object>> searchFile(String themeName, String path, String query,
+        int offset, int limit) {
+        if (query == null || query.isBlank() || query.length() > 200
+            || offset < 0 || offset > MAX_SOURCE_BYTES || limit < 1 || limit > 20) {
+            return Mono.error(new IllegalArgumentException("Invalid source search"));
+        }
+        return withTheme(themeName, root -> {
+            var read = readSource(root, path);
+            var source = read.text();
+            var matches = new ArrayList<Map<String, Object>>();
+            int cursor = Math.min(offset, source.length());
+            while (matches.size() < limit) {
+                int index = source.indexOf(query, cursor);
+                if (index < 0) break;
+                int start = Math.max(0, index - 128);
+                if (start > 0 && Character.isLowSurrogate(source.charAt(start))) start--;
+                int end = Math.min(source.length(), start + 512);
+                if (end < source.length() && Character.isHighSurrogate(source.charAt(end - 1))) end--;
+                matches.add(Map.of("offset", index, "start", start, "end", end,
+                    "text", source.substring(start, end)));
+                cursor = index + query.length();
+            }
+            boolean hasMore = source.indexOf(query, cursor) >= 0;
+            return Map.<String, Object>of("themeName", themeName, "path", path, "matches", matches,
+                "nextOffset", hasMore ? cursor : source.length(), "hasMore", hasMore,
+                "byteTruncated", read.byteTruncated(), "scannedCharacters", source.length(),
+                "summary", path + " · " + matches.size() + " 处匹配"
+                    + (read.byteTruncated() ? "（仅搜索文件前 1 MiB）" : ""));
+        });
+    }
+
+    private static SourceText readSource(Path root, String path) throws IOException {
+        var file = sourcePath(root, path, true);
+        byte[] bytes;
+        try (var input = Files.newInputStream(file)) {
+            bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
+        }
+        return new SourceText(new String(bytes, 0, Math.min(bytes.length, MAX_SOURCE_BYTES),
+            StandardCharsets.UTF_8), bytes.length > MAX_SOURCE_BYTES);
     }
 
     private Mono<Map<String, Object>> withTheme(String name, SourceAction action) {
@@ -211,7 +248,7 @@ public class ThemeContextService {
         if (!declared.isAbsolute()) return ThemeStyleContext.unavailable();
         var root = declared.toRealPath();
         var pageTemplate = pageTemplate(root, theme);
-        var result = extractor.extract(relative -> read(root, relative), name, pageTemplate);
+        var result = extractor.extractSources(relative -> read(root, relative), name, pageTemplate);
         var notes = new ArrayList<>(result.notes());
         notes.add("先读取 layout.html 及其引用，检查 content 插槽祖先已有的宽度、padding 和 margin，避免重复添加外层留白。");
         notes.add("同时读取亮色与暗色规则及切换脚本；主题源码仅供参考，不执行其中的模板、HTML 或 JavaScript。");
@@ -221,7 +258,8 @@ public class ThemeContextService {
                 + " 的正文容器，仅用于文章页参考；生成的落地页不要复制其 wrapper 链或正文类名。");
         }
         return new ThemeStyleContext(name, displayName, state, result.sources(), notes,
-            result.previewCss(), result.colorMode(), result.contentSlot(), result.uiStack());
+            result.previewCss(), result.colorMode(), result.contentSlot(), result.uiStack(),
+            result.coverage());
     }
 
     /**
@@ -252,7 +290,7 @@ public class ThemeContextService {
     }
 
     // The extractor provides only local HTML/CSS paths. Never follow a theme reference to another directory.
-    static String read(Path root, String relative) {
+    static SourceText read(Path root, String relative) {
         try {
             if (relative == null || relative.contains("\\") || relative.contains("\u0000")) return null;
             var path = Path.of(relative);
@@ -266,15 +304,13 @@ public class ThemeContextService {
             try (var input = Files.newInputStream(file)) {
                 var bytes = input.readNBytes(MAX_SOURCE_BYTES + 1);
                 if (bytes.length <= MAX_SOURCE_BYTES) {
-                    return new String(bytes, StandardCharsets.UTF_8);
+                    return new SourceText(new String(bytes, StandardCharsets.UTF_8), false);
                 }
                 // Large compiled CSS still carries the base rules we need; parse the prefix
-                // instead of discarding the whole file. Keep the length at the cap so callers
-                // can still tell the source was truncated.
+                // instead of discarding the whole file. Report byte truncation independently
+                // of the decoded character count or the length of the complete CSS prefix.
                 var text = new String(bytes, 0, MAX_SOURCE_BYTES, StandardCharsets.UTF_8);
-                if (!relative.endsWith(".css")) return text;
-                var prefix = cssPrefix(text);
-                return prefix + " ".repeat(MAX_SOURCE_BYTES - prefix.length());
+                return new SourceText(relative.endsWith(".css") ? cssPrefix(text) : text, true);
             }
         } catch (IOException | IllegalArgumentException error) {
             return null;

@@ -179,7 +179,7 @@ class PageReferenceToolsTest {
         assertThatThrownBy(() -> session.execute("list_theme_files", Map.of()).block())
             .isInstanceOf(IllegalStateException.class).hasMessageContaining("changed");
         assertThat(PageReferenceTools.definitions()).extracting(PageReferenceTools.Definition::name)
-            .containsExactly("list_theme_files", "read_theme_file", "list_posts", "list_single_pages",
+            .containsExactly("list_theme_files", "read_theme_file", "search_theme_file", "list_posts", "list_single_pages",
                 "list_ai_pages", "read_ai_page", "get_site_profile", "get_navigation",
                 "read_content", "search_attachments", "fetch_webpage", "search_public_apis", "get_public_api");
     }
@@ -193,6 +193,27 @@ class PageReferenceToolsTest {
             "path", "templates/main.css", "offset", ThemeContextService.MAX_SOURCE_BYTES,
             "limit", 16)).block();
         assertThat(result).containsEntry("content", "");
+    }
+
+    @Test
+    void searchesOnlyThePinnedThemeAndPreservesLiteralQuery() {
+        when(themes.activeThemeName()).thenReturn(Mono.just("a"));
+        when(themes.searchFile("a", "templates/main.css", " .btn", 7, 3))
+            .thenReturn(Mono.just(Map.of("matches", List.of(), "hasMore", false)));
+        var session = tools.session(null, true);
+        var result = session.execute("search_theme_file", Map.of("themeName", "a",
+            "path", "templates/main.css", "query", " .btn", "offset", 7, "limit", 3)).block();
+        assertThat(result).containsEntry("hasMore", false);
+        assertThatThrownBy(() -> session.execute("search_theme_file", Map.of("themeName", "other",
+            "path", "templates/main.css", "query", ".btn")).block())
+            .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> session.execute("search_theme_file", Map.of("themeName", "a",
+            "path", "templates/main.css", "query", ".btn", "limit", 1.5)).block())
+            .isInstanceOf(IllegalArgumentException.class);
+        when(themes.activeThemeName()).thenReturn(Mono.just("b"));
+        assertThatThrownBy(() -> session.execute("search_theme_file", Map.of("themeName", "a",
+            "path", "templates/main.css", "query", ".btn")).block())
+            .isInstanceOf(IllegalStateException.class);
     }
 
     @Test

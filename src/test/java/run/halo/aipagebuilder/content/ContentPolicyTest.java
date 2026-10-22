@@ -45,6 +45,42 @@ class ContentPolicyTest {
             .doesNotThrowAnyException();
     }
 
+    @Test
+    void preservesInertDrawerAndItsFocusControls() {
+        var html = "<aside inert aria-hidden='true'><button tabindex='-1'>关闭</button></aside>";
+        assertThatCode(() -> policy.validateHtml(html)).doesNotThrowAnyException();
+        var drawer = org.jsoup.Jsoup.parseBodyFragment(policy.sanitizeHtml(html))
+            .selectFirst("aside");
+        assertThat(drawer.hasAttr("inert")).isTrue();
+        assertThat(drawer.attr("aria-hidden")).isEqualTo("true");
+        assertThat(drawer.selectFirst("button").attr("tabindex")).isEqualTo("-1");
+        assertThat((List<String>) policy.capabilities().get("htmlAttributes")).contains("inert");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "clamp(1.85rem, calc(1.25rem + 2.1vw), 2.5rem)",
+        "min(90vw, calc(100% - 2rem))", "max(1rem, calc(2vw + 0.5rem))"
+    })
+    void acceptsAndRendersCompatibleMathExpressions(String value) {
+        var css = ".heading {font-size:" + value + "}";
+        assertThatCode(() -> policy.validateCss(css)).doesNotThrowAnyException();
+        assertThat(policy.renderCss(css, "page-test")).contains("#page-test .heading", "calc(");
+        assertThatCode(() -> policy.validateHtml("<h1 style='font-size:" + value + "'>标题</h1>"))
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void explainsHowToRepairBareClampArithmeticWithoutRewritingIt() {
+        var css = ".heading {font-size:clamp(1.85rem, 1.25rem + 2.1vw, 2.5rem)}";
+        assertThatThrownBy(() -> policy.validateCss(css))
+            .isInstanceOf(ResponseStatusException.class)
+            .hasMessageContaining("CSS 语法无效：").hasMessageContaining("line")
+            .hasMessageContaining("calc(1.25rem + 2.1vw)");
+        assertThatThrownBy(() -> policy.validateCss(".heading {color:}"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageNotContaining("calc(");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
         "<script>alert(1)</script>", "<img src=x onerror=alert(1)>",
@@ -67,6 +103,54 @@ class ContentPolicyTest {
     })
     void rejectsUnsupportedCss(String css) {
         assertThatThrownBy(() -> policy.validateCss(css)).isInstanceOf(ResponseStatusException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        ".x { scroll-behavior: smooth; overscroll-behavior: contain; }",
+        "@media (max-width: 620px) { .x { SCROLL-BEHAVIOR: smooth; } }",
+        "@supports (display: grid) { .x { overscroll-behavior-x: none; } }",
+        ".x { content: 'behavior: none; -moz-binding'; }"
+    })
+    void acceptsScrollingPropertiesAndHarmlessPropertyNamesInText(String css) {
+        assertThatCode(() -> policy.validateCss(css)).doesNotThrowAnyException();
+        assertThatCode(() -> policy.renderCss(css, "page-test")).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"behavior", "BEHAVIOR", "-moz-binding", "-MOZ-BINDING",
+        "-ms-behavior", "-MS-BEHAVIOR", "_behavior", "_BEHAVIOR"})
+    void rejectsActualExecutablePropertiesWithRepairLocation(String property) {
+        var declaration = property + " /* gap */ : url('/legacy.htc');";
+        for (var css : List.of(".unsafe {" + declaration + "}",
+            "@media (max-width:620px) { @supports (display:grid) { .unsafe {"
+                + declaration + "} } }")) {
+            assertThatThrownBy(() -> policy.validateCss(css))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining(property.toLowerCase(Locale.ROOT)).hasMessageContaining(".unsafe")
+                .hasMessageContaining("请移除此声明");
+        }
+        assertThatThrownBy(() -> policy.validateHtml("<p style=\"" + declaration + "\">Text</p>"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining(property.toLowerCase(Locale.ROOT));
+    }
+
+    @Test
+    void supportsScrollingInInlineStylesAndExplainsUnsupportedMediaRanges() {
+        assertThatCode(() -> policy.validateHtml("<p style='scroll-behavior:smooth'>Text</p>"))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> policy.validateCss("@media (width <= 620px) {.x{color:red}}"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("max-width")
+            .hasMessageContaining("min-width");
+        assertThatCode(() -> policy.validateCss("@media (max-width:620px) {.x{color:red}}"))
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void scopesStandaloneBoxSizingWithoutChangingThemeElements() {
+        var css = policy.renderCss(
+            "body, *, *::before, *::after {box-sizing:border-box}", "page-test");
+        assertThat(css).contains("#page-test,", "#page-test *", "#page-test *::before",
+            "#page-test *::after", "box-sizing:border-box");
     }
 
     @ParameterizedTest

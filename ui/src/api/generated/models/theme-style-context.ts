@@ -24,6 +24,9 @@ import type { ThemeColorMode } from './theme-color-mode';
 import type { ThemeContentSlot } from './theme-content-slot';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ThemeContextCoverage } from './theme-context-coverage';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { ThemeUiStack } from './theme-ui-stack';
 
 /**
@@ -44,6 +47,12 @@ export interface ThemeStyleContext {
      * @memberof ThemeStyleContext
      */
     'contentSlot': ThemeContentSlot;
+    /**
+     * 
+     * @type {ThemeContextCoverage}
+     * @memberof ThemeStyleContext
+     */
+    'coverage': ThemeContextCoverage;
     /**
      * 
      * @type {string}

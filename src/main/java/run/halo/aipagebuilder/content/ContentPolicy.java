@@ -40,7 +40,7 @@ public class ContentPolicy {
         "section", "small", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td",
         "tfoot", "th", "thead", "time", "tr", "u", "ul");
     private static final Set<String> ATTRIBUTES = Set.of("id", "class", "title", "style", "lang",
-        "dir", "role", "tabindex", "hidden", "href", "target", "rel", "src", "alt", "width",
+        "dir", "role", "tabindex", "hidden", "inert", "href", "target", "rel", "src", "alt", "width",
         "height", "loading", "decoding", "colspan", "rowspan", "scope", "start", "reversed",
         "type", "open", "datetime", "cite", "span", "disabled");
     private static final Pattern CSS_URL = Pattern.compile("(?i)url\\(\\s*(['\"]?)(.*?)\\1\\s*\\)");
@@ -60,6 +60,13 @@ public class ContentPolicy {
                 "Use the separate js field and addEventListener, scoped to the page container.",
                 "CSS supports ordinary rules, variables, @media and @supports. No @import, "
                     + "@namespace, @font-face, @keyframes, nested selectors or escape characters.",
+                "Use min-width/max-width media queries instead of range comparisons with <. "
+                    + "scroll-behavior and overscroll-behavior are supported.",
+                "Wrap arithmetic inside clamp(), min() and max() in calc(), for example "
+                    + "clamp(1.85rem, calc(1.25rem + 2.1vw), 2.5rem).",
+                "Closed drawers must not be keyboard-focusable: use hidden, visibility:hidden "
+                    + "or inert, not only transforms or aria-hidden. Remove inert when opening "
+                    + "or showing a persistent desktop sidebar; restore focus when closing.",
                 "JavaScript validation checks size and transport, not runtime safety. "
                     + "Published JavaScript executes in the site DOM.",
                 "Do not implement forms or text inputs through JavaScript workarounds.",
@@ -205,12 +212,15 @@ public class ContentPolicy {
     private CascadingStyleSheet parseCss(String css) {
         require(css != null && css.length() <= MAX_CSS, "CSS 不能超过 100 KB");
         // Reject escapes so URL/property checks cannot be bypassed with CSS escape sequences.
-        require(!css.contains("\\") && !css.contains("<") && !css.contains("\u0000"),
-            "CSS 不支持转义字符或 HTML 标签");
+        require(!css.contains("\\"), "CSS 不支持反斜杠转义字符，请使用未转义的属性名和值");
+        require(!css.contains("\u0000"), "CSS 不能包含 NUL 字符");
+        require(!css.contains("<"),
+            "CSS 不支持 < 字符或 HTML 标签；媒体查询请使用 (max-width: 620px) 或 (min-width: 620px)，不要使用 < 或 <= 比较");
         var normalized = css.replaceAll("(?s)/\\*.*?\\*/", "").toLowerCase(Locale.ROOT);
-        require(!normalized.contains("expression(") && !normalized.contains("javascript:")
-            && !normalized.contains("-moz-binding") && !normalized.contains("behavior:")
-            && !normalized.contains("image-set("), "CSS 包含不支持的可执行或外部资源语法");
+        require(!normalized.contains("expression("), "CSS 不支持 expression()，请使用普通 CSS 属性值");
+        require(!normalized.contains("javascript:"), "CSS 不支持 javascript: URL");
+        require(!normalized.contains("image-set("),
+            "CSS 不支持 image-set()，请使用单个 HTTP(S) 或相对地址的 url()");
         var urls = CSS_URL.matcher(normalized);
         while (urls.find()) {
             validateUrl(urls.group(2), false);
@@ -221,7 +231,7 @@ public class ContentPolicy {
                 .setCustomErrorHandler(new ThrowingCSSParseErrorHandler())
                 .setCustomExceptionHandler(
                     error -> parseProblem.compareAndSet(null, error.getMessage())));
-            require(sheet != null, "CSS 语法无效" + detail(parseProblem.get()));
+            require(sheet != null, cssSyntaxError(css, parseProblem.get()));
             require(sheet.getAllImportRules().isEmpty() && sheet.getAllNamespaceRules().isEmpty(),
                 "不支持 CSS @import 或 @namespace");
             validateRules(sheet, 0);
@@ -230,8 +240,16 @@ public class ContentPolicy {
             throw error;
         } catch (RuntimeException error) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "CSS 语法无效" + detail(error.getMessage()));
+                cssSyntaxError(css, error.getMessage()));
         }
+    }
+
+    private static String cssSyntaxError(String css, String message) {
+        var hint = Pattern.compile("(?i)\\b(?:clamp|min|max)\\s*\\(").matcher(css).find()
+            ? "；若 clamp()/min()/max() 参数包含算术，请使用 calc() 包裹，例如 "
+                + "clamp(1.85rem, calc(1.25rem + 2.1vw), 2.5rem)"
+            : "";
+        return "CSS 语法无效" + detail(message) + hint;
     }
 
     private static String detail(String message) {
@@ -250,8 +268,12 @@ public class ContentPolicy {
                     rootConditionEnd(selector);
                 }
                 for (var declaration : style.getAllDeclarations()) {
-                    require(!Set.of("behavior", "-moz-binding").contains(
-                        declaration.getProperty().toLowerCase(Locale.ROOT)), "不支持的 CSS 属性");
+                    var selector = style.getSelectorAtIndex(0)
+                        .getAsCSSString(new CSSWriter().getSettings(), 0);
+                    require(!Set.of("behavior", "_behavior", "-ms-behavior", "-moz-binding").contains(
+                        declaration.getProperty().toLowerCase(Locale.ROOT)),
+                        "不支持的 CSS 属性：" + declaration.getProperty()
+                            + "（选择器：" + selector + "），请移除此声明");
                 }
             } else if (rule instanceof CSSMediaRule media) {
                 validateRules(media, depth + 1);
