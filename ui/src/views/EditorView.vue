@@ -3,6 +3,7 @@ import {
   computed,
   defineAsyncComponent,
   onBeforeUnmount,
+  onMounted,
   shallowRef,
   useTemplateRef,
   watch,
@@ -99,7 +100,17 @@ async function annotate(target: AnnotationTarget, comment: string) {
     Toast.info(errorMessage(e))
   }
 }
-const { themeContext, rootStates, rootState, previewModeIcon, cyclePreviewMode } = useThemePreview()
+const {
+  themeContext,
+  rootStates,
+  rootState,
+  previewModeIcon,
+  cyclePreviewMode,
+  refreshThemeContext,
+} = useThemePreview()
+// The site theme can change in another tab while this editor stays open; reload the
+// identity the mismatch banner compares against whenever the tab regains focus.
+onMounted(() => window.addEventListener('focus', refreshThemeContext))
 const loading = shallowRef(true)
 const settingsOpen = shallowRef(false)
 const historyOpen = shallowRef(false)
@@ -110,6 +121,16 @@ const publicUrl = computed(() => {
   const page = detail.value?.page
   if (!page?.publishedRevision || !page.slug) return ''
   return pageUrl(page.slug)
+})
+const themeMismatch = computed(() => {
+  const current = themeContext.value
+  const revisionTheme = detail.value?.revisionTheme
+  if (!detail.value?.page.themeLayout || !revisionTheme || !current?.themeName) return undefined
+  if (revisionTheme.name === current.themeName) return undefined
+  return {
+    saved: revisionTheme.displayName || revisionTheme.name,
+    current: current.displayName || current.themeName,
+  }
 })
 function openPublicPage() {
   if (publicUrl.value) window.open(publicUrl.value, '_blank', 'noopener')
@@ -159,6 +180,7 @@ useEditorShortcuts({
 })
 onBeforeUnmount(() => {
   loadId++
+  window.removeEventListener('focus', refreshThemeContext)
 })
 async function reload() {
   if (locked.value) return
@@ -173,7 +195,11 @@ async function reload() {
 }
 async function saveDraft() {
   try {
-    if (await save()) Toast.success('草稿已保存')
+    if (await save()) {
+      // The saved revision snapshots the current theme, so drop any stale identity.
+      refreshThemeContext()
+      Toast.success('草稿已保存')
+    }
   } catch (e) {
     Toast.error(errorMessage(e))
   }
@@ -290,6 +316,15 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
       >
         <IconClose class="text-sm" />
       </button>
+    </div>
+    <div
+      v-if="themeMismatch"
+      class="shrink-0 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-700"
+      role="status"
+    >
+      当前草稿基于「{{ themeMismatch.saved }}」保存，站点当前主题为「{{
+        themeMismatch.current
+      }}」，页面样式可能已不适配。可以让 AI 调整以适配当前主题。
     </div>
     <VLoading v-if="loading" />
     <template v-else-if="working && detail">

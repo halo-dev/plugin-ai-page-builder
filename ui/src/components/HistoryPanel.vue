@@ -160,6 +160,9 @@ function refetchDetails() {
               <p class="truncate text-xs text-gray-500" :title="fullTime(selected.createdAt)">
                 {{ timeAgo(selected.createdAt) }} · {{ sourceLabel(selected.source) }} ·
                 {{ selected.createdBy }}
+                <template v-if="selected.theme">
+                  · 主题：{{ selected.theme.displayName || selected.theme.name }}
+                </template>
               </p>
             </div>
             <ApbSegmented v-if="view === 'preview'" v-model="device" :options="deviceOptions" />

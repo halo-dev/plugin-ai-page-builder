@@ -61,6 +61,9 @@ const sourceIcon = (source: string) =>
             {{ revision.createdBy }}</span
           >
         </span>
+        <span v-if="revision.theme" class="truncate text-[10px] text-gray-400">
+          主题：{{ revision.theme.displayName || revision.theme.name }}
+        </span>
       </button>
     </div>
   </nav>

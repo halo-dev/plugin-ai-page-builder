@@ -41,6 +41,10 @@ public class ThemePage extends AbstractExtension {
         private List<PageMember> members;
         private String draftRevision;
         private String publishedRevision;
+        /**
+         * Snapshot of the published revision's theme; null when unknown at save or publish time.
+         */
+        private ThemeRef publishedTheme;
         /** Written with the page CAS; older runs are recorded in conversation history. */
         private AiCommit lastAiCommit;
         private Instant updatedAt;

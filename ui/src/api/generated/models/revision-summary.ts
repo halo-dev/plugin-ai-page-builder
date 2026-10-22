@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ThemeRef } from './theme-ref';
 
 /**
  * 
@@ -50,5 +53,11 @@ export interface RevisionSummary {
      * @memberof RevisionSummary
      */
     'source': string;
+    /**
+     * 
+     * @type {ThemeRef}
+     * @memberof RevisionSummary
+     */
+    'theme'?: ThemeRef | null;
 }
 

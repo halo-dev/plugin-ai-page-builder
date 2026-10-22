@@ -16,6 +16,9 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PageSummary } from './page-summary';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ThemeRef } from './theme-ref';
 
 /**
  * 
@@ -23,6 +26,12 @@ import type { PageSummary } from './page-summary';
  * @interface PageList
  */
 export interface PageList {
+    /**
+     * 
+     * @type {ThemeRef}
+     * @memberof PageList
+     */
+    'currentTheme'?: ThemeRef | null;
     /**
      * 
      * @type {Array<PageSummary>}

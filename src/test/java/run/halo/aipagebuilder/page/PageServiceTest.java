@@ -44,9 +44,11 @@ import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.model.ThemePage;
 import run.halo.aipagebuilder.model.ThemePageRevision;
+import run.halo.aipagebuilder.model.ThemeRef;
 import run.halo.aipagebuilder.page.PageApi.CreatePageRequest;
 import run.halo.aipagebuilder.page.PageApi.RestoreRequest;
 import run.halo.aipagebuilder.page.PageApi.SavePageRequest;
+import run.halo.aipagebuilder.theme.ThemeContextService;
 
 class PageServiceTest {
     private final ReactiveExtensionClient client = mock(ReactiveExtensionClient.class);
@@ -57,12 +59,15 @@ class PageServiceTest {
     private final ImportReviewStore reviewStore = new ImportReviewStore();
     private final PageImportReviewService importReviews =
         new PageImportReviewService(gateway, new ContentPolicy(), reviewStore);
-    private final PageService service = new PageService(client, policy, importReviews);
-    private final PageService importer = new PageService(client, new ContentPolicy(), importReviews);
+    private final ThemeContextService themes = mock(ThemeContextService.class);
+    private final PageService service = new PageService(client, policy, importReviews, themes);
+    private final PageService importer =
+        new PageService(client, new ContentPolicy(), importReviews, themes);
     private boolean failUpdate;
 
     @BeforeEach
     void setUp() {
+        when(themes.activeThemeIdentity()).thenReturn(Mono.empty());
         when(client.listAll(eq(ThemePage.class), any(ListOptions.class), any()))
             .thenAnswer(invocation -> Flux.defer(() -> {
                 ListOptions options = invocation.getArgument(1);
@@ -1030,6 +1035,88 @@ class PageServiceTest {
         var published = service.publish(name, saved.page().version(), saved.page().draftRevision())
             .block();
         assertThat(published.page().publishedRevision()).isEqualTo(saved.page().draftRevision());
+    }
+
+    @Test
+    void revisionsSnapshotTheActiveTheme() {
+        var earth = new ThemeRef("theme-earth", "Earth");
+        when(themes.activeThemeIdentity()).thenReturn(Mono.just(earth));
+
+        var created = service.create(new CreatePageRequest("themed", "Themed"), "owner").block();
+        var name = created.page().name();
+        var saved = service.save(name, new SavePageRequest(created.page().version(),
+            document("Changed"), "manual"), "owner").block();
+
+        assertThat(revisions.get(created.page().draftRevision()).getSpec().getTheme())
+            .isEqualTo(earth);
+        assertThat(revisions.get(saved.page().draftRevision()).getSpec().getTheme())
+            .isEqualTo(earth);
+
+        var aiSaved = service.saveAi(name, saved.page().version(), document("AI"), "owner",
+            "run-1", saved.page().draftRevision(), null, null).block();
+        assertThat(revisions.get(aiSaved.page().draftRevision()).getSpec().getTheme())
+            .isEqualTo(earth);
+    }
+
+    @Test
+    void missingActiveThemeStillAllowsSaving() {
+        var created = service.create(new CreatePageRequest("untitled-theme", "Themed"), "owner")
+            .block();
+        var saved = service.save(created.page().name(), new SavePageRequest(
+            created.page().version(), document("Changed"), "manual"), "owner").block();
+
+        assertThat(saved).isNotNull();
+        assertThat(revisions.get(saved.page().draftRevision()).getSpec().getTheme()).isNull();
+    }
+
+    @Test
+    void publishingCopiesTheRevisionThemeAndRestoreKeepsTheSourceTheme() {
+        var earth = new ThemeRef("theme-earth", "Earth");
+        var nebula = new ThemeRef("theme-nebula", "Nebula");
+        when(themes.activeThemeIdentity()).thenReturn(Mono.just(earth));
+        var created = service.create(new CreatePageRequest("theme-switch", "Themed"), "owner")
+            .block();
+        var name = created.page().name();
+        var earthRevision = created.page().draftRevision();
+        var published = service.publish(name, created.page().version(), earthRevision).block();
+        assertThat(published.page().publishedTheme()).isEqualTo(earth);
+        assertThat(service.get(name).block().revisionTheme()).isEqualTo(earth);
+
+        when(themes.activeThemeIdentity()).thenReturn(Mono.just(nebula));
+        var saved = service.save(name, new SavePageRequest(published.page().version(),
+            document("Changed"), "manual"), "owner").block();
+        var restored = service.restore(name,
+            new RestoreRequest(saved.page().version(), earthRevision), "owner").block();
+
+        assertThat(revisions.get(saved.page().draftRevision()).getSpec().getTheme())
+            .isEqualTo(nebula);
+        assertThat(revisions.get(restored.page().draftRevision()).getSpec().getTheme())
+            .isEqualTo(earth);
+
+        var unpublished = service.unpublish(name, restored.page().version()).block();
+        assertThat(unpublished.page().publishedRevision()).isNull();
+        assertThat(unpublished.page().publishedTheme()).isNull();
+    }
+
+    @Test
+    void listExposesTheCurrentThemeAndEachPagesPublishedTheme() {
+        var earth = new ThemeRef("theme-earth", "Earth");
+        var nebula = new ThemeRef("theme-nebula", "Nebula");
+        when(themes.activeThemeIdentity()).thenReturn(Mono.just(earth));
+        var created = service.create(new CreatePageRequest("listed-theme", "Themed"), "owner")
+            .block();
+        service.publish(created.page().name(), created.page().version(),
+            created.page().draftRevision()).block();
+        when(themes.activeThemeIdentity()).thenReturn(Mono.just(nebula));
+        when(client.listBy(eq(ThemePage.class), any(ListOptions.class), any(PageRequest.class)))
+            .thenAnswer(invocation -> Mono.just(new ListResult<>(1, 20, pages.size(),
+                pages.values().stream().map(Json::deepCopy).toList())));
+
+        var list = service.list(1, 20, null, null, null).block();
+
+        assertThat(list.currentTheme()).isEqualTo(nebula);
+        assertThat(list.items()).singleElement()
+            .satisfies(item -> assertThat(item.publishedTheme()).isEqualTo(earth));
     }
 
     @Test

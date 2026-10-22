@@ -20,6 +20,8 @@ public class ThemePageRevision extends AbstractExtension {
         private String createdBy;
         private String source;
         private String contentHash;
+        // Snapshot of the active theme when this revision was written.
+        private ThemeRef theme;
         // Links only successfully installed draft snapshots, including later manual saves.
         private String parentRevision;
         private PageDocument document;

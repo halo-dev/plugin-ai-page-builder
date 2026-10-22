@@ -9,11 +9,15 @@ import {
 } from '@halo-dev/components'
 import { utils } from '@halo-dev/ui-shared'
 import IconMore from '~icons/mingcute/more-2-line'
-import type { PageSummary } from '../api/generated'
+import type { PageSummary, ThemeRef } from '../api/generated'
 import PagePreviewCard from './PagePreviewCard.vue'
 import PublishPagePopper from './PublishPagePopper.vue'
 
-const props = defineProps<{ item: PageSummary; disabled?: boolean }>()
+const props = defineProps<{
+  item: PageSummary
+  currentTheme?: ThemeRef | null
+  disabled?: boolean
+}>()
 const emit = defineEmits<{
   open: [item: PageSummary]
   preview: [item: PageSummary]
@@ -35,6 +39,25 @@ const status = computed(() =>
 )
 const updatedAt = computed(() => utils.date.timeAgo(props.item.updatedAt) ?? '')
 const updatedAtFull = computed(() => utils.date.format(props.item.updatedAt))
+const themeWarning = computed(() => {
+  const saved = props.item.publishedTheme
+  const current = props.currentTheme
+  if (
+    !props.item.themeLayout ||
+    !props.item.publishedRevision ||
+    !saved ||
+    !current ||
+    saved.name === current.name
+  ) {
+    return undefined
+  }
+  const savedLabel = saved.displayName || saved.name
+  const currentLabel = current.displayName || current.name
+  return {
+    text: '主题已更换',
+    detail: `该页面发布于主题「${savedLabel}」，当前站点主题为「${currentLabel}」。页面样式可能已不适配，可以让 AI 适配当前主题。`,
+  }
+})
 </script>
 
 <template>
@@ -58,7 +81,16 @@ const updatedAtFull = computed(() => utils.date.format(props.item.updatedAt))
         {{ item.slug ? '/' + item.slug : '未设置访问路径' }}
       </p>
       <div class="mt-3.5 flex items-center justify-between gap-2">
-        <VStatusDot :state="status.state" :text="status.text" />
+        <div class="flex min-w-0 items-center gap-2">
+          <VStatusDot :state="status.state" :text="status.text" />
+          <span
+            v-if="themeWarning"
+            v-tooltip="themeWarning.detail"
+            class="shrink-0 whitespace-nowrap rounded bg-amber-50 px-1.5 py-0.5 text-[11px] leading-4 text-amber-700"
+          >
+            {{ themeWarning.text }}
+          </span>
+        </div>
         <span v-tooltip="updatedAtFull" class="text-[11px] text-gray-400">{{ updatedAt }}</span>
       </div>
       <div class="mt-4 flex items-center gap-2 border-t border-gray-100 pt-3.5">

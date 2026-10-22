@@ -63,9 +63,13 @@ function summary(extra: Record<string, unknown> = {}): PageSummary {
   } as PageSummary
 }
 
-function mountCard(item: PageSummary, disabled = false) {
+function mountCard(
+  item: PageSummary,
+  disabled = false,
+  currentTheme?: PageSummary['publishedTheme'],
+) {
   return mount(PageCard, {
-    props: { item, disabled },
+    props: { item, currentTheme, disabled },
     global: {
       stubs: { RouterLink: true, PagePreviewCard: true, PublishPagePopper: SlotStub },
       directives: { 'close-popper': {}, tooltip: {} },
@@ -95,6 +99,40 @@ describe('page card', () => {
   it('shows the relative update time on the card', () => {
     const wrapper = mountCard(summary({ updatedAt: '2026-10-16T10:15:09Z' }))
     expect(wrapper.text()).toContain('timeAgo:2026-10-16T10:15:09Z')
+  })
+
+  it('warns when the published revision was saved under another theme', () => {
+    const wrapper = mountCard(
+      summary({
+        publishedRevision: 'r2',
+        publishedTheme: { name: 'theme-earth', displayName: 'Earth' },
+      }),
+      false,
+      { name: 'theme-nebula', displayName: 'Nebula' },
+    )
+    expect(wrapper.text()).toContain('主题已更换')
+  })
+
+  it('does not warn without a published theme, a different theme or theme layout', () => {
+    const earth = { name: 'theme-earth', displayName: 'Earth' }
+    const nebula = { name: 'theme-nebula', displayName: 'Nebula' }
+
+    expect(mountCard(summary({ publishedRevision: 'r2' }), false, nebula).text()).not.toContain(
+      '主题已更换',
+    )
+    expect(
+      mountCard(summary({ publishedRevision: 'r2', publishedTheme: earth }), false, earth).text(),
+    ).not.toContain('主题已更换')
+    expect(
+      mountCard(
+        summary({ publishedRevision: 'r2', publishedTheme: earth, themeLayout: false }),
+        false,
+        nebula,
+      ).text(),
+    ).not.toContain('主题已更换')
+    expect(mountCard(summary({ publishedTheme: earth }), false, nebula).text()).not.toContain(
+      '主题已更换',
+    )
   })
 
   it('emits card actions with the page summary', async () => {

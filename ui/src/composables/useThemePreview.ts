@@ -31,18 +31,31 @@ export function useThemePreview() {
   const previewModeIcon = computed(
     () => themeModes.find((mode) => mode.value === previewMode.value) || themeModes[0],
   )
-  queryClient
-    .fetchQuery({
-      queryKey: pageKeys.themeContext,
-      queryFn: async () => (await aiPageBuilderChatApi.getThemeContext()).data,
-      staleTime: 60_000,
-      retry: false,
-    })
-    .then((context) => {
-      themeContext.value = context
-    })
-    .catch(() => {
-      // Theme context is optional; manual editing and validation stay independent.
-    })
-  return { themeContext, previewMode, rootStates, rootState, previewModeIcon, cyclePreviewMode }
+  // Refetch every time: callers reload it when the editor regains focus or saves,
+  // because the active theme may have changed in another tab.
+  function loadThemeContext() {
+    queryClient
+      .fetchQuery({
+        queryKey: pageKeys.themeContext,
+        queryFn: async () => (await aiPageBuilderChatApi.getThemeContext()).data,
+        staleTime: 0,
+        retry: false,
+      })
+      .then((context) => {
+        themeContext.value = context
+      })
+      .catch(() => {
+        // Theme context is optional; manual editing and validation stay independent.
+      })
+  }
+  loadThemeContext()
+  return {
+    themeContext,
+    previewMode,
+    rootStates,
+    rootState,
+    previewModeIcon,
+    cyclePreviewMode,
+    refreshThemeContext: loadThemeContext,
+  }
 }
