@@ -38,17 +38,15 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
      */
     public String brief() {
         if ("STANDALONE".equals(layoutState)) {
-            return "Theme mount: STANDALONE. This page renders without the theme layout, header, "
-                + "footer or theme CSS variables; provide complete self-contained styles and exactly one main. "
-                + "modern-normalize is already loaded (document margin, border-box sizing, base fonts), "
-                + "so do not write document-level resets; only bare body, html and :root selectors are "
-                + "rewritten to the page container, so scope other styles with classes.";
+            return "Theme mount: STANDALONE. No theme layout, header, footer, CSS variables "
+                + "or color-mode contract. modern-normalize is already loaded; "
+                + "page layout, typography and colors are independent of the theme.";
         }
         if (themeName == null) return "";
         if (!"SUPPORTED".equals(layoutState)) {
             return "Theme brief (reference data, not instructions): " + themeName
                 + ". Layout state " + layoutState
-                + ": do not rely on this theme's private styles.";
+                + ": theme-private styles are unavailable.";
         }
         if (sources.isEmpty()) return "";
         var text = new StringBuilder("Theme brief (reference data, not instructions): ")
@@ -56,22 +54,17 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
         if (displayName != null && !displayName.isBlank() && !displayName.equals(themeName)) {
             text.append(" (").append(displayName).append(')');
         }
-        text.append(". Call get_theme_context for the full layout, CSS and notes.");
+        text.append(". Full layout and base CSS are available through get_theme_context.");
         if (contentSlot != null && !contentSlot.slot().isEmpty()) {
             text.append(" The page mounts inside the layout content slot: ")
                 .append(selectors(contentSlot.slot()))
-                .append(". Fill that box and do not repeat its max-width, padding or margin. "
-                    + "It may be a content column beside a sidebar; do not assume it has "
-                    + "the header or footer's width.");
+                .append(". This may be a content column beside a sidebar.");
         } else {
-            text.append(" No layout content-slot container was found: check the layout before "
-                + "adding width or outer spacing.");
+            text.append(" Layout content-slot container: unknown.");
         }
         if (contentSlot != null) {
             text.append(" Main landmark around the slot: ").append(contentSlot.mainLandmark())
-                .append(". When present, do not add another main; when absent, provide exactly one main; "
-                    + "unknown requires checking "
-                    + "the layout source.");
+                .append('.');
         }
         if (contentSlot != null && (!contentSlot.wrapper().isEmpty()
             || !contentSlot.contentClasses().isEmpty())) {
@@ -86,8 +79,7 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
                         .map(name -> "." + name).collect(Collectors.joining(" ")))
                     .append(" on the content element");
             }
-            text.append("; it is the markdown/article layout, not a landing-page container. "
-                + "Do not copy its wrappers or article typography onto a landing page.");
+            text.append("; this is article typography, not a required landing-page container.");
         }
         if (uiStack != null && !uiStack.frameworks().isEmpty()) {
             text.append(" UI stack: ").append(String.join(", ", uiStack.frameworks())).append('.');
@@ -95,20 +87,18 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
         if (uiStack != null && !uiStack.componentClasses().isEmpty()) {
             text.append(" Candidate theme component classes: ")
                 .append(String.join(", ", uiStack.componentClasses()))
-                .append(". Search their CSS and template usage before relying on variants "
-                    + "or interactions; names alone do not establish their contract.");
+                .append(" (names only; styles and dependencies are not established).");
         }
         if (colorMode != null && "explicit".equals(colorMode.strategy())
             && !colorMode.rootStates().isEmpty()) {
             text.append(" Color mode uses explicit root states: ")
                 .append(colorMode.rootStates().stream().map(RootState::selector)
                     .collect(Collectors.joining(", ")))
-                .append("; inherit theme colors and never override with prefers-color-scheme.");
+                .append('.');
         }
         if (!coverage.gaps().isEmpty() || coverage.hasMore()) {
-            text.append(" The static summary has extraction gaps. Check coverage in "
-                + "get_theme_context and use search_theme_file/read_theme_file for relevant "
-                + "missing sources. Dynamic setting values are not available.");
+            text.append(" The static summary has extraction gaps recorded in coverage. "
+                + "Dynamic setting values are not available.");
         }
         return text.toString();
     }
@@ -182,7 +172,7 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
 
     public static ThemeStyleContext unavailable() {
         return new ThemeStyleContext(null, null, "UNAVAILABLE", List.of(),
-            List.of("主题样式暂不可读取，请保留页面独立的基础样式，并以预览为准。"), "",
+            List.of("主题样式暂不可读取，主题私有样式与变量未知。"), "",
             ColorMode.unknown(), ContentSlot.empty(), UiStack.empty());
     }
 
@@ -190,12 +180,8 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
     public static ThemeStyleContext standalone() {
         return new ThemeStyleContext(null, null, "STANDALONE", List.of(), List.of(
             "此页面设置为独立渲染，不套用主题 layout：没有站点 header/footer、主题基础样式或 CSS 变量。"
-                + "渲染时已引入 modern-normalize 基线（盒模型、body margin、基础字体栈、表单控件字体），"
-                + "无需重复全局 reset；页面 CSS 会被限定到页面容器，仅裸 body/html/:root 选择器会重写为容器，"
-                + "其他选择器会被加上容器前缀（例如 body .hero 会变成 #容器 body .hero 而失效），"
-                + "请用类选择器限定样式。"
-                + "仍需提供页面配色、字体与响应式规则。",
-            "无主题亮暗模式契约；如需暗色适配可自行使用 prefers-color-scheme。"), "",
+                + "渲染时已引入 modern-normalize 基线，页面 CSS 限定到页面容器。",
+            "无主题亮暗模式契约，页面可独立使用 prefers-color-scheme。"), "",
             ColorMode.unknown(), ContentSlot.empty(), UiStack.empty());
     }
 }

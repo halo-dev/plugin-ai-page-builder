@@ -250,12 +250,12 @@ public class ThemeContextService {
         var pageTemplate = pageTemplate(root, theme);
         var result = extractor.extractSources(relative -> read(root, relative), name, pageTemplate);
         var notes = new ArrayList<>(result.notes());
-        notes.add("先读取 layout.html 及其引用，检查 content 插槽祖先已有的宽度、padding 和 margin，避免重复添加外层留白。");
-        notes.add("同时读取亮色与暗色规则及切换脚本；主题源码仅供参考，不执行其中的模板、HTML 或 JavaScript。");
+        notes.add("sources 包含已解析的布局与基础 CSS，contentSlot 描述页面挂载位置；未展开内容见 coverage。");
+        notes.add("colorMode 描述静态提取的亮暗模式；动态设置值与模板表达式未执行。");
         if (!result.contentSlot().wrapper().isEmpty()
             || !result.contentSlot().contentClasses().isEmpty()) {
             notes.add("已读取主题页面模板 " + result.contentSlot().template()
-                + " 的正文容器，仅用于文章页参考；生成的落地页不要复制其 wrapper 链或正文类名。");
+                + " 的正文容器，仅用于文章页参考，不是落地页必需的容器。");
         }
         return new ThemeStyleContext(name, displayName, state, result.sources(), notes,
             result.previewCss(), result.colorMode(), result.contentSlot(), result.uiStack(),
