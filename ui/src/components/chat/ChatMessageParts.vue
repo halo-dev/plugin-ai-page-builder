@@ -91,7 +91,12 @@ function toolIcon(name: string): Component {
         :running="part.tool.active"
         :expandable="part.tool.openable"
       >
-        <p class="break-all text-xs leading-5 text-gray-500">{{ part.tool.summary }}</p>
+        <p
+          class="break-all text-xs leading-5"
+          :class="part.tool.tone === 'error' ? 'text-red-500' : 'text-gray-500'"
+        >
+          {{ part.tool.summary }}
+        </p>
       </ChatDisclosureRow>
       <ChatQuestions
         v-if="part.tool.question"

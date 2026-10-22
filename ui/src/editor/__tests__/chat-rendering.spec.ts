@@ -155,15 +155,14 @@ describe('streaming conversation rendering', () => {
         expect(wrapper.text()).toContain('读取接口文档')
         expect(wrapper.find('[data-tone="error"]').exists()).toBe(status === 'error')
         if (status === 'error') {
-          // Failures show their reason inline instead of behind an expander.
-          expect(wrapper.find('[data-expandable]').exists()).toBe(false)
-          expect(wrapper.text()).toContain(summary)
-        } else {
-          expect(wrapper.get('[data-disclosure-row]').text()).not.toContain('完成')
-          expect(wrapper.get('[data-disclosure-row]').attributes('aria-expanded')).toBe('false')
-          await wrapper.get('[data-disclosure-row]').trigger('click')
-          expect(wrapper.get('[data-disclosure-body]').text()).toBe(summary)
+          // The failure reads inline in red, but the row stays expandable so a
+          // narrow panel can reveal the part the row truncates.
+          expect(wrapper.get('[data-disclosure-row]').text()).toContain(summary)
         }
+        expect(wrapper.get('[data-disclosure-row]').text()).not.toContain('完成')
+        expect(wrapper.get('[data-disclosure-row]').attributes('aria-expanded')).toBe('false')
+        await wrapper.get('[data-disclosure-row]').trigger('click')
+        expect(wrapper.get('[data-disclosure-body]').text()).toBe(summary)
         expect(wrapper.text()).not.toContain('GET /')
         wrapper.unmount()
       }

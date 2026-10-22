@@ -231,11 +231,14 @@ function displayParts(
     // "读取完成" is the old history fallback; it repeats the row's own state and
     // would turn every settled restore row into a meaningless summary.
     const summary = rawSummary === '读取完成' ? '' : rawSummary
-    // Failures show their reason inline; a settled read with no detail is flat.
-    const openable = !failed && summary.trim() !== ''
+    // A failure keeps its reason readable: the row shows one truncated line, so
+    // the body must stay available even though the call did not succeed.
+    const openable = summary.trim() !== ''
     // The first segment of a read summary is its subject (path, keyword, title),
-    // which tells repeated calls apart without expanding the row.
-    const hint = openable && summary.includes(' · ') ? summary.slice(0, summary.indexOf(' · ')) : ''
+    // which tells repeated calls apart without expanding the row. A failure's
+    // first segment can be the useful part of the error, so it stays inline.
+    const hint =
+      !failed && openable && summary.includes(' · ') ? summary.slice(0, summary.indexOf(' · ')) : ''
     return [
       {
         type: 'tool' as const,
