@@ -1106,6 +1106,89 @@ class PageChatServiceTest {
         assertThat(result.recovery().canResume()).isTrue();
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void preparationCompletionWaitsForCancellationPersistence(boolean resume, boolean cancelFails) {
+        usePageWithoutPath();
+        var request = request();
+        var lookup = Sinks.<Void>empty();
+        var theme = Sinks.<run.halo.aipagebuilder.theme.ThemeStyleContext>one();
+        var cancellationWrite = Sinks.<Void>empty();
+        try {
+            if (resume) {
+                when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                    PageWorkingCopy copy = i.getArgument(3);
+                    return copy.setSlug(Map.of("slug", "activity"))
+                        .thenMany(Flux.error(new AiGenerationException(
+                            AiGenerationException.Reason.TRUNCATED)));
+                });
+                service.start("page", request, "admin").block().blockLast();
+                request = resumeRequest(service.checkpoint("page", "page", "admin").block(),
+                    UUID.randomUUID().toString());
+                when(pages.checkSlugAvailable(anyString(), anyString())).thenReturn(lookup.asMono());
+            } else {
+                when(themes.current()).thenReturn(theme.asMono());
+            }
+            clearInvocations(gateway);
+            doAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                return copy.update(Map.of("html", "<p>Continued after cancellation failed</p>"))
+                    .thenMany(Flux.empty());
+            }).when(gateway).chat(anyString(), any(), anyString(), any());
+            when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(request.runId()),
+                eq("old-revision"), any(), any(), any())).thenReturn(Mono.just(fixture.changed));
+            var events = service.start("page", request, "admin").block().collectList().toFuture();
+            when(client.update(any(PageChatSession.class))).thenAnswer(i -> {
+                PageChatSession session = i.getArgument(0);
+                var write = Mono.fromSupplier(() -> {
+                    session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+                    stored.put(session.getMetadata().getName(), Json.deepCopy(session));
+                    return session;
+                });
+                return session.getSpec().getActive() != null
+                    && "cancelled".equals(session.getSpec().getActive().status())
+                    ? cancellationWrite.asMono().then(write) : write;
+            });
+            var cancellation = service.cancel("page", request.runId()).toFuture();
+            lookup.tryEmitEmpty();
+            theme.tryEmitValue(run.halo.aipagebuilder.theme.ThemeStyleContext.unavailable());
+            assertThat(cancellation).isNotDone();
+            assertThat(events).isNotDone();
+            verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+
+            if (cancelFails) {
+                cancellationWrite.tryEmitError(new IllegalStateException("storage unavailable"));
+                assertThat(cancellation).isCompletedExceptionally();
+            } else {
+                cancellationWrite.tryEmitEmpty();
+                assertThat(cancellation.join().status()).isEqualTo("cancelled");
+            }
+
+            assertThat(events).isDone();
+            assertThat(events.join()).extracting(event -> event.get("type"))
+                .contains(cancelFails ? "finish" : "abort").doesNotContain("error");
+            assertThat(service.result("page", request.runId()).block().status())
+                .isEqualTo(cancelFails ? "completed" : "cancelled");
+            assertThat(service.runs().contains("page")).isFalse();
+            assertThat(stored.get("page").getSpec().getActive()).isNull();
+            verify(gateway, times(cancelFails ? 1 : 0)).chat(anyString(), any(), anyString(), any());
+            if (cancelFails) {
+                verify(pages).saveAi(eq("page"), eq(1L),
+                    org.mockito.ArgumentMatchers.argThat(document ->
+                        "<p>Continued after cancellation failed</p>".equals(document.html())),
+                    eq("admin"), eq(request.runId()), eq("old-revision"), any(), any(), any());
+            } else {
+                verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
+                    anyString(), any(), any(), any());
+            }
+        } finally {
+            lookup.tryEmitEmpty();
+            theme.tryEmitValue(run.halo.aipagebuilder.theme.ThemeStyleContext.unavailable());
+            cancellationWrite.tryEmitEmpty();
+            service.stop();
+        }
+    }
+
     @Test
     void cancellationWaitsForMemoryWriteAndArchivesItsOutcome() {
         var memories = mock(run.halo.aipagebuilder.memory.SiteMemoryService.class);

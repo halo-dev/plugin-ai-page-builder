@@ -381,9 +381,10 @@ public class PageChatService {
         return run.copy.prepareThemeBrief().then(run.copy.validateRestoredSlug())
             .takeUntilOther(timeoutSignal.asMono())
             .takeUntilOther(run.cancel.asMono())
-            .then(Mono.defer(() ->
+            // Cancellation is provisional until its write succeeds; it may still roll back.
+            .then(run.settleThen(() ->
                 run.is(PageRun.State.CANCELLED) || run.is(PageRun.State.INTERRUPTED)
-                    ? run.finish(null)
+                    ? Mono.defer(() -> run.finish(null))
                     : run.persistCheckpoint().then(Mono.defer(() -> converse(name, run, history,
                         run.request.prompt(), timeoutSignal.asMono())))))
             .onErrorResume(error -> {
