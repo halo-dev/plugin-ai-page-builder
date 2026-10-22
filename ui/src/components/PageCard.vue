@@ -45,6 +45,7 @@ const updatedAtFull = computed(() => utils.date.format(props.item.updatedAt))
       :name="item.name"
       :revision="item.draftRevision || ''"
       :title="item.title"
+      :theme-layout="item.themeLayout"
       @open="emit('open', item)"
     />
     <div class="p-4">

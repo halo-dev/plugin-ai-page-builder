@@ -4,12 +4,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { candidatePreview } from '../preview'
 
 // Vitest returns an empty module for CSS imports, including ?raw.
-vi.mock('../../../../src/main/resources/static/modern-normalize-3.0.1.css?raw', () => ({
-  default: readFileSync(
-    resolve(process.cwd(), '../src/main/resources/static/modern-normalize-3.0.1.css'),
-    'utf8',
-  ),
-}))
+vi.mock('../../../../src/main/resources/static/modern-normalize-3.0.1.css?raw', () => {
+  const uiRoot = process.cwd().endsWith('/ui') ? '..' : '.'
+  return {
+    default: readFileSync(
+      resolve(process.cwd(), uiRoot, 'src/main/resources/static/modern-normalize-3.0.1.css'),
+      'utf8',
+    ),
+  }
+})
 
 describe('AI candidate preview', () => {
   it('keeps style-closing injection inside CSS text', () => {

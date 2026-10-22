@@ -3,7 +3,6 @@ import { aiPageBuilderApi } from '../api/clients'
 export interface CardPreview {
   html: string
   css: string
-  themeLayout: boolean
 }
 
 const cache = new Map<string, CardPreview>()
@@ -30,7 +29,6 @@ export function loadCardPreview(name: string, revision: string) {
           const content = {
             html: detail.document.html,
             css: detail.document.css,
-            themeLayout: detail.page.themeLayout,
           }
           const actualKey = `${name}:${detail.page.draftRevision}`
           cache.set(actualKey, content)

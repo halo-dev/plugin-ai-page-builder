@@ -12,6 +12,7 @@ import run.halo.aipagebuilder.page.PageApi.PageDetail;
 /** Source export intentionally leaves online assets and theme dependencies as references. */
 final class PageExport {
     private static final String NORMALIZE = "modern-normalize-3.0.1.css";
+    private static final String NORMALIZE_LICENSE = "modern-normalize-3.0.1.LICENSE.txt";
 
     private PageExport() { }
 
@@ -31,7 +32,8 @@ final class PageExport {
             entry(zip, "page.json", Json.toJson(metadata));
             entry(zip, "page.html", document.html());
             entry(zip, "index.html", html);
-            entry(zip, NORMALIZE, normalize());
+            entry(zip, NORMALIZE, resource(NORMALIZE));
+            entry(zip, NORMALIZE_LICENSE, resource(NORMALIZE_LICENSE));
             entry(zip, "styles.css", document.css());
             entry(zip, "script.js", document.js());
             entry(zip, "README.txt", "AI Page Builder 页面源码导出\n\n"
@@ -40,7 +42,7 @@ final class PageExport {
                 + "导入读取 page.json（format: ai-page-builder，version: 1）、page.html 正文、styles.css 和 script.js。\n"
                 + "page.json 保存 title、description、themeLayout、authorizeRequired；"
                 + "成员列表不随包导出。index.html 仅用于本地预览，"
-                + "并引用 " + NORMALIZE + " 作为渲染基线。\n"
+                + "并引用 " + NORMALIZE + " 作为渲染基线（许可证见 " + NORMALIZE_LICENSE + "）。\n"
                 + "图片、字体、相对路径和主题变量可能需要原站点环境；离线使用前请调整资源地址。\n"
                 + "主题亮暗根条件需由集成环境设置（如 html.dark），导出不会复制主题私有脚本。\n"
                 + "script.js 在直接打开或部署此源码时会执行；Console 运行预览的 iframe 沙箱不随源码包提供。\n");
@@ -51,10 +53,10 @@ final class PageExport {
         }
     }
 
-    private static String normalize() {
+    private static String resource(String name) {
         try (var input = PageExport.class.getClassLoader()
-            .getResourceAsStream("static/" + NORMALIZE)) {
-            if (input == null) throw new IllegalStateException("缺少独立页面渲染基线");
+            .getResourceAsStream("static/" + name)) {
+            if (input == null) throw new IllegalStateException("缺少页面导出资源：" + name);
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException error) {
             throw new IllegalStateException("页面导出失败", error);

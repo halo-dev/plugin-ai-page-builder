@@ -4,7 +4,12 @@ import { VButton } from '@halo-dev/components'
 import { candidatePreview } from '../editor/preview'
 import { loadCardPreview, type CardPreview } from '../editor/card-preview'
 
-const props = defineProps<{ name: string; revision: string; title: string }>()
+const props = defineProps<{
+  name: string
+  revision: string
+  title: string
+  themeLayout: boolean
+}>()
 const emit = defineEmits<{ open: [] }>()
 const root = ref<HTMLElement>()
 const content = ref<CardPreview>()
@@ -16,7 +21,7 @@ let generation = 0
 let observer: IntersectionObserver | undefined
 let resize: ResizeObserver | undefined
 const srcdoc = computed(() =>
-  content.value ? candidatePreview(content.value, '', undefined, !content.value.themeLayout) : '',
+  content.value ? candidatePreview(content.value, '', undefined, !props.themeLayout) : '',
 )
 const empty = computed(() => !content.value?.html.trim())
 async function load() {

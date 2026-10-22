@@ -57,7 +57,8 @@ class PageExportTest {
             }
         }
         assertThat(files).containsOnlyKeys("page.json", "page.html", "index.html",
-            "modern-normalize-3.0.1.css", "styles.css", "script.js", "README.txt");
+            "modern-normalize-3.0.1.css", "modern-normalize-3.0.1.LICENSE.txt", "styles.css",
+            "script.js", "README.txt");
         assertThat(files.get("page.html")).isEqualTo(document.html());
         var metadata = Json.fromJson(files.get("page.json"),
             tools.jackson.databind.JsonNode.class);
@@ -75,5 +76,7 @@ class PageExportTest {
             .doesNotContain("<unsafe & title>", document.js());
         assertThat(files.get("modern-normalize-3.0.1.css"))
             .contains("box-sizing: border-box", "margin: 0");
+        assertThat(files.get("modern-normalize-3.0.1.LICENSE.txt"))
+            .contains("MIT License", "Sindre Sorhus", "Jonathan Neal", "Nicolas Gallagher");
     }
 }
