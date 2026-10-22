@@ -254,6 +254,38 @@ describe('streaming conversation rendering', () => {
     expect(wrapper.find('.animate-spin').exists()).toBe(false)
     wrapper.unmount()
   })
+  it('warns only the unfinished ask-user step while the message waits', () => {
+    const wrapper = mount(ChatMessageParts, {
+      props: displayProps({
+        active: true,
+        waiting: true,
+        message: {
+          id: 'assistant',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-ask_user',
+              toolCallId: 'answered',
+              toolName: 'ask_user',
+              state: 'output-available',
+              input: {},
+              output: { summary: '用户已回答问题' },
+            },
+            {
+              type: 'tool-ask_user',
+              toolCallId: 'pending',
+              toolName: 'ask_user',
+              state: 'input-available',
+              input: {},
+            },
+          ],
+        },
+      }),
+    })
+    expect(wrapper.findAll('[data-tone="warn"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('等待回答')
+    wrapper.unmount()
+  })
   it('renders the question panel where it was asked, with later activity streaming below', () => {
     const question = {
       id: 'q1',

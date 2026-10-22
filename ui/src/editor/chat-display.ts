@@ -249,9 +249,11 @@ function displayParts(
           name: part.toolName,
           label: labels[part.toolName] || '处理页面',
           state: failed ? ('error' as const) : done ? ('success' as const) : ('default' as const),
+          // waiting covers the whole message, so only the unfinished ask_user
+          // call is the one still pending; earlier answered calls stay neutral.
           tone: failed
             ? ('error' as const)
-            : waiting && part.toolName === 'ask_user'
+            : waiting && !done && part.toolName === 'ask_user'
               ? ('warn' as const)
               : ('default' as const),
           active: active && !done && !failed,
