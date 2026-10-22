@@ -26,6 +26,7 @@ import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
+import run.halo.app.extension.GroupVersionKind;
 import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.app.theme.TemplateNameResolver;
 import run.halo.aipagebuilder.content.ContentPolicy;
@@ -131,6 +132,23 @@ class PageRendererTest {
     }
 
     @Test
+    void publishedPagesExposeHaloVisitTrackerVariablesButPreviewDoesNot() {
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        var published = (RenderingResponse) renderer.render(request, "about", "about/company",
+            true, document, "About", "Description", false, true).block();
+        assertThat(published.model())
+            .containsEntry("name", "about")
+            .containsEntry("plural", "themepages")
+            .containsEntry("groupVersionKind",
+                new GroupVersionKind("aipagebuilder.halo.run", "v1alpha1", "ThemePage"));
+
+        var preview = (RenderingResponse) renderer.render(request, "about", "about/company",
+            true, document, "About", "Description").block();
+        assertThat(preview.model()).doesNotContainKeys("name", "plural", "groupVersionKind");
+    }
+
+    @Test
     void importedPagesWithoutADescriptionOmitTheSeoVariable() {
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder-standalone")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder-standalone"));
@@ -147,7 +165,7 @@ class PageRendererTest {
             "document.querySelector('p').textContent = 'Ready';");
         when(policy.sanitizeHtml(scripted.html())).thenReturn(scripted.html());
         var response = (RenderingResponse) renderer.render(request, "about", "about", true,
-            scripted, "About", "Description", true).block();
+            scripted, "About", "Description", true, false).block();
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");
         assertThat(view.scriptBlocked()).isTrue();
         assertThat(view.html()).isEqualTo(scripted.html()).doesNotContain("<script");
@@ -156,7 +174,7 @@ class PageRendererTest {
             "");
         when(policy.sanitizeHtml(staticPage.html())).thenReturn(staticPage.html());
         var staticResponse = (RenderingResponse) renderer.render(request, "about", "about", true,
-            staticPage, "About", "Description", true).block();
+            staticPage, "About", "Description", true, false).block();
         var staticView = (PageRenderer.PageView) staticResponse.model().get("aiPageBuilder");
         assertThat(staticView.scriptBlocked()).isFalse();
     }
