@@ -70,6 +70,53 @@ class ContentPolicyTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {
+        ".x { scroll-behavior: smooth; overscroll-behavior: contain; }",
+        "@media (max-width: 620px) { .x { SCROLL-BEHAVIOR: smooth; } }",
+        "@supports (display: grid) { .x { overscroll-behavior-x: none; } }",
+        ".x { content: 'behavior: none; -moz-binding'; }"
+    })
+    void acceptsScrollingPropertiesAndHarmlessPropertyNamesInText(String css) {
+        assertThatCode(() -> policy.validateCss(css)).doesNotThrowAnyException();
+        assertThatCode(() -> policy.renderCss(css, "page-test")).doesNotThrowAnyException();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"behavior", "BEHAVIOR", "-moz-binding", "-MOZ-BINDING"})
+    void rejectsActualExecutablePropertiesWithRepairLocation(String property) {
+        var declaration = property + " /* gap */ : url('/legacy.htc');";
+        for (var css : List.of(".unsafe {" + declaration + "}",
+            "@media (max-width:620px) { @supports (display:grid) { .unsafe {"
+                + declaration + "} } }")) {
+            assertThatThrownBy(() -> policy.validateCss(css))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining(property.toLowerCase(Locale.ROOT)).hasMessageContaining(".unsafe")
+                .hasMessageContaining("请移除此声明");
+        }
+        assertThatThrownBy(() -> policy.validateHtml("<p style=\"" + declaration + "\">Text</p>"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining(property.toLowerCase(Locale.ROOT));
+    }
+
+    @Test
+    void supportsScrollingInInlineStylesAndExplainsUnsupportedMediaRanges() {
+        assertThatCode(() -> policy.validateHtml("<p style='scroll-behavior:smooth'>Text</p>"))
+            .doesNotThrowAnyException();
+        assertThatThrownBy(() -> policy.validateCss("@media (width <= 620px) {.x{color:red}}"))
+            .isInstanceOf(ResponseStatusException.class).hasMessageContaining("max-width")
+            .hasMessageContaining("min-width");
+        assertThatCode(() -> policy.validateCss("@media (max-width:620px) {.x{color:red}}"))
+            .doesNotThrowAnyException();
+    }
+
+    @Test
+    void scopesStandaloneBoxSizingWithoutChangingThemeElements() {
+        var css = policy.renderCss(
+            "body, *, *::before, *::after {box-sizing:border-box}", "page-test");
+        assertThat(css).contains("#page-test,", "#page-test *", "#page-test *::before",
+            "#page-test *::after", "box-sizing:border-box");
+    }
+
+    @ParameterizedTest
     @ValueSource(strings = {"opener", "OPENER", "nofollow Opener", "noopener opener"})
     void neutralizesOpenerRelInsteadOfRejectingLegacyPages(String rel) {
         var html = "<a href='https://example.com' target='_blank' rel='" + rel + "'>x</a>";

@@ -60,6 +60,8 @@ public class ContentPolicy {
                 "Use the separate js field and addEventListener, scoped to the page container.",
                 "CSS supports ordinary rules, variables, @media and @supports. No @import, "
                     + "@namespace, @font-face, @keyframes, nested selectors or escape characters.",
+                "Use min-width/max-width media queries instead of range comparisons with <. "
+                    + "scroll-behavior and overscroll-behavior are supported.",
                 "JavaScript validation checks size and transport, not runtime safety. "
                     + "Published JavaScript executes in the site DOM.",
                 "Do not implement forms or text inputs through JavaScript workarounds.",
@@ -205,12 +207,15 @@ public class ContentPolicy {
     private CascadingStyleSheet parseCss(String css) {
         require(css != null && css.length() <= MAX_CSS, "CSS 不能超过 100 KB");
         // Reject escapes so URL/property checks cannot be bypassed with CSS escape sequences.
-        require(!css.contains("\\") && !css.contains("<") && !css.contains("\u0000"),
-            "CSS 不支持转义字符或 HTML 标签");
+        require(!css.contains("\\"), "CSS 不支持反斜杠转义字符，请使用未转义的属性名和值");
+        require(!css.contains("\u0000"), "CSS 不能包含 NUL 字符");
+        require(!css.contains("<"),
+            "CSS 不支持 < 字符或 HTML 标签；媒体查询请使用 (max-width: 620px) 或 (min-width: 620px)，不要使用 < 或 <= 比较");
         var normalized = css.replaceAll("(?s)/\\*.*?\\*/", "").toLowerCase(Locale.ROOT);
-        require(!normalized.contains("expression(") && !normalized.contains("javascript:")
-            && !normalized.contains("-moz-binding") && !normalized.contains("behavior:")
-            && !normalized.contains("image-set("), "CSS 包含不支持的可执行或外部资源语法");
+        require(!normalized.contains("expression("), "CSS 不支持 expression()，请使用普通 CSS 属性值");
+        require(!normalized.contains("javascript:"), "CSS 不支持 javascript: URL");
+        require(!normalized.contains("image-set("),
+            "CSS 不支持 image-set()，请使用单个 HTTP(S) 或相对地址的 url()");
         var urls = CSS_URL.matcher(normalized);
         while (urls.find()) {
             validateUrl(urls.group(2), false);
@@ -250,8 +255,12 @@ public class ContentPolicy {
                     rootConditionEnd(selector);
                 }
                 for (var declaration : style.getAllDeclarations()) {
+                    var selector = style.getSelectorAtIndex(0)
+                        .getAsCSSString(new CSSWriter().getSettings(), 0);
                     require(!Set.of("behavior", "-moz-binding").contains(
-                        declaration.getProperty().toLowerCase(Locale.ROOT)), "不支持的 CSS 属性");
+                        declaration.getProperty().toLowerCase(Locale.ROOT)),
+                        "不支持的 CSS 属性：" + declaration.getProperty()
+                            + "（选择器：" + selector + "），请移除此声明");
                 }
             } else if (rule instanceof CSSMediaRule media) {
                 validateRules(media, depth + 1);

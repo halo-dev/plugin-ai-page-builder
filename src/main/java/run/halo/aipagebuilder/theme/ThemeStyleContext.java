@@ -39,7 +39,8 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
     public String brief() {
         if ("STANDALONE".equals(layoutState)) {
             return "Theme mount: STANDALONE. This page renders without the theme layout, header, "
-                + "footer or theme CSS variables; provide complete self-contained styles.";
+                + "footer or theme CSS variables; provide complete self-contained styles, exactly one main, "
+                + "and border-box sizing for the page root, descendants and pseudo-elements.";
         }
         if (themeName == null) return "";
         if (!"SUPPORTED".equals(layoutState)) {
@@ -66,7 +67,8 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
         }
         if (contentSlot != null) {
             text.append(" Main landmark around the slot: ").append(contentSlot.mainLandmark())
-                .append(". Avoid another main only when present; unknown requires checking "
+                .append(". When present, do not add another main; when absent, provide exactly one main; "
+                    + "unknown requires checking "
                     + "the layout source.");
         }
         if (contentSlot != null && (!contentSlot.wrapper().isEmpty()
