@@ -1,10 +1,25 @@
 <script setup lang="ts">
-import IconCheck from '~icons/mingcute/check-line'
-import IconError from '~icons/mingcute/warning-line'
-import IconSpinner from '~icons/mingcute/loading-line'
-import IconChevron from '~icons/mingcute/right-line'
+import type { Component } from 'vue'
+import IconBookmark from '~icons/mingcute/bookmark-line'
+import IconBrain from '~icons/mingcute/brain-line'
+import IconChat from '~icons/mingcute/chat-1-line'
+import IconCode from '~icons/mingcute/code-line'
+import IconEdit from '~icons/mingcute/edit-line'
+import IconEye from '~icons/mingcute/eye-line'
+import IconFile from '~icons/mingcute/file-line'
+import IconFolder from '~icons/mingcute/folder-line'
+import IconGlobe from '~icons/mingcute/globe-line'
+import IconInformation from '~icons/mingcute/information-line'
+import IconLink from '~icons/mingcute/link-line'
+import IconListCheck from '~icons/mingcute/list-check-line'
+import IconPalette from '~icons/mingcute/palette-line'
+import IconQuestion from '~icons/mingcute/question-line'
+import IconSearch from '~icons/mingcute/search-line'
+import IconSparkles from '~icons/mingcute/sparkles-line'
+import IconText from '~icons/mingcute/text-line'
 import type { PageChatAnswerItem } from '../../api/generated'
-import type { DisplayPart } from '../../editor/chat-display'
+import { reasoningSummary, type DisplayPart } from '../../editor/chat-display'
+import ChatDisclosureRow from './ChatDisclosureRow.vue'
 import ChatMarkdown from './ChatMarkdown.vue'
 import ChatQuestions from './ChatQuestions.vue'
 
@@ -15,58 +30,69 @@ defineProps<{
   answerError?: string
 }>()
 const emit = defineEmits<{ answer: [questionId: string, answers: PageChatAnswerItem[]] }>()
+
+// Each step carries a glyph for what it touches, the way the harness rows do.
+const TOOL_ICONS: Record<string, Component> = {
+  read_current_page: IconEye,
+  get_theme_context: IconPalette,
+  update_current_page: IconEdit,
+  update_page_title: IconEdit,
+  update_page_description: IconEdit,
+  patch_current_page: IconEdit,
+  set_page_slug: IconLink,
+  rename_session: IconChat,
+  list_theme_files: IconFolder,
+  read_theme_file: IconFile,
+  search_theme_file: IconSearch,
+  list_posts: IconFile,
+  list_single_pages: IconFile,
+  list_ai_pages: IconFile,
+  read_ai_page: IconFile,
+  read_content: IconText,
+  get_site_profile: IconInformation,
+  get_navigation: IconListCheck,
+  search_attachments: IconSearch,
+  fetch_webpage: IconGlobe,
+  search_public_apis: IconSearch,
+  get_public_api: IconCode,
+  ask_user: IconQuestion,
+  update_site_memory: IconBookmark,
+}
+
+function toolIcon(name: string): Component {
+  return TOOL_ICONS[name] || IconSparkles
+}
 </script>
 
 <template>
   <template v-for="part in parts" :key="part.id">
     <ChatMarkdown v-if="part.type === 'text'" :content="part.text" :final="!part.active" />
-    <details
+    <ChatDisclosureRow
       v-else-if="part.type === 'reasoning' && part.text"
-      class="my-2 border-l-2 border-gray-200 pl-3 text-xs text-gray-500"
+      class="my-0.5"
+      :icon="IconBrain"
+      title="思考"
+      :summary="reasoningSummary(part.text, part.active)"
+      :running="part.active"
+      expandable
     >
-      <summary class="cursor-pointer select-none">
-        思考过程<span v-if="part.active"> · 正在思考…</span>
-      </summary>
-      <ChatMarkdown :content="part.text" :final="!part.active" />
-    </details>
-    <template v-else-if="'tool' in part && part.tool">
-      <details v-if="part.tool.openable" class="group my-0.5">
-        <summary
-          class="flex cursor-pointer select-none items-center gap-1.5 py-1 text-xs text-gray-500 marker:hidden"
-        >
-          <IconSpinner v-if="part.tool.active" class="animate-spin text-gray-400" />
-          <IconError v-else-if="part.tool.state === 'error'" class="text-red-500" />
-          <IconCheck v-else-if="part.tool.state === 'success'" class="text-emerald-600" />
-          <IconCheck v-else class="text-gray-300" />
-          <span class="shrink-0 whitespace-nowrap text-gray-600">{{ part.tool.label }}</span>
-          <span v-if="part.tool.hint" class="min-w-0 truncate text-gray-400">{{
-            part.tool.hint
-          }}</span>
-          <span v-if="part.tool.status" class="text-gray-400">{{ part.tool.status }}</span>
-          <IconChevron
-            class="ml-auto shrink-0 text-gray-300 transition-transform group-open:rotate-90"
-          />
-        </summary>
-        <p class="mb-1 break-all pl-[22px] text-xs leading-5 text-gray-400">
-          {{ part.tool.summary }}
-        </p>
-      </details>
-      <div v-else class="my-0.5">
-        <div class="flex items-center gap-1.5 py-1 text-xs text-gray-500">
-          <IconSpinner v-if="part.tool.active" class="animate-spin text-gray-400" />
-          <IconError v-else-if="part.tool.state === 'error'" class="text-red-500" />
-          <IconCheck v-else-if="part.tool.state === 'success'" class="text-emerald-600" />
-          <IconCheck v-else class="text-gray-300" />
-          <span class="shrink-0 whitespace-nowrap text-gray-600">{{ part.tool.label }}</span>
-          <span v-if="part.tool.status" class="text-gray-400">{{ part.tool.status }}</span>
-        </div>
-        <p
-          v-if="part.tool.state === 'error' && part.tool.summary"
-          class="mb-1 break-all pl-[22px] text-xs leading-5 text-red-500"
-        >
-          {{ part.tool.summary }}
-        </p>
+      <div class="apb-reasoning-body">
+        <ChatMarkdown :content="part.text" :final="!part.active" />
       </div>
+    </ChatDisclosureRow>
+    <template v-else-if="'tool' in part && part.tool">
+      <ChatDisclosureRow
+        class="my-0.5"
+        :icon="toolIcon(part.tool.name)"
+        :title="part.tool.label"
+        :summary="part.tool.hint || part.tool.summary"
+        :status="part.tool.status"
+        :tone="part.tool.tone"
+        :running="part.tool.active"
+        :expandable="part.tool.openable"
+      >
+        <p class="break-all text-xs leading-5 text-gray-500">{{ part.tool.summary }}</p>
+      </ChatDisclosureRow>
       <ChatQuestions
         v-if="part.tool.question"
         :question="part.tool.question"
@@ -78,3 +104,16 @@ const emit = defineEmits<{ answer: [questionId: string, answers: PageChatAnswerI
     </template>
   </template>
 </template>
+
+<style scoped>
+/* Thinking reads one step below the answer: compact, muted, and never louder
+   than the row that opened it. */
+.apb-reasoning-body :deep(.apb-md) {
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 21px;
+}
+.apb-reasoning-body :deep(.apb-md p) {
+  margin: 0.4em 0;
+}
+</style>

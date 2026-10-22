@@ -51,9 +51,8 @@ describe('streaming conversation rendering', () => {
       props: displayProps({ message: state.message, active: true }),
     })
     expect(wrapper.text()).toContain(label)
-    expect(wrapper.text()).toContain('进行中')
+    expect(wrapper.find('[data-disclosure-row][data-running]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('处理页面')
-    expect(wrapper.find('.animate-spin').exists()).toBe(true)
 
     state = applyUIMessageChunk(state, {
       type: 'tool-input-available',
@@ -69,10 +68,9 @@ describe('streaming conversation rendering', () => {
     })
     await wrapper.setProps(displayProps({ message: state.message, active: false }))
     expect(wrapper.text()).toContain(label)
-    // A successful row ends with the check icon; the redundant "完成" label is gone.
+    // A settled row stops its highlight and ends without a redundant "完成" label.
+    expect(wrapper.find('[data-running]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('完成')
-    expect(wrapper.find('.text-emerald-600').exists()).toBe(true)
-    expect(wrapper.find('.animate-spin').exists()).toBe(false)
     wrapper.unmount()
 
     const restored = mount(ChatMessageParts, {
@@ -97,7 +95,7 @@ describe('streaming conversation rendering', () => {
     expect(restored.text()).toContain(label)
     // The generic history fallback is not detail, so the row stays flat.
     expect(restored.text()).not.toContain('读取完成')
-    expect(restored.find('details').exists()).toBe(false)
+    expect(restored.find('[data-expandable]').exists()).toBe(false)
     expect(restored.text()).not.toContain('处理页面')
     restored.unmount()
   })
@@ -121,7 +119,7 @@ describe('streaming conversation rendering', () => {
     },
   ])(
     'renders $status API details live and through history restoration',
-    ({ status, summary, items }) => {
+    async ({ status, summary, items }) => {
       let state = createUIMessageReducer()
       state = applyUIMessageChunk(state, {
         type: 'tool-input-available',
@@ -155,23 +153,23 @@ describe('streaming conversation rendering', () => {
       for (const message of [state.message, restored]) {
         const wrapper = mount(ChatMessageParts, { props: displayProps({ message, active: false }) })
         expect(wrapper.text()).toContain('读取接口文档')
-        expect(wrapper.find('.text-red-500').exists()).toBe(status === 'error')
-        expect(wrapper.find('.text-emerald-600').exists()).toBe(status === 'completed')
+        expect(wrapper.find('[data-tone="error"]').exists()).toBe(status === 'error')
         if (status === 'error') {
           // Failures show their reason inline instead of behind an expander.
-          expect(wrapper.find('details').exists()).toBe(false)
+          expect(wrapper.find('[data-expandable]').exists()).toBe(false)
           expect(wrapper.text()).toContain(summary)
         } else {
-          expect(wrapper.get('summary').text()).not.toContain('完成')
-          expect(wrapper.get('details p').text()).toBe(summary)
-          expect(wrapper.get('details').attributes('open')).toBeUndefined()
+          expect(wrapper.get('[data-disclosure-row]').text()).not.toContain('完成')
+          expect(wrapper.get('[data-disclosure-row]').attributes('aria-expanded')).toBe('false')
+          await wrapper.get('[data-disclosure-row]').trigger('click')
+          expect(wrapper.get('[data-disclosure-body]').text()).toBe(summary)
         }
         expect(wrapper.text()).not.toContain('GET /')
         wrapper.unmount()
       }
     },
   )
-  it('shows a read subject inline and keeps the count in details', () => {
+  it('shows a read subject inline and keeps the count in details', async () => {
     const wrapper = mount(ChatMessageParts, {
       props: displayProps({
         active: false,
@@ -191,10 +189,12 @@ describe('streaming conversation rendering', () => {
         },
       }),
     })
-    expect(wrapper.get('summary').text()).toContain('查找主题文件')
-    expect(wrapper.get('summary').text()).toContain('templates')
-    expect(wrapper.get('summary').text()).not.toContain('共 3 个文件')
-    expect(wrapper.get('details p').text()).toBe('templates · 共 3 个文件')
+    const row = wrapper.get('[data-disclosure-row]')
+    expect(row.text()).toContain('查找主题文件')
+    expect(row.text()).toContain('templates')
+    expect(row.text()).not.toContain('共 3 个文件')
+    await row.trigger('click')
+    expect(wrapper.get('[data-disclosure-body]').text()).toBe('templates · 共 3 个文件')
     wrapper.unmount()
   })
   it('renders durable memory outcomes separately from page staging', async () => {
@@ -224,7 +224,7 @@ describe('streaming conversation rendering', () => {
         },
       }),
     )
-    expect(wrapper.text()).toContain('未确认保存')
+    expect(wrapper.find('[data-tone="error"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('保存结果待确认')
     wrapper.unmount()
   })
@@ -385,10 +385,11 @@ describe('streaming conversation rendering', () => {
       props: displayProps({ message: state.message, active: false }),
     })
     const text = wrapper.text()
-    expect(text.indexOf('Before')).toBeLessThan(text.indexOf('思考过程'))
-    expect(text.indexOf('思考过程')).toBeLessThan(text.indexOf('已暂存'))
+    expect(text.indexOf('Before')).toBeLessThan(text.indexOf('思考'))
+    expect(text.indexOf('思考')).toBeLessThan(text.indexOf('已暂存'))
     expect(text.indexOf('已暂存')).toBeLessThan(text.indexOf('Between'))
-    expect(text).toContain('已结束')
+    // A cancelled run leaves the row settled instead of keeping a running label.
+    expect(wrapper.find('[data-running]').exists()).toBe(false)
     expect(wrapper.find('[data-animate="true"]').exists()).toBe(false)
     wrapper.unmount()
   })
