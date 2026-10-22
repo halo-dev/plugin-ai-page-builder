@@ -32,6 +32,7 @@ export function usePageListQuery() {
   })
   const items = computed(() => listQuery.data.value?.items || [])
   const total = computed(() => listQuery.data.value?.total || 0)
+  const currentTheme = computed(() => listQuery.data.value?.currentTheme)
   // The empty workspace shows the create panel instead; keep the toolbar only
   // when there is something to search or filter, or while loading/erroring.
   const showToolbar = computed(
@@ -42,5 +43,5 @@ export function usePageListQuery() {
       listQuery.isLoading.value ||
       listQuery.isError.value,
   )
-  return { page, size, keyword, status, sort, listQuery, items, total, showToolbar }
+  return { page, size, keyword, status, sort, listQuery, items, total, currentTheme, showToolbar }
 }

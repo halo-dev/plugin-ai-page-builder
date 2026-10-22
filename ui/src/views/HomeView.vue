@@ -30,7 +30,7 @@ import PageSettings from '../components/PageSettings.vue'
 import CreatePagePanel from '../components/create/CreatePagePanel.vue'
 
 const router = useRouter()
-const { page, size, keyword, status, sort, listQuery, items, total, showToolbar } =
+const { page, size, keyword, status, sort, listQuery, items, total, currentTheme, showToolbar } =
   usePageListQuery()
 const statusItems = [
   { label: '全部', value: undefined },
@@ -180,6 +180,7 @@ const {
         v-for="item in items"
         :key="item.name"
         :item="item"
+        :current-theme="currentTheme"
         :disabled="mutating"
         @open="openEditor(item.name)"
         @preview="preview"

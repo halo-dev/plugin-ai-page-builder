@@ -16,6 +16,9 @@
 // May contain unused imports in some cases
 // @ts-ignore
 import type { PageMember } from './page-member';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ThemeRef } from './theme-ref';
 
 /**
  * 
@@ -65,6 +68,12 @@ export interface PageSummary {
      * @memberof PageSummary
      */
     'publishedRevision'?: string | null;
+    /**
+     * 
+     * @type {ThemeRef}
+     * @memberof PageSummary
+     */
+    'publishedTheme'?: ThemeRef | null;
     /**
      * 
      * @type {string}

@@ -17,7 +17,11 @@ final class PageMcpOutputSchemas {
                 "htmlTags", array(text()), "htmlAttributes", array(text()),
                 "rules", array(text()), "workflow", array(text()));
             case "get_theme_context" -> theme();
-            case "list_pages" -> page(summary(false));
+            case "list_pages" -> {
+                var schema = page(summary(false));
+                add(schema, "currentTheme", themeRef(), false);
+                yield schema;
+            }
             case "get_page" -> detail();
             case "create_page", "update_page_properties", "update_page", "patch_page", "publish_page", "unpublish_page",
                 "restore_page_revision" -> summary(true);
@@ -39,6 +43,7 @@ final class PageMcpOutputSchemas {
         add(schema, "members",
             array(fields("kind", enumeration("USER", "ROLE"), "name", text())), false);
         add(schema, "publishedRevision", text(), false);
+        add(schema, "publishedTheme", themeRef(), false);
         if (detail) {
             add(schema, "mode", enumeration("visual", "code"), true);
             add(schema, "publicPath", Map.of("type", "string", "description",
@@ -63,6 +68,13 @@ final class PageMcpOutputSchemas {
         var schema = fields("name", text(), "createdAt", timestamp(), "createdBy", text(),
             "source", text());
         add(schema, "parentRevision", text(), false);
+        add(schema, "theme", themeRef(), false);
+        return schema;
+    }
+
+    private static Map<String, Object> themeRef() {
+        var schema = fields("name", text());
+        add(schema, "displayName", text(), false);
         return schema;
     }
 

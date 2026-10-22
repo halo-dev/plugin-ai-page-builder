@@ -111,6 +111,16 @@ const publicUrl = computed(() => {
   if (!page?.publishedRevision || !page.slug) return ''
   return pageUrl(page.slug)
 })
+const themeMismatch = computed(() => {
+  const current = themeContext.value
+  const revisionTheme = detail.value?.revisionTheme
+  if (!detail.value?.page.themeLayout || !revisionTheme || !current?.themeName) return undefined
+  if (revisionTheme.name === current.themeName) return undefined
+  return {
+    saved: revisionTheme.displayName || revisionTheme.name,
+    current: current.displayName || current.themeName,
+  }
+})
 function openPublicPage() {
   if (publicUrl.value) window.open(publicUrl.value, '_blank', 'noopener')
 }
@@ -290,6 +300,15 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
       >
         <IconClose class="text-sm" />
       </button>
+    </div>
+    <div
+      v-if="themeMismatch"
+      class="shrink-0 border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-700"
+      role="status"
+    >
+      当前草稿基于「{{ themeMismatch.saved }}」保存，站点当前主题为「{{
+        themeMismatch.current
+      }}」，页面样式可能已不适配。可以让 AI 调整以适配当前主题。
     </div>
     <VLoading v-if="loading" />
     <template v-else-if="working && detail">

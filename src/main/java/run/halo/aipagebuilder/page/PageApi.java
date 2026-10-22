@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.model.ThemePage;
+import run.halo.aipagebuilder.model.ThemeRef;
 
 public final class PageApi {
     private PageApi() {
@@ -62,21 +63,41 @@ public final class PageApi {
         @Schema(nullable = true) List<ThemePage.PageMember> members, String draftRevision,
         @Schema(nullable = true) String publishedRevision,
         Instant updatedAt,
-        boolean hasUnpublishedChanges) {
+        boolean hasUnpublishedChanges,
+        @Schema(nullable = true) ThemeRef publishedTheme) {
+        public PageSummary(String name, String slug, String title, String description,
+            Long version, boolean themeLayout, boolean authorizeRequired,
+            List<ThemePage.PageMember> members, String draftRevision, String publishedRevision,
+            Instant updatedAt, boolean hasUnpublishedChanges) {
+            this(name, slug, title, description, version, themeLayout, authorizeRequired, members,
+                draftRevision, publishedRevision, updatedAt, hasUnpublishedChanges, null);
+        }
     }
 
     @Schema(name = "PageDetail", requiredProperties = {"page", "document"})
-    public record PageDetail(PageSummary page, PageDocument document) {
+    public record PageDetail(PageSummary page, PageDocument document,
+        @Schema(nullable = true) ThemeRef revisionTheme) {
+        public PageDetail(PageSummary page, PageDocument document) {
+            this(page, document, null);
+        }
     }
 
     @Schema(name = "PageList", requiredProperties = {"items", "total", "page", "size"})
-    public record PageList(List<PageSummary> items, long total, int page, int size) {
+    public record PageList(List<PageSummary> items, long total, int page, int size,
+        @Schema(nullable = true) ThemeRef currentTheme) {
+        public PageList(List<PageSummary> items, long total, int page, int size) {
+            this(items, total, page, size, null);
+        }
     }
 
     @Schema(name = "RevisionSummary", requiredProperties = {"name", "createdAt", "createdBy",
         "source"})
     public record RevisionSummary(String name, Instant createdAt, String createdBy, String source,
-        String parentRevision) {
+        String parentRevision, @Schema(nullable = true) ThemeRef theme) {
+        public RevisionSummary(String name, Instant createdAt, String createdBy, String source,
+            String parentRevision) {
+            this(name, createdAt, createdBy, source, parentRevision, null);
+        }
     }
 
     @Schema(name = "RevisionDetail", requiredProperties = {"summary", "document"})

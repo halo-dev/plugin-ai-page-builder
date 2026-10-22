@@ -17,6 +17,7 @@ import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.infra.SystemSetting;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
+import run.halo.aipagebuilder.model.ThemeRef;
 import run.halo.aipagebuilder.theme.ThemeContextExtractor.SourceText;
 
 @Service
@@ -52,6 +53,15 @@ public class ThemeContextService {
                     .flatMap(this::activeName))))
             .filter(name -> !name.isBlank())
             .switchIfEmpty(Mono.error(new IllegalStateException("No active theme")));
+    }
+
+    /** Cheap theme identity for persistence; never fails and never scans theme sources. */
+    public Mono<ThemeRef> activeThemeIdentity() {
+        return activeThemeName()
+            .flatMap(name -> client.fetch(Theme.class, name)
+                .map(theme -> new ThemeRef(name,
+                    theme.getSpec() == null ? null : theme.getSpec().getDisplayName())))
+            .onErrorResume(error -> Mono.empty());
     }
 
     public Mono<Map<String, Object>> listFiles(String themeName, String directory, int offset,

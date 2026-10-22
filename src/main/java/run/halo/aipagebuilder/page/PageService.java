@@ -14,6 +14,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,6 +37,7 @@ import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.model.ThemePage;
 import run.halo.aipagebuilder.model.ThemePageRevision;
+import run.halo.aipagebuilder.model.ThemeRef;
 import run.halo.aipagebuilder.page.PageApi.CreatePageRequest;
 import run.halo.aipagebuilder.page.PageApi.PageDetail;
 import run.halo.aipagebuilder.page.PageApi.PageList;
@@ -44,20 +46,23 @@ import run.halo.aipagebuilder.page.PageApi.RestoreRequest;
 import run.halo.aipagebuilder.page.PageApi.RevisionDetail;
 import run.halo.aipagebuilder.page.PageApi.RevisionSummary;
 import run.halo.aipagebuilder.page.PageApi.SavePageRequest;
+import run.halo.aipagebuilder.theme.ThemeContextService;
 
 @Service
 public class PageService {
     private final ReactiveExtensionClient client;
     private final ContentPolicy contentPolicy;
     private final PageImportReviewService importReviews;
+    private final ThemeContextService themes;
     private final Set<String> slugWrites = ConcurrentHashMap.newKeySet();
     private final Map<String, Object> pageWrites = new ConcurrentHashMap<>();
 
     public PageService(ReactiveExtensionClient client, ContentPolicy contentPolicy,
-        PageImportReviewService importReviews) {
+        PageImportReviewService importReviews, ThemeContextService themes) {
         this.client = client;
         this.contentPolicy = contentPolicy;
         this.importReviews = importReviews;
+        this.themes = themes;
     }
 
     public Mono<PageList> list(int page, int size, String keyword, String status, String sort) {
@@ -87,8 +92,9 @@ public class PageService {
         var options = new ListOptions().setFieldSelector(selector);
         return client.listBy(ThemePage.class, options,
                 PageRequestImpl.of(page, size, Sort.by(order, Sort.Order.asc("metadata.name"))))
-            .map(result -> new PageList(result.getItems().stream().map(PageService::summary).toList(),
-                result.getTotal(), result.getPage(), result.getSize()));
+            .flatMap(result -> withActiveTheme(theme -> Mono.just(new PageList(
+                result.getItems().stream().map(PageService::summary).toList(),
+                result.getTotal(), result.getPage(), result.getSize(), theme))));
     }
 
     public Mono<PageDetail> create(CreatePageRequest request, String actor) {
@@ -126,9 +132,9 @@ public class PageService {
             final var normalizedSlug = slug == null || slug.isBlank() ? null : slug;
             validateProperties(title, description);
             contentPolicy.validate(document);
-            Supplier<Mono<PageDetail>> write = () -> {
+            Supplier<Mono<PageDetail>> write = () -> withActiveTheme(theme -> {
                 var name = UUID.randomUUID().toString();
-                var revision = newRevision(name, document, "manual", actor);
+                var revision = newRevision(name, document, "manual", actor, theme);
                 return client.create(revision).flatMap(created -> {
                     var page = new ThemePage();
                     var metadata = new Metadata();
@@ -162,7 +168,7 @@ public class PageService {
                         })
                         .map(saved -> detail(saved, created));
                 });
-            };
+            });
             if (normalizedSlug == null) {
                 return write.get();
             }
@@ -188,7 +194,8 @@ public class PageService {
                 if (Objects.equals(current.getSpec().getDocument(), request.document())) {
                     return Mono.just(detail(page, current));
                 }
-                return writeDraft(page, request.document(), request.source(), actor, null);
+                return withActiveTheme(theme -> writeDraft(page, request.document(),
+                    request.source(), actor, null, theme));
             });
         });
     }
@@ -224,7 +231,8 @@ public class PageService {
                     if (Objects.equals(current.getSpec().getDocument(), document)) {
                         return client.update(page).map(saved -> detail(saved, current));
                     }
-                    return writeDraft(page, document, "ai", actor, runId);
+                    return withActiveTheme(theme -> writeDraft(page, document, "ai", actor,
+                        runId, theme));
                 });
             };
             return slug == null ? write.get() : writeSlug(slug,
@@ -313,6 +321,7 @@ public class PageService {
                 .then(revision(name, page.getSpec().getDraftRevision())).flatMap(draft -> {
                     contentPolicy.validate(draft.getSpec().getDocument());
                     page.getSpec().setPublishedRevision(draft.getMetadata().getName());
+                    page.getSpec().setPublishedTheme(draft.getSpec().getTheme());
                     page.getSpec().setUpdatedAt(Instant.now());
                     return client.update(page).map(saved -> detail(saved, draft));
                 }));
@@ -322,6 +331,7 @@ public class PageService {
     public Mono<PageDetail> unpublish(String name, Long version) {
         return mutate(name, version, page -> {
             page.getSpec().setPublishedRevision(null);
+            page.getSpec().setPublishedTheme(null);
             page.getSpec().setUpdatedAt(Instant.now());
             return client.update(page).flatMap(this::draftDetail);
         });
@@ -331,7 +341,8 @@ public class PageService {
         return mutate(name, request.version(), page ->
             revision(name, request.revision()).flatMap(historical -> {
                 contentPolicy.validate(historical.getSpec().getDocument());
-                return writeDraft(page, historical.getSpec().getDocument(), "restore", actor, null);
+                return writeDraft(page, historical.getSpec().getDocument(), "restore", actor,
+                    null, historical.getSpec().getTheme());
             }));
     }
 
@@ -423,8 +434,8 @@ public class PageService {
     }
 
     private Mono<PageDetail> writeDraft(ThemePage page, PageDocument document, String source,
-        String actor, String runId) {
-        var revision = newRevision(page.getMetadata().getName(), document, source, actor);
+        String actor, String runId, ThemeRef theme) {
+        var revision = newRevision(page.getMetadata().getName(), document, source, actor, theme);
         revision.getSpec().setParentRevision(page.getSpec().getDraftRevision());
         return client.create(revision).flatMap(created -> {
             applyDraft(page, created);
@@ -504,8 +515,16 @@ public class PageService {
             .andQuery(isNull("metadata.deletionTimestamp")));
     }
 
+    /** Theme lookup is advisory: a missing or unreadable theme never blocks the write. */
+    private <T> Mono<T> withActiveTheme(Function<ThemeRef, Mono<T>> action) {
+        return themes.activeThemeIdentity()
+            .map(Optional::of)
+            .defaultIfEmpty(Optional.empty())
+            .flatMap(theme -> action.apply(theme.orElse(null)));
+    }
+
     private static ThemePageRevision newRevision(String name, PageDocument document, String source,
-        String actor) {
+        String actor, ThemeRef theme) {
         var revision = new ThemePageRevision();
         var metadata = new Metadata();
         metadata.setName(UUID.randomUUID().toString());
@@ -514,6 +533,7 @@ public class PageService {
         spec.setPageName(name);
         spec.setCreatedBy(actor);
         spec.setSource(source);
+        spec.setTheme(theme);
         // Snapshot editor project data too, so caller mutations cannot modify a revision.
         var json = Json.toJson(document);
         spec.setDocument(Json.fromJson(json, PageDocument.class));
@@ -537,7 +557,8 @@ public class PageService {
     }
 
     private static PageDetail detail(ThemePage page, ThemePageRevision revision) {
-        return new PageDetail(summary(page), revision.getSpec().getDocument());
+        return new PageDetail(summary(page), revision.getSpec().getDocument(),
+            revision.getSpec().getTheme());
     }
 
     private static PageSummary summary(ThemePage page) {
@@ -547,14 +568,15 @@ public class PageService {
             page.getMetadata().getVersion(), page.getSpec().isThemeLayout(),
             spec.isAuthorizeRequired(), spec.getMembers(), spec.getDraftRevision(),
             spec.getPublishedRevision(),
-            spec.getUpdatedAt(), !Objects.equals(spec.getDraftRevision(), spec.getPublishedRevision()));
+            spec.getUpdatedAt(), !Objects.equals(spec.getDraftRevision(), spec.getPublishedRevision()),
+            spec.getPublishedTheme());
     }
 
     private static RevisionSummary revisionSummary(ThemePageRevision revision) {
         return new RevisionSummary(revision.getMetadata().getName(),
             revision.getMetadata().getCreationTimestamp(), revision.getSpec().getCreatedBy(),
             revision.getSpec().getSource(),
-            revision.getSpec().getParentRevision());
+            revision.getSpec().getParentRevision(), revision.getSpec().getTheme());
     }
 
     private static ResponseStatusException badRequest(String reason) {
