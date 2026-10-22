@@ -100,7 +100,7 @@ const themeWarning = computed(() => {
           class="flex-1"
           @click="emit('preview', item)"
         >
-          管理员预览 ↗
+          预览 ↗
         </VButton>
         <VButton
           v-if="item.publishedRevision"
@@ -109,7 +109,7 @@ const themeWarning = computed(() => {
           class="flex-1"
           @click="emit('visit', item)"
         >
-          访问页面 ↗
+          访问 ↗
         </VButton>
         <VDropdown>
           <VButton ghost size="sm" :disabled="disabled" :aria-label="`${item.title}的操作`">

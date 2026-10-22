@@ -81,8 +81,8 @@ describe('page card', () => {
   it('shows draft state and the admin preview action for an unpublished page', () => {
     const wrapper = mountCard(summary())
     expect(wrapper.text()).toContain('未发布')
-    expect(wrapper.text()).toContain('管理员预览')
-    expect(wrapper.text()).not.toContain('访问页面')
+    expect(wrapper.text()).toContain('预览')
+    expect(wrapper.text()).not.toContain('访问 ↗')
     expect(wrapper.text()).toContain('发布')
     expect(wrapper.text()).not.toContain('更新发布')
   })
@@ -90,8 +90,8 @@ describe('page card', () => {
   it('shows published state with both admin preview and public actions', () => {
     const wrapper = mountCard(summary({ publishedRevision: 'r2', hasUnpublishedChanges: true }))
     expect(wrapper.text()).toContain('有未发布修改')
-    expect(wrapper.text()).toContain('管理员预览')
-    expect(wrapper.text()).toContain('访问页面 ↗')
+    expect(wrapper.text()).toContain('预览 ↗')
+    expect(wrapper.text()).toContain('访问 ↗')
     expect(wrapper.text()).toContain('更新发布')
     expect(wrapper.text()).toContain('取消发布')
   })
@@ -138,9 +138,9 @@ describe('page card', () => {
   it('emits card actions with the page summary', async () => {
     const item = summary({ publishedRevision: 'r2' })
     const wrapper = mountCard(item)
-    const button = wrapper.findAll('button').find((node) => node.text() === '管理员预览 ↗')!
+    const button = wrapper.findAll('button').find((node) => node.text() === '预览 ↗')!
     await button.trigger('click')
-    const visitButton = wrapper.findAll('button').find((node) => node.text() === '访问页面 ↗')!
+    const visitButton = wrapper.findAll('button').find((node) => node.text() === '访问 ↗')!
     await visitButton.trigger('click')
     const itemText = (text: string) => wrapper.findAll('div').find((node) => node.text() === text)!
     await itemText('设置').trigger('click')
