@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { UIMessage, ToolPart } from '@halo-dev/ai-foundation-sdk'
 import type { ChatTurn } from '../../api/clients'
 import type { PageChatQuestion } from '../../api/generated'
-import { buildConversationDisplay, restoreConversation } from '../chat-display'
+import { buildConversationDisplay, reasoningSummary, restoreConversation } from '../chat-display'
 
 const started = '2026-01-01T00:00:00Z'
 function question(id: string, createdAt = started): PageChatQuestion {
@@ -271,5 +271,23 @@ describe('conversation display', () => {
       error: 'connection lost',
     })[0]!
     expect(failed.parts.map((part) => part.active)).toEqual([false, false])
+  })
+})
+
+describe('reasoning summary', () => {
+  it('uses the first visible line once settled, without Markdown emphasis', () => {
+    expect(reasoningSummary('\n\n**Plan** the layout\nthen build it', false)).toBe(
+      'Plan the layout',
+    )
+  })
+  it('follows the latest completed paragraph while streaming', () => {
+    expect(reasoningSummary('First thought\n\nSecond thought\nstill typing', true)).toBe(
+      'Second thought',
+    )
+    // The opening paragraph has not finished, so there is nothing stable to show yet.
+    expect(reasoningSummary('One unfinished paragraph', true)).toBe('')
+  })
+  it('never surfaces the truncation marker as a summary', () => {
+    expect(reasoningSummary('\n（内容已截断）', false)).toBe('')
   })
 })

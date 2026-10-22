@@ -9,8 +9,10 @@ export interface DisplayPart {
   text: string
   active: boolean
   tool?: {
+    name: string
     label: string
     state: 'error' | 'success' | 'default'
+    tone: 'default' | 'error' | 'warn'
     active: boolean
     status: string
     summary: string
@@ -220,18 +222,23 @@ function displayParts(
       ask_user: '确认页面需求',
       update_site_memory: '记忆业务资料',
     }
-    const summary =
+    const rawSummary =
       typeof output.summary === 'string'
         ? output.summary
         : typeof output.error === 'string'
           ? output.error
           : (part as ToolPart).errorText || ''
-    // Failures show their reason inline; "读取完成" is the old history fallback and
-    // repeats the row status, so neither is worth an expander.
-    const openable = !failed && summary.trim() !== '' && summary !== '读取完成'
+    // "读取完成" is the old history fallback; it repeats the row's own state and
+    // would turn every settled restore row into a meaningless summary.
+    const summary = rawSummary === '读取完成' ? '' : rawSummary
+    // A failure keeps its reason readable: the row shows one truncated line, so
+    // the body must stay available even though the call did not succeed.
+    const openable = summary.trim() !== ''
     // The first segment of a read summary is its subject (path, keyword, title),
-    // which tells repeated calls apart without expanding the row.
-    const hint = openable && summary.includes(' · ') ? summary.slice(0, summary.indexOf(' · ')) : ''
+    // which tells repeated calls apart without expanding the row. A failure's
+    // first segment can be the useful part of the error, so it stays inline.
+    const hint =
+      !failed && openable && summary.includes(' · ') ? summary.slice(0, summary.indexOf(' · ')) : ''
     return [
       {
         type: 'tool' as const,
@@ -239,15 +246,21 @@ function displayParts(
         text: '',
         active: false,
         tool: {
+          name: part.toolName,
           label: labels[part.toolName] || '处理页面',
           state: failed ? ('error' as const) : done ? ('success' as const) : ('default' as const),
+          // waiting covers the whole message, so only the unfinished ask_user
+          // call is the one still pending; earlier answered calls stay neutral.
+          tone: failed
+            ? ('error' as const)
+            : waiting && !done && part.toolName === 'ask_user'
+              ? ('warn' as const)
+              : ('default' as const),
           active: active && !done && !failed,
+          // Running rows animate their own text; a failure already reads red, so
+          // only settled outcomes whose meaning is not in the summary keep a suffix.
           status: failed
-            ? part.toolName === 'update_site_memory'
-              ? '未确认保存'
-              : part.toolName === 'get_public_api'
-                ? '读取失败'
-                : '校验未通过'
+            ? ''
             : done
               ? changing && output.staged === false
                 ? '内容未变化'
@@ -256,9 +269,7 @@ function displayParts(
                   : ''
               : waiting && part.toolName === 'ask_user'
                 ? '等待回答'
-                : active
-                  ? '进行中'
-                  : '已结束',
+                : '',
           summary,
           hint,
           openable,
@@ -269,4 +280,45 @@ function displayParts(
   })
   // The same traversal owns pairing and the unmatched remainder.
   return { parts, fallbackQuestions: questions.slice(askUserIndex) }
+}
+
+/**
+ * One-line summary for a collapsed reasoning row. While streaming, the latest
+ * completed paragraph is the most recent readable statement; once settled the
+ * opening line stays stable. Markdown emphasis markers are display noise here.
+ */
+export function reasoningSummary(text: string, active: boolean): string {
+  return (active ? latestParagraphFirstLine(text) : firstLine(text))
+    .replace(/\*\*/g, '')
+    .replace('（内容已截断）', '')
+    .trim()
+}
+
+function firstLine(text: string): string {
+  // Reasoning often opens with a blank line; the first visible statement is
+  // the useful summary.
+  return (
+    text
+      .split('\n')
+      .find((line) => line.trim() !== '')
+      ?.trim() || ''
+  )
+}
+
+function latestParagraphFirstLine(text: string): string {
+  let summary = ''
+  let paragraphStart = 0
+  const separator = /\r?\n(?:[\t ]*\r?\n)+/g
+  while (true) {
+    const nextParagraph = separator.exec(text)
+    const paragraphEnd =
+      nextParagraph === null ? text.length : nextParagraph.index + nextParagraph[0].indexOf('\n')
+    const newline = text.indexOf('\n', paragraphStart)
+    if (newline !== -1 && newline <= paragraphEnd) {
+      const candidate = text.slice(paragraphStart, newline).trim()
+      if (candidate !== '') summary = candidate
+    }
+    if (nextParagraph === null) return summary
+    paragraphStart = nextParagraph.index + nextParagraph[0].length
+  }
 }
