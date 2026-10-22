@@ -60,8 +60,9 @@ public class ContentPolicy {
                 "Use the separate js field and addEventListener, scoped to the page container.",
                 "CSS supports ordinary rules, variables, @media and @supports. No @import, "
                     + "@namespace, @font-face, @keyframes, nested selectors or escape characters.",
-                "CSS is scoped to the page container: body, html and :root selectors are "
-                    + "rewritten to the container, so they cannot style the document itself.",
+                "CSS is scoped to the page container: only bare body, html and :root selectors "
+                    + "are rewritten to it, while other selectors are prefixed with the container, "
+                    + "so body .hero or html body never match. Scope styles with classes.",
                 "Use min-width/max-width media queries instead of range comparisons with <. "
                     + "scroll-behavior and overscroll-behavior are supported.",
                 "Wrap arithmetic inside clamp(), min() and max() in calc(), for example "

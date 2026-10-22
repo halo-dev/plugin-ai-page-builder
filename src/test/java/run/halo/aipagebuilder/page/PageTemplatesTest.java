@@ -5,25 +5,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class PageTemplatesTest {
     @Test
     void standalonePagesLoadTheNormalizeBaselineWithoutTheThemeLayout() throws IOException {
         assertThat(resource("templates/ai-page-builder-standalone.html"))
-            .contains("/plugins/ai-page-builder/assets/modern-normalize.css");
+            .contains("/plugins/ai-page-builder/assets/modern-normalize-3.0.1.css");
         assertThat(resource("templates/ai-page-builder.html")).doesNotContain("modern-normalize");
     }
 
     @Test
     void assetsProxyExposesTheNormalizeBaseline() throws IOException {
         assertThat(resource("extensions/assets-proxy.yaml"))
-            .contains("path: /modern-normalize.css", "filename: modern-normalize.css");
+            .containsPattern(Pattern.compile("- path: /modern-normalize-3\\.0\\.1\\.css\\s+"
+                + "file:\\s+directory: static\\s+filename: modern-normalize-3\\.0\\.1\\.css"));
     }
 
     @Test
     void bundledNormalizeRemovesTheDocumentMargin() throws IOException {
-        assertThat(resource("static/modern-normalize.css")).contains("body {", "margin: 0");
+        assertThat(resource("static/modern-normalize-3.0.1.css"))
+            .containsPattern(Pattern.compile("body\\s*\\{[^}]*margin:\\s*0;", Pattern.DOTALL));
     }
 
     private static String resource(String path) throws IOException {

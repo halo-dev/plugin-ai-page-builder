@@ -2,12 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { VButton } from '@halo-dev/components'
 import { candidatePreview } from '../editor/preview'
-import { loadCardPreview } from '../editor/card-preview'
+import { loadCardPreview, type CardPreview } from '../editor/card-preview'
 
 const props = defineProps<{ name: string; revision: string; title: string }>()
 const emit = defineEmits<{ open: [] }>()
 const root = ref<HTMLElement>()
-const content = ref<{ html: string; css: string }>()
+const content = ref<CardPreview>()
 const loading = ref(false)
 const failed = ref(false)
 const visible = ref(false)
@@ -15,7 +15,9 @@ const width = ref(320)
 let generation = 0
 let observer: IntersectionObserver | undefined
 let resize: ResizeObserver | undefined
-const srcdoc = computed(() => (content.value ? candidatePreview(content.value) : ''))
+const srcdoc = computed(() =>
+  content.value ? candidatePreview(content.value, '', undefined, !content.value.themeLayout) : '',
+)
 const empty = computed(() => !content.value?.html.trim())
 async function load() {
   if (!visible.value) return

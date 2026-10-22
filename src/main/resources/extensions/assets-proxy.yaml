@@ -6,7 +6,7 @@ rules:
   - path: /placeholders/**
     file:
       directory: static/placeholders
-  - path: /modern-normalize.css
+  - path: /modern-normalize-3.0.1.css
     file:
       directory: static
-      filename: modern-normalize.css
+      filename: modern-normalize-3.0.1.css

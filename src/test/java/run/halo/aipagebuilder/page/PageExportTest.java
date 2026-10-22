@@ -56,8 +56,8 @@ class PageExportTest {
                 files.put(entry.getName(), new String(zip.readAllBytes(), StandardCharsets.UTF_8));
             }
         }
-        assertThat(files).containsOnlyKeys("page.json", "page.html", "index.html", "styles.css",
-            "script.js", "README.txt");
+        assertThat(files).containsOnlyKeys("page.json", "page.html", "index.html",
+            "modern-normalize-3.0.1.css", "styles.css", "script.js", "README.txt");
         assertThat(files.get("page.html")).isEqualTo(document.html());
         var metadata = Json.fromJson(files.get("page.json"),
             tools.jackson.databind.JsonNode.class);
@@ -70,7 +70,10 @@ class PageExportTest {
         assertThat(metadata.has("members")).isFalse();
         assertThat(files.get("styles.css")).isEqualTo(document.css());
         assertThat(files.get("script.js")).isEqualTo(document.js());
-        assertThat(files.get("index.html")).contains("&lt;unsafe &amp; title&gt;", document.html(), "href=\"styles.css\"", "src=\"script.js\"")
+        assertThat(files.get("index.html")).contains("&lt;unsafe &amp; title&gt;", document.html(),
+                "href=\"modern-normalize-3.0.1.css\"", "href=\"styles.css\"", "src=\"script.js\"")
             .doesNotContain("<unsafe & title>", document.js());
+        assertThat(files.get("modern-normalize-3.0.1.css"))
+            .contains("box-sizing: border-box", "margin: 0");
     }
 }

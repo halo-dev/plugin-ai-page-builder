@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../api/clients', () => ({ aiPageBuilderApi: { getPage: mocks.get } }))
 
 function detail(revision: string, html = '<p>Preview</p>') {
-  return { page: { draftRevision: revision }, document: { html, css: 'p { color: red; }' } }
+  return {
+    page: { draftRevision: revision, themeLayout: false },
+    document: { html, css: 'p { color: red; }' },
+  }
 }
 
 beforeEach(() => {
@@ -26,6 +29,7 @@ describe('card preview loading', () => {
     expect(await loadCardPreview('page', 'r2')).toEqual({
       html: '<p>Preview</p>',
       css: 'p { color: red; }',
+      themeLayout: false,
     })
     expect(mocks.get).toHaveBeenCalledOnce()
     await loadCardPreview('page', 'r3')
