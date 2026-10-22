@@ -219,6 +219,7 @@ public class PageChatService {
         if (referenceTools != null) run.copy.references(referenceTools.session(null, true));
         run.copy.questions(run::ask);
         run.copy.sessionRename(title -> renameSessionFromTool(run, title));
+        run.copy.slugAvailability(slug -> pages.checkSlugAvailable(slug, name));
         if (checkpoint != null) {
             var spec = checkpoint.getSpec();
             run.copy.title(spec.getTitle());
@@ -377,7 +378,8 @@ public class PageChatService {
         var timeoutSignal = Sinks.<Void>empty();
         var timeout = run.copy.timeBudget.deadline(RUN_TIMEOUT, AiGenerationException.Reason.RUN_TIMEOUT)
             .doOnError(timeoutSignal::tryEmitError).subscribe();
-        return run.copy.prepareThemeBrief().then(run.persistCheckpoint()).then(Mono.defer(() ->
+        return run.copy.prepareThemeBrief().then(run.copy.validateRestoredSlug())
+            .then(run.persistCheckpoint()).then(Mono.defer(() ->
                 run.is(PageRun.State.INTERRUPTED) ? run.finish(null) : converse(name, run, history,
                 run.request.prompt(), timeoutSignal.asMono())))
             .onErrorResume(error -> {
@@ -408,7 +410,7 @@ public class PageChatService {
                         var reason = failureReason(error, run.copy);
                         var message = error instanceof ResponseStatusException status
                             && status.getStatusCode().value() == 409
-                            ? "页面已变化，请重新载入（409）" : reason.message;
+                            ? conflictMessage(status) : reason.message;
                         switch (reason) {
                             case STEP_LIMIT, TOOL_LIMIT, DATA_LIMIT, CONTEXT_LIMIT, TOKEN_LIMIT,
                                 TRUNCATED, RUN_TIMEOUT -> run.incomplete(message);
@@ -837,6 +839,15 @@ public class PageChatService {
 
     private static ResponseStatusException conflict(String message) {
         return new ResponseStatusException(HttpStatus.CONFLICT, message);
+    }
+
+    private static String conflictMessage(ResponseStatusException error) {
+        return switch (java.util.Objects.requireNonNullElse(error.getReason(), "")) {
+            case "Page changed; reload before saving" -> "页面已变化，请重新载入（409）";
+            case "Slug already exists" -> "访问路径已被占用，请选择其他路径后继续生成";
+            case "" -> "保存发生冲突，请重新载入后检查页面与访问路径（409）";
+            default -> error.getReason();
+        };
     }
 
 }

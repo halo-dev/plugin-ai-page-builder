@@ -181,6 +181,65 @@ class PageWorkingCopyTest {
     }
 
     @Test
+    void slugLookupAndCheckpointKeepCancelledSubscribersAndLaterEditsInOrder() {
+        var copy = copy("<p>old</p>", "");
+        var lookup = reactor.core.publisher.Sinks.<Void>empty();
+        var checked = new ArrayList<String>();
+        var saved = new ArrayList<String>();
+        copy.slugAvailability(slug -> {
+            checked.add(slug);
+            return "first".equals(slug) ? lookup.asMono() : Mono.empty();
+        });
+        copy.checkpoint(() -> Mono.fromRunnable(() -> saved.add(copy.slug())));
+
+        copy.setSlug(Map.of("slug", "first")).subscribe().dispose();
+        var second = copy.setSlug(Map.of("slug", "second")).toFuture();
+        assertThat(checked).containsExactly("first");
+        assertThat(saved).isEmpty();
+        assertThat(second).isNotDone();
+        lookup.tryEmitEmpty();
+
+        assertThat(second.join()).containsEntry("valid", true);
+        assertThat(checked).containsExactly("first", "second");
+        assertThat(saved).containsExactly("first", "second");
+        assertThat(copy.slug()).isEqualTo("second");
+    }
+
+    @Test
+    void closingWhileSlugLookupIsPendingPreventsLateStaging() {
+        var copy = copy("<p>old</p>", "");
+        var lookup = reactor.core.publisher.Sinks.<Void>empty();
+        var writes = new AtomicInteger();
+        copy.slugAvailability(slug -> lookup.asMono());
+        copy.checkpoint(() -> Mono.fromRunnable(writes::incrementAndGet));
+        var pending = copy.setSlug(Map.of("slug", "activity")).toFuture();
+        var closing = copy.closeEdits().toFuture();
+        assertThat(closing).isNotDone();
+
+        lookup.tryEmitEmpty();
+
+        assertThatThrownBy(pending::join).hasCauseInstanceOf(IllegalStateException.class);
+        closing.join();
+        assertThat(copy.slug()).isNull();
+        assertThat(writes).hasValue(0);
+    }
+
+    @Test
+    void slugLookupFailureDoesNotAcknowledgeOrStageAnUncheckedPath() {
+        var copy = copy("<p>old</p>", "");
+        copy.setSlug(Map.of("slug", "previous")).block();
+        var writes = new AtomicInteger();
+        copy.checkpoint(() -> Mono.fromRunnable(writes::incrementAndGet));
+        copy.slugAvailability(slug -> Mono.error(new IllegalStateException("lookup unavailable")));
+
+        assertThatThrownBy(() -> copy.setSlug(Map.of("slug", "activity")).block())
+            .hasMessage("lookup unavailable");
+
+        assertThat(copy.slug()).isEqualTo("previous");
+        assertThat(writes).hasValue(0);
+    }
+
+    @Test
     void semanticSlugIsStagedWithTitleAndContent() {
         var copy = copy("<p>old</p>", "");
         assertThat(copy.read()).containsEntry("slug", "").containsEntry("canSetSlug", true);

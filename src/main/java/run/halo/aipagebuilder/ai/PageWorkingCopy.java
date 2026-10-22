@@ -21,6 +21,7 @@ public final class PageWorkingCopy {
     private boolean restored;
     private java.util.function.Supplier<Mono<Void>> checkpoint = Mono::empty;
     private java.util.function.Supplier<String> taskContext = () -> "";
+    private java.util.function.Function<String, Mono<Void>> slugAvailability = slug -> Mono.empty();
     private Mono<Void> edits = Mono.empty();
     private boolean closed;
     private boolean checkpointFailed;
@@ -50,6 +51,10 @@ public final class PageWorkingCopy {
 
     void taskContext(java.util.function.Supplier<String> context) { this.taskContext = context; }
 
+    void slugAvailability(java.util.function.Function<String, Mono<Void>> check) {
+        this.slugAvailability = check;
+    }
+
     String recoveryContext() {
         return "Continue the original page task from the verified working copy below. "
             + "Previous successful tools are already applied; never replay them or memory writes. "
@@ -65,24 +70,37 @@ public final class PageWorkingCopy {
             + "\nCan set path: " + canSetSlug
             + "\nUnresolved invalid update: " + hasInvalidUpdate()
             + "\nUnresolved invalid path: " + hasInvalidSlugUpdate()
+            + (hasInvalidSlugUpdate()
+                ? "\nRepair the path with set_page_slug before changing content or claiming completion."
+                : "")
             + "\nPrior tool outcomes: " + Json.toJson(summaries());
     }
 
     /** Serialize edits and await durable storage before acknowledging a tool result. */
     private Mono<Map<String, Object>> edit(java.util.function.Supplier<Map<String, Object>> mutation) {
+        return edit(Mono.just(true), ignored -> mutation.get());
+    }
+
+    private <T> Mono<Map<String, Object>> edit(Mono<T> preparation,
+        java.util.function.Function<T, Map<String, Object>> mutation) {
         return Mono.defer(() -> {
             synchronized (this) {
                 if (closed || checkpointFailed) return Mono.error(
                     new AiGenerationException(AiGenerationException.Reason.CHECKPOINT_FAILED));
                 var result = edits.then(Mono.defer(() -> {
-                    final Map<String, Object> output;
                     synchronized (this) {
                         if (closed) return Mono.error(new IllegalStateException("Run has ended"));
-                        output = mutation.get();
                     }
-                    return checkpoint.get().doOnError(error -> {
-                        synchronized (this) { checkpointFailed = true; }
-                    }).thenReturn(output);
+                    return preparation.flatMap(prepared -> {
+                        final Map<String, Object> output;
+                        synchronized (this) {
+                            if (closed) return Mono.error(new IllegalStateException("Run has ended"));
+                            output = mutation.apply(prepared);
+                        }
+                        return checkpoint.get().doOnError(error -> {
+                            synchronized (this) { checkpointFailed = true; }
+                        }).thenReturn(output);
+                    });
                 })).cache();
                 edits = result.then();
                 return result;
@@ -406,22 +424,44 @@ public final class PageWorkingCopy {
     }
 
     public Mono<Map<String, Object>> setSlug(Map<String, Object> input) {
-        return edit(() -> applySlug(input));
-    }
-
-    private Map<String, Object> applySlug(Map<String, Object> input) {
-        call();
-        consume(Json.toJson(input));
-        var tool = "set_page_slug";
-        String error = null;
         var candidate = input != null && input.get("slug") instanceof String raw
             ? raw.trim() : null;
-        if (!canSetSlug) {
-            error = "已有访问路径或已发布的页面不能由 AI 更改路径，请在页面设置中修改";
-        } else if (!PagePaths.allowed(candidate)) {
-            error = "访问路径须为 1–200 个小写字母、数字和连字符，可用 / 分层，且不能使用系统保留路径";
-        }
-        if (error != null) {
+        return edit(Mono.defer(() -> {
+            synchronized (this) {
+                call();
+                consume(Json.toJson(input));
+                if (!canSetSlug) {
+                    return Mono.just("已有访问路径或已发布的页面不能由 AI 更改路径，请在页面设置中修改");
+                }
+                if (!PagePaths.allowed(candidate)) {
+                    return Mono.just("访问路径须为 1–200 个小写字母、数字和连字符，可用 / 分层，且不能使用系统保留路径");
+                }
+            }
+            return checkSlug(candidate);
+        }), error -> applySlug(candidate, error));
+    }
+
+    private Mono<String> checkSlug(String candidate) {
+        return Mono.defer(() -> slugAvailability.apply(candidate)).thenReturn("")
+            .onErrorResume(ResponseStatusException.class, error ->
+                error.getStatusCode().value() == 409
+                    ? Mono.just(java.util.Objects.requireNonNullElse(error.getReason(), "访问路径不可用"))
+                    : Mono.error(error));
+    }
+
+    Mono<Void> validateRestoredSlug() {
+        return Mono.defer(() -> {
+            synchronized (this) {
+                if (!restored || !canSetSlug || slug == null || invalidSlugUpdate) return Mono.empty();
+                var candidate = slug;
+                return edit(checkSlug(candidate), error -> applySlug(candidate, error)).then();
+            }
+        });
+    }
+
+    private Map<String, Object> applySlug(String candidate, String error) {
+        var tool = "set_page_slug";
+        if (!error.isEmpty()) {
             invalidSlugUpdate = true;
             summaries.add(new ChatApi.Tool(tool, "error", error));
             return Map.of("valid", false, "staged", false, "error", error);

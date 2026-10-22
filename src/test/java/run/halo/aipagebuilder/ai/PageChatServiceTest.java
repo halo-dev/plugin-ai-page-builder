@@ -63,6 +63,7 @@ class PageChatServiceTest {
         storage.install();
         when(pages.get("page")).thenReturn(Mono.just(fixture.base));
         when(pages.committedAiRun(anyString(), anyString())).thenReturn(Mono.empty());
+        when(pages.checkSlugAvailable(anyString(), anyString())).thenReturn(Mono.empty());
         when(gateway.available()).thenReturn(Mono.just(true));
         when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any(), any()))
             .thenReturn(Mono.just(fixture.changed));
@@ -460,6 +461,119 @@ class PageChatServiceTest {
         service.start("page", request(), "admin").block().blockLast();
         verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
             anyString(), any(), any(), any());
+    }
+
+    @Test
+    void occupiedPathIsRejectedByTheToolAndCanBeRepairedBeforeCommit() {
+        usePageWithoutPath();
+        useOccupiedSlug("activity");
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setSlug(Map.of("slug", "activity")).doOnNext(result -> {
+                assertThat(result).containsEntry("valid", false).containsEntry("staged", false);
+                assertThat(result.get("error").toString()).contains("activity", "已被占用");
+                assertThat(copy.slug()).isNull();
+                assertThat(copy.hasInvalidSlugUpdate()).isTrue();
+                assertThat(checkpoints.values()).singleElement().satisfies(checkpoint ->
+                    assertThat(checkpoint.getSpec().isInvalidSlugUpdate()).isTrue());
+            }).then(copy.setSlug(Map.of("slug", "personal-activity")))
+                .then(copy.update(Map.of("html", "<p>Generated activity</p>")))
+                .thenMany(Flux.empty());
+        });
+
+        service.start("page", request(), "admin").block().blockLast();
+
+        assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), eq("personal-activity"), any(), any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void resumeRevalidatesOccupiedPathWithoutLosingGeneratedContent(boolean repair) {
+        usePageWithoutPath();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setSlug(Map.of("slug", "activity"))
+                .then(copy.update(Map.of("html", "<p>Generated activity</p>")))
+                .thenMany(Flux.empty());
+        });
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), eq("activity"), any(), any()))
+            .thenReturn(Mono.error(new ResponseStatusException(
+                org.springframework.http.HttpStatus.CONFLICT, "Slug already exists")));
+        service.start("page", request(), "admin").block().blockLast();
+        var saved = service.checkpoint("page", "page", "admin").block();
+        var next = UUID.randomUUID().toString();
+        useOccupiedSlug("activity");
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next),
+            eq("old-revision"), eq("personal-activity"), any(), any()))
+            .thenReturn(Mono.just(fixture.changed));
+        doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            assertThat(copy.document().html()).isEqualTo("<p>Generated activity</p>");
+            assertThat(copy.hasInvalidSlugUpdate()).isTrue();
+            assertThat(copy.recoveryContext()).contains("activity", "已被占用", "set_page_slug");
+            return repair ? copy.setSlug(Map.of("slug", "personal-activity"))
+                .thenMany(Flux.empty()) : Flux.empty();
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+
+        service.start("page", resumeRequest(saved, next), "admin").block().blockLast();
+
+        assertThat(service.result("page", next).block().status())
+            .isEqualTo(repair ? "completed" : "failed");
+        if (repair) {
+            verify(pages).saveAi(eq("page"), eq(1L), eq(saved.document()), eq("admin"), eq(next),
+                eq("old-revision"), eq("personal-activity"), any(), any());
+        } else {
+            verify(pages, never()).saveAi(eq("page"), any(), any(), anyString(), eq(next),
+                anyString(), any(), any(), any());
+            assertThat(service.checkpoint("page", "page", "admin").block().document())
+                .isEqualTo(saved.document());
+        }
+    }
+
+    private void useOccupiedSlug(String slug) {
+        var occupied = new ThemePage();
+        var metadata = new run.halo.app.extension.Metadata();
+        metadata.setName("other-page");
+        occupied.setMetadata(metadata);
+        occupied.setSpec(new ThemePage.Spec());
+        occupied.getSpec().setSlug(slug);
+        when(client.listAll(eq(ThemePage.class), any(), any())).thenAnswer(i ->
+            run.halo.aipagebuilder.QueryTestSupport.matches(i.getArgument(1),
+                field -> "spec.slug".equals(field) ? slug : null)
+                ? Flux.just(occupied) : Flux.empty());
+        var realPages = new PageService(client, policy, mock(PageImportReviewService.class), themes);
+        doAnswer(i -> realPages.checkSlugAvailable(i.getArgument(0), i.getArgument(1)))
+            .when(pages).checkSlugAvailable(anyString(), anyString());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "Slug already exists", "访问路径“activity”已被占用，请选择其他路径"
+    })
+    void commitConflictPreservesTheActualCauseAndRecoverableContent(String reason) {
+        usePageWithoutPath();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setSlug(Map.of("slug", "activity"))
+                .then(copy.update(Map.of("html", "<p>Generated activity</p>")))
+                .thenMany(Flux.empty());
+        });
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), eq("activity"), any(), any()))
+            .thenReturn(Mono.error(new ResponseStatusException(
+                org.springframework.http.HttpStatus.CONFLICT, reason)));
+
+        service.start("page", request(), "admin").block().blockLast();
+
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("failed");
+        assertThat(result.error()).contains("访问路径", "已被占用").doesNotContain("页面已变化");
+        var saved = service.checkpoint("page", "page", "admin").block();
+        assertThat(saved.document().html()).isEqualTo("<p>Generated activity</p>");
+        assertThat(saved.recovery().canResume()).isTrue();
     }
 
     @Test
