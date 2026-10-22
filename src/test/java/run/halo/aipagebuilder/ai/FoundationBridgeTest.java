@@ -244,7 +244,7 @@ class FoundationBridgeTest {
             "title", "公司介绍页"));
         assertThat(copy.summaries()).extracting(ChatApi.Tool::name).contains("rename_session");
         assertThat(captured.get().getSystem())
-            .contains("call rename_session before any other tool");
+            .contains("Use rename_session on the first user turn", "routine follow-up edits");
     }
 
     @Test

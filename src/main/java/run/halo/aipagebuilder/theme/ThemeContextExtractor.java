@@ -257,7 +257,7 @@ public class ThemeContextExtractor {
                     "th:data-theme", "th:data-theme-light", "th:data-theme-dark")) {
                     if (element.hasAttr(attribute)) {
                         omitted(path, "dynamic_expression", element.normalName() + "@"
-                            + attribute + "：动态设计值未求值，请读取此处源码并继承主题值");
+                            + attribute + "：动态设计值未求值，静态源码不包含运行时设置值");
                     }
                 }
                 if (Set.of("div", "main", "article", "section", "body").contains(element.normalName())) {
@@ -898,8 +898,8 @@ public class ThemeContextExtractor {
             }
             note("静态 CSS 不能确定访客当前模式；未读取主题设置、存储或执行脚本，动态条件可能未展开。");
             note(rootStates.isEmpty()
-                ? "颜色模式 unknown：优先继承主题颜色或使用配对的前景/背景后备，不自动生成 prefers-color-scheme。"
-                : "已识别显式根条件：优先主题变量和根状态，不使用 prefers-color-scheme 覆盖手动模式。");
+                ? "颜色模式 unknown：未识别到显式根条件，访客当前模式未知。"
+                : "已识别显式根条件，详见 colorMode.rootStates。");
             var colorMode = new ThemeStyleContext.ColorMode(rootStates.isEmpty() ? "unknown" : "explicit",
                 List.copyOf(rootStates.values()), List.copyOf(colorEvidence));
             var uiStack = new ThemeStyleContext.UiStack(List.copyOf(frameworks),

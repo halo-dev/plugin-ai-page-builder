@@ -472,7 +472,7 @@ class ThemeContextExtractorTest {
                 java.util.List.of("btn")));
         assertThat(context.brief()).contains("theme-earth", "main.shell", ".prose",
             "layout content slot", "main.layout-shell", "Main landmark",
-            "not a landing-page container", "Tailwind CSS", "btn");
+            "not a required landing-page container", "Tailwind CSS", "btn");
         assertThat(ThemeStyleContext.unavailable().brief()).isEmpty();
         assertThat(ThemeStyleContext.standalone().brief()).contains("STANDALONE");
     }
@@ -814,7 +814,7 @@ class ThemeContextExtractorTest {
     void briefWarnsWhenTheLayoutIsNotSupported() {
         var context = new ThemeStyleContext("theme-x", "X", "INVALID",
             java.util.List.of(), java.util.List.of(), "");
-        assertThat(context.brief()).contains("INVALID", "do not rely");
+        assertThat(context.brief()).contains("INVALID", "theme-private styles are unavailable");
     }
 
     private ThemeContextExtractor.Result extractCss(String css) {
