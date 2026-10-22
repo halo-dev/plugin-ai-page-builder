@@ -1,5 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import { candidatePreview } from '../preview'
+
+// Vitest returns an empty module for CSS imports, including ?raw.
+vi.mock('../../../../src/main/resources/static/modern-normalize-3.0.1.css?raw', () => {
+  const uiRoot = process.cwd().endsWith('/ui') ? '..' : '.'
+  return {
+    default: readFileSync(
+      resolve(process.cwd(), uiRoot, 'src/main/resources/static/modern-normalize-3.0.1.css'),
+      'utf8',
+    ),
+  }
+})
 
 describe('AI candidate preview', () => {
   it('keeps style-closing injection inside CSS text', () => {
@@ -54,6 +67,28 @@ describe('AI candidate preview', () => {
         .className,
     ).toBe('')
     document.documentElement.className = ''
+  })
+  it('mirrors the standalone normalize baseline before the page CSS', () => {
+    const page = { html: '<p>正文</p>', css: 'body { margin: 0 auto }' }
+    const doc = new DOMParser().parseFromString(
+      candidatePreview(page, '', undefined, true),
+      'text/html',
+    )
+    const styles = [...doc.querySelectorAll('style')]
+    expect(styles).toHaveLength(2)
+    expect(styles[0]?.textContent).toContain('box-sizing: border-box')
+    expect(styles[0]?.textContent).toContain('font-family:')
+    expect(styles[0]?.textContent).toContain('system-ui')
+    expect(styles[0]?.textContent).toContain('margin: 0')
+    expect(styles[1]?.textContent).toBe(page.css)
+    expect(doc.body.hasAttribute('style')).toBe(false)
+  })
+  it('leaves theme-layout previews without the standalone baseline', () => {
+    const page = { html: '<p>正文</p>', css: 'p { color: red }' }
+    const doc = new DOMParser().parseFromString(candidatePreview(page), 'text/html')
+    const styles = [...doc.querySelectorAll('style')]
+    expect(styles).toHaveLength(1)
+    expect(styles[0]?.textContent).toBe(page.css)
   })
   it('places restrictive CSP before content and preserves candidate markup', () => {
     const source = candidatePreview({ html: '<h2>候选</h2>', css: 'h2 {color:red}' })

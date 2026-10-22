@@ -11,10 +11,11 @@ const props = defineProps<{
   device: PreviewDevice
   previewCss: string
   rootState?: PreviewRootState
+  themeLayout: boolean
 }>()
 const source = computed(() =>
   props.preview.content
-    ? candidatePreview(props.preview.content, props.previewCss, props.rootState)
+    ? candidatePreview(props.preview.content, props.previewCss, props.rootState, !props.themeLayout)
     : '',
 )
 const status = computed(

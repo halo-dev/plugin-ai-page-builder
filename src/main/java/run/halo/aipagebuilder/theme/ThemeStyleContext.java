@@ -39,8 +39,10 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
     public String brief() {
         if ("STANDALONE".equals(layoutState)) {
             return "Theme mount: STANDALONE. This page renders without the theme layout, header, "
-                + "footer or theme CSS variables; provide complete self-contained styles, exactly one main, "
-                + "and border-box sizing for the page root, descendants and pseudo-elements.";
+                + "footer or theme CSS variables; provide complete self-contained styles and exactly one main. "
+                + "modern-normalize is already loaded (document margin, border-box sizing, base fonts), "
+                + "so do not write document-level resets; only bare body, html and :root selectors are "
+                + "rewritten to the page container, so scope other styles with classes.";
         }
         if (themeName == null) return "";
         if (!"SUPPORTED".equals(layoutState)) {
@@ -187,8 +189,12 @@ public record ThemeStyleContext(String themeName, String displayName, String lay
     /** Page setting: render without the theme layout, so no theme styles or variables exist. */
     public static ThemeStyleContext standalone() {
         return new ThemeStyleContext(null, null, "STANDALONE", List.of(), List.of(
-            "此页面设置为独立渲染，不套用主题 layout：没有站点 header/footer、主题基础样式或 CSS 变量，"
-                + "必须提供完整自包含的样式（盒模型、字体栈、配色与响应式规则）。",
+            "此页面设置为独立渲染，不套用主题 layout：没有站点 header/footer、主题基础样式或 CSS 变量。"
+                + "渲染时已引入 modern-normalize 基线（盒模型、body margin、基础字体栈、表单控件字体），"
+                + "无需重复全局 reset；页面 CSS 会被限定到页面容器，仅裸 body/html/:root 选择器会重写为容器，"
+                + "其他选择器会被加上容器前缀（例如 body .hero 会变成 #容器 body .hero 而失效），"
+                + "请用类选择器限定样式。"
+                + "仍需提供页面配色、字体与响应式规则。",
             "无主题亮暗模式契约；如需暗色适配可自行使用 prefers-color-scheme。"), "",
             ColorMode.unknown(), ContentSlot.empty(), UiStack.empty());
     }

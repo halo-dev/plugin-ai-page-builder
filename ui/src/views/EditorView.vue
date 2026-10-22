@@ -356,6 +356,7 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
                 :device="device"
                 :preview-css="themeContext?.previewCss || ''"
                 :root-state="rootState"
+                :theme-layout="detail.page.themeLayout"
               />
               <RuntimePreview
                 v-if="view === 'runtime'"

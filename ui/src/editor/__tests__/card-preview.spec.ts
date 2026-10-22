@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../api/clients', () => ({ aiPageBuilderApi: { getPage: mocks.get } }))
 
 function detail(revision: string, html = '<p>Preview</p>') {
-  return { page: { draftRevision: revision }, document: { html, css: 'p { color: red; }' } }
+  return {
+    page: { draftRevision: revision },
+    document: { html, css: 'p { color: red; }' },
+  }
 }
 
 beforeEach(() => {

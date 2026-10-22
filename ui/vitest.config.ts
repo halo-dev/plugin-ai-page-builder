@@ -11,6 +11,16 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: {
+    fs: {
+      // The preview imports the plugin's vendored normalize as ?raw so both
+      // renderers share one baseline file.
+      allow: [
+        fileURLToPath(new URL('./', import.meta.url)),
+        fileURLToPath(new URL('../src/main/resources/static', import.meta.url)),
+      ],
+    },
+  },
   test: {
     environment: 'jsdom',
     server: { deps: { inline: ['@halo-dev/ai-foundation-sdk'] } },
