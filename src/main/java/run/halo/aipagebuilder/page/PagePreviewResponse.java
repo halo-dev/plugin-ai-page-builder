@@ -6,6 +6,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.DataNode;
+import org.jsoup.nodes.Element;
 import org.reactivestreams.Publisher;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -100,9 +102,14 @@ record PagePreviewResponse(ServerResponse delegate, URI documentUri, String chil
     private static String host(String html, URI base, String policy) {
         var child = Jsoup.parse(html);
         child.select("base").remove();
-        child.head().prependElement("base").attr("href", base.toASCIIString());
+        var baseElement = child.head().prependElement("base");
+        baseElement.attr("href", base.toASCIIString());
         child.head().prependElement("meta").attr("http-equiv", "Content-Security-Policy")
             .attr("content", policy);
+        // Run before any theme script so startup storage access succeeds in the opaque origin.
+        var shim = new Element("script").attr("data-ai-page-builder", "preview-storage");
+        shim.appendChild(new DataNode(PreviewStorageShim.BODY));
+        baseElement.after(shim);
         var source = Base64.getEncoder().encodeToString(
             child.outerHtml().getBytes(StandardCharsets.UTF_8));
         var host = Jsoup.parse("<!doctype html><html><head><meta charset='utf-8'>"

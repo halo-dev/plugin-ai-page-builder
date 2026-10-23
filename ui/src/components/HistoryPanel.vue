@@ -92,8 +92,9 @@ const previewLink = computed(() =>
 )
 const previewSrc = computed(() => (view.value === 'preview' ? previewLink.value : ''))
 // Load the revision preview directly, exactly like the "运行" tab: the server sets a
-// sandbox CSP (opaque origin, public APIs only), and the iframe adds allow-scripts without
-// allow-same-origin. Scripts run in isolation, and theme assets load via the CORS filter.
+// sandbox CSP (opaque origin, public APIs and feeds only), and the iframe adds allow-scripts
+// without allow-same-origin. Scripts run in isolation, and theme assets load via the CORS
+// filter.
 const {
   loading: previewLoading,
   error: previewError,

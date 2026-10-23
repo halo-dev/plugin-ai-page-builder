@@ -2,6 +2,7 @@ package run.halo.aipagebuilder.page;
 
 import java.net.URI;
 import java.util.List;
+import java.util.stream.Stream;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
@@ -14,6 +15,9 @@ import run.halo.aipagebuilder.model.PageDocument;
 /** Owns preview isolation, including the request used during deferred template rendering. */
 @Component
 public class PagePreview {
+    /** Public site documents that theme widgets fetch without exposing any API. */
+    private static final List<String> PUBLIC_PATHS =
+        List.of("/rss.xml", "/feed.xml", "/sitemap.xml", "/feed/");
     private final PageRenderer renderer;
     private final PublicApiCatalog publicApiCatalog;
     private final PageOrigins origins;
@@ -52,8 +56,9 @@ public class PagePreview {
         // Resources resolve against the origin actually serving the preview, which can
         // differ from the configured external URL used for public links.
         var base = origins.servingOrigin(request);
+        var paths = Stream.concat(allowedPrefixes().stream(), PUBLIC_PATHS.stream()).toList();
         var sources = base == null ? List.<String>of()
-            : allowedPrefixes().stream().map(prefix -> base + prefix).distinct().toList();
+            : paths.stream().map(prefix -> base + prefix).distinct().toList();
         // A trailing slash also allows resources below a configured deployment sub-path.
         var resourceSources = base == null ? "'unsafe-inline'" : base + "/ 'unsafe-inline'";
         var connectSources = sources.isEmpty() ? "'none'" : String.join(" ", sources);

@@ -261,7 +261,10 @@ class PageEndpointTest {
         assertThat(response.name()).isEqualTo("theme:custom-ai-page-builder");
         assertThat(response.model()).isEqualTo(getResponse.model());
         assertThat(response.headers().getFirst("Content-Security-Policy"))
-            .contains("sandbox allow-scripts", "connect-src 'none'").doesNotContain("allow-same-origin");
+            .contains("sandbox allow-scripts",
+                "connect-src http://localhost/rss.xml http://localhost/feed.xml "
+                    + "http://localhost/sitemap.xml http://localhost/feed/")
+            .doesNotContain("allow-same-origin");
         assertThat(getResponse.headers().getFirst("Content-Security-Policy"))
             .isEqualTo(response.headers().getFirst("Content-Security-Policy"));
         var view = (PageRenderer.PageView) response.model().get("aiPageBuilder");

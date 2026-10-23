@@ -102,6 +102,9 @@ class PagePreviewIsolationTest {
             .doesNotContain(token, "wrong.test");
         var child = Jsoup.parse(childHtml);
         assertThat(child.select("base")).hasSize(1);
+        // The storage shim must precede every theme script in the opaque-origin document.
+        assertThat(child.selectFirst("script").attr("data-ai-page-builder"))
+            .isEqualTo("preview-storage");
         var childPolicy = child.selectFirst("meta[http-equiv=Content-Security-Policy]")
             .attr("content");
         assertThat(childPolicy).contains("base-uri " + safeUri, "frame-src 'none'",
@@ -142,8 +145,11 @@ class PagePreviewIsolationTest {
             .doesNotContain("<iframe");
         assertThat(exchange.getResponse().getHeaders().getFirst("Content-Security-Policy"))
             .isEqualTo(response.headers().getFirst("Content-Security-Policy"))
-            .contains("sandbox allow-scripts", "connect-src 'none'", "base-uri 'none'",
-                "frame-src 'none'").doesNotContain("allow-same-origin");
+            .contains("sandbox allow-scripts",
+                "connect-src https://example.test/rss.xml https://example.test/feed.xml "
+                    + "https://example.test/sitemap.xml https://example.test/feed/",
+                "base-uri 'none'", "frame-src 'none'")
+            .doesNotContain("allow-same-origin", "/apis/");
     }
 
     private static void assertClean(ServerWebExchange exchange, URI uri) {
