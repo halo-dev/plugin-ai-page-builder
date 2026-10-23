@@ -29,7 +29,7 @@ const open = defineModel<boolean>('open', { default: false })
         {{ annotations[0]?.tag }} · {{ annotations[0]?.summary }}
       </span>
     </button>
-    <div v-if="open" class="mt-1.5 max-h-[40vh] space-y-1.5 overflow-y-auto">
+    <div v-if="open" class="mt-1.5 space-y-1.5">
       <div
         v-for="item in annotations"
         :key="item.id"

@@ -67,7 +67,7 @@ watch(prompt, async () => {
     <textarea
       ref="input"
       v-model="prompt"
-      class="block max-h-[180px] min-h-[64px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13px] leading-6 outline-none placeholder:text-gray-400"
+      class="block max-h-[min(180px,35dvh)] min-h-[64px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13px] leading-6 outline-none placeholder:text-gray-400"
       aria-label="描述你的想法"
       :placeholder="
         steering
