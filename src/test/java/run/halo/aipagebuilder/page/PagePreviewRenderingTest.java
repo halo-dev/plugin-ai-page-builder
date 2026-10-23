@@ -149,6 +149,21 @@ class PagePreviewRenderingTest {
     }
 
     @Test
+    void malformedOriginsAreScopedWithoutFailingThePreview() {
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of());
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/site/p/about")
+            .contextPath("/site").header("Host", "[").build());
+        var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog,
+            requestBasedExternalUrl()).render(ServerRequest.create(exchange,
+            HandlerStrategies.withDefaults().messageReaders()), "about", "about", true, document,
+            "About", "Description").block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+            .contains("connect-src http://[/site/rss.xml");
+    }
+
+    @Test
     void previewPolicyFallsBackToTheExternalUrlWhenTheRequestOriginIsUnknown() {
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
             "/apis/api.content.halo.run/v1alpha1/"));

@@ -108,7 +108,7 @@ class PagePreviewIsolationTest {
         var childPolicy = child.selectFirst("meta[http-equiv=Content-Security-Policy]")
             .attr("content");
         assertThat(childPolicy).contains("base-uri " + safeUri, "frame-src 'none'",
-            "connect-src https://example.test/apis/api.content.halo.run/")
+            "connect-src https://example.test" + prefix + "/apis/api.content.halo.run/")
             .doesNotContain("sandbox", "frame-src data:", "allow-same-origin");
         assertThat(exchange.getResponse().getHeaders().getFirst("Content-Security-Policy"))
             .isEqualTo(expectedPolicy)

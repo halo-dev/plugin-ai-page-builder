@@ -30,4 +30,35 @@ class PreviewStorageShimTest {
         var injected = PreviewStorageShim.inject("<p>fragment</p>");
         assertThat(injected).startsWith("<script").endsWith("<p>fragment</p>");
     }
+
+    @Test
+    void keepsTheDoctypeFirstWhenTheDocumentHasNoHead() {
+        var injected = PreviewStorageShim.inject("<!doctype html><html><body><p>x</p></body>");
+        assertThat(injected).startsWith("<!doctype html><script")
+            .contains("</script><html><body>");
+    }
+
+    @Test
+    void ignoresALiteralHeadInsideAComment() {
+        var injected = PreviewStorageShim.inject(
+            "<!-- example <head> --><html><head><title>x</title></head></html>");
+        assertThat(injected).startsWith("<!-- example <head> --><html><head><script")
+            .contains("</script><title>x</title>");
+    }
+
+    @Test
+    void longAttributeValuesDoNotExhaustTheMatcherStack() {
+        var value = "a".repeat(10_000);
+        var injected = PreviewStorageShim.inject(
+            "<html><head data-theme=" + value + "><title>x</title></head></html>");
+        assertThat(injected).startsWith("<html><head data-theme=" + value + "><script");
+    }
+
+    @Test
+    void quotedAttributeValuesDoNotEndTheHeadTagEarly() {
+        var injected = PreviewStorageShim.inject(
+            "<html><head data-label=\"a > b\"><title>x</title></head></html>");
+        assertThat(injected).startsWith("<html><head data-label=\"a > b\"><script")
+            .contains("</script><title>x</title>");
+    }
 }

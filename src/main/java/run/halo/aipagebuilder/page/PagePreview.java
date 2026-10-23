@@ -56,9 +56,11 @@ public class PagePreview {
         // Resources resolve against the origin actually serving the preview, which can
         // differ from the configured external URL used for public links.
         var base = origins.servingOrigin(request);
+        // Public paths live below the context path, so every source must name it too.
+        var origin = scopedOrigin(base, request.requestPath().contextPath().value());
         var paths = Stream.concat(allowedPrefixes().stream(), PUBLIC_PATHS.stream()).toList();
-        var sources = base == null ? List.<String>of()
-            : paths.stream().map(prefix -> base + prefix).distinct().toList();
+        var sources = origin == null ? List.<String>of()
+            : paths.stream().map(prefix -> origin + prefix).distinct().toList();
         // A trailing slash also allows resources below a configured deployment sub-path.
         var resourceSources = base == null ? "'unsafe-inline'" : base + "/ 'unsafe-inline'";
         var connectSources = sources.isEmpty() ? "'none'" : String.join(" ", sources);
@@ -67,6 +69,15 @@ public class PagePreview {
             + " 'unsafe-eval'; style-src " + resourceSources
             + "; img-src * data: blob:; font-src * data:; media-src *"
             + "; connect-src " + connectSources);
+    }
+
+    /** Adds the deployment path the preview document is served under. */
+    private static String scopedOrigin(String base, String contextPath) {
+        if (base == null || contextPath.isEmpty()) return base;
+        // The external URL fallback may already carry the configured path. Compare the
+        // suffix as plain text so a malformed authority or path cannot throw here.
+        var path = base.indexOf('/', base.indexOf("://") + 3);
+        return contextPath.equals(path < 0 ? "" : base.substring(path)) ? base : base + contextPath;
     }
 
     private List<String> allowedPrefixes() {
