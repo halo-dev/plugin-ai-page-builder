@@ -214,7 +214,12 @@ watch(blankPage, () => (activePresetGroup.value = 0))
       @create="createSession"
       @delete="confirmDelete"
     />
-    <div ref="feed" class="min-h-0 flex-1 overflow-auto px-4 py-4" role="log" aria-label="页面对话">
+    <div
+      ref="feed"
+      class="min-h-0 flex-1 overflow-auto px-4 py-4 [@media(min-height:480px)]:min-h-[20%]"
+      role="log"
+      aria-label="页面对话"
+    >
       <div v-if="hasMore" class="mb-4 text-center">
         <button
           type="button"
