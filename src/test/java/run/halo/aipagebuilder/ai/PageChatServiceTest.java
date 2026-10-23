@@ -63,6 +63,7 @@ class PageChatServiceTest {
         storage.install();
         when(pages.get("page")).thenReturn(Mono.just(fixture.base));
         when(pages.committedAiRun(anyString(), anyString())).thenReturn(Mono.empty());
+        when(pages.checkSlugAvailable(anyString(), anyString())).thenReturn(Mono.empty());
         when(gateway.available()).thenReturn(Mono.just(true));
         when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId), eq("old-revision"), any(), any(), any()))
             .thenReturn(Mono.just(fixture.changed));
@@ -463,6 +464,119 @@ class PageChatServiceTest {
     }
 
     @Test
+    void occupiedPathIsRejectedByTheToolAndCanBeRepairedBeforeCommit() {
+        usePageWithoutPath();
+        useOccupiedSlug("activity");
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setSlug(Map.of("slug", "activity")).doOnNext(result -> {
+                assertThat(result).containsEntry("valid", false).containsEntry("staged", false);
+                assertThat(result.get("error").toString()).contains("activity", "已被占用");
+                assertThat(copy.slug()).isNull();
+                assertThat(copy.hasInvalidSlugUpdate()).isTrue();
+                assertThat(checkpoints.values()).singleElement().satisfies(checkpoint ->
+                    assertThat(checkpoint.getSpec().isInvalidSlugUpdate()).isTrue());
+            }).then(copy.setSlug(Map.of("slug", "personal-activity")))
+                .then(copy.update(Map.of("html", "<p>Generated activity</p>")))
+                .thenMany(Flux.empty());
+        });
+
+        service.start("page", request(), "admin").block().blockLast();
+
+        assertThat(service.result("page", runId).block().status()).isEqualTo("completed");
+        verify(pages).saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), eq("personal-activity"), any(), any());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void resumeRevalidatesOccupiedPathWithoutLosingGeneratedContent(boolean repair) {
+        usePageWithoutPath();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setSlug(Map.of("slug", "activity"))
+                .then(copy.update(Map.of("html", "<p>Generated activity</p>")))
+                .thenMany(Flux.empty());
+        });
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), eq("activity"), any(), any()))
+            .thenReturn(Mono.error(new ResponseStatusException(
+                org.springframework.http.HttpStatus.CONFLICT, "Slug already exists")));
+        service.start("page", request(), "admin").block().blockLast();
+        var saved = service.checkpoint("page", "page", "admin").block();
+        var next = UUID.randomUUID().toString();
+        useOccupiedSlug("activity");
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(next),
+            eq("old-revision"), eq("personal-activity"), any(), any()))
+            .thenReturn(Mono.just(fixture.changed));
+        doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            assertThat(copy.document().html()).isEqualTo("<p>Generated activity</p>");
+            assertThat(copy.hasInvalidSlugUpdate()).isTrue();
+            assertThat(copy.recoveryContext()).contains("activity", "已被占用", "set_page_slug");
+            return repair ? copy.setSlug(Map.of("slug", "personal-activity"))
+                .thenMany(Flux.empty()) : Flux.empty();
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+
+        service.start("page", resumeRequest(saved, next), "admin").block().blockLast();
+
+        assertThat(service.result("page", next).block().status())
+            .isEqualTo(repair ? "completed" : "failed");
+        if (repair) {
+            verify(pages).saveAi(eq("page"), eq(1L), eq(saved.document()), eq("admin"), eq(next),
+                eq("old-revision"), eq("personal-activity"), any(), any());
+        } else {
+            verify(pages, never()).saveAi(eq("page"), any(), any(), anyString(), eq(next),
+                anyString(), any(), any(), any());
+            assertThat(service.checkpoint("page", "page", "admin").block().document())
+                .isEqualTo(saved.document());
+        }
+    }
+
+    private void useOccupiedSlug(String slug) {
+        var occupied = new ThemePage();
+        var metadata = new run.halo.app.extension.Metadata();
+        metadata.setName("other-page");
+        occupied.setMetadata(metadata);
+        occupied.setSpec(new ThemePage.Spec());
+        occupied.getSpec().setSlug(slug);
+        when(client.listAll(eq(ThemePage.class), any(), any())).thenAnswer(i ->
+            run.halo.aipagebuilder.QueryTestSupport.matches(i.getArgument(1),
+                field -> "spec.slug".equals(field) ? slug : null)
+                ? Flux.just(occupied) : Flux.empty());
+        var realPages = new PageService(client, policy, mock(PageImportReviewService.class), themes);
+        doAnswer(i -> realPages.checkSlugAvailable(i.getArgument(0), i.getArgument(1)))
+            .when(pages).checkSlugAvailable(anyString(), anyString());
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+        "Slug already exists", "访问路径“activity”已被占用，请选择其他路径"
+    })
+    void commitConflictPreservesTheActualCauseAndRecoverableContent(String reason) {
+        usePageWithoutPath();
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            return copy.setSlug(Map.of("slug", "activity"))
+                .then(copy.update(Map.of("html", "<p>Generated activity</p>")))
+                .thenMany(Flux.empty());
+        });
+        when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(runId),
+            eq("old-revision"), eq("activity"), any(), any()))
+            .thenReturn(Mono.error(new ResponseStatusException(
+                org.springframework.http.HttpStatus.CONFLICT, reason)));
+
+        service.start("page", request(), "admin").block().blockLast();
+
+        var result = service.result("page", runId).block();
+        assertThat(result.status()).isEqualTo("failed");
+        assertThat(result.error()).contains("访问路径", "已被占用").doesNotContain("页面已变化");
+        var saved = service.checkpoint("page", "page", "admin").block();
+        assertThat(saved.document().html()).isEqualTo("<p>Generated activity</p>");
+        assertThat(saved.recovery().canResume()).isTrue();
+    }
+
+    @Test
     void initialGenerationCommitsSemanticPathWithTitleAndContent() {
         usePageWithoutPath();
         when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> Flux.defer(() -> {
@@ -637,6 +751,115 @@ class PageChatServiceTest {
             new PageApi.PageSummary(base.name(), null, base.title(), base.description(), base.version(),
                 base.themeLayout(), false, null, base.draftRevision(), null, base.updatedAt(), true),
             fixture.base.document())));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void pendingSlugLookupEndsOnCancellationOrDeadline(boolean resume, boolean timeout) {
+        var clock = reactor.test.scheduler.VirtualTimeScheduler.getOrSet();
+        var lookup = Sinks.<Void>empty();
+        try {
+            usePageWithoutPath();
+            var request = request();
+            if (resume) {
+                when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                    PageWorkingCopy copy = i.getArgument(3);
+                    return copy.setSlug(Map.of("slug", "activity"))
+                        .then(copy.update(Map.of("html", "<p>Preserve me</p>")))
+                        .thenMany(Flux.error(new AiGenerationException(
+                            AiGenerationException.Reason.TRUNCATED)));
+                });
+                service.start("page", request, "admin").block().blockLast();
+                request = resumeRequest(service.checkpoint("page", "page", "admin").block(),
+                    UUID.randomUUID().toString());
+            }
+            clearInvocations(gateway);
+            var cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+            when(pages.checkSlugAvailable(anyString(), anyString()))
+                .thenReturn(lookup.asMono().doOnCancel(() -> cancelled.set(true)));
+            doAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                return copy.setSlug(Map.of("slug", "activity")).thenMany(Flux.empty());
+            }).when(gateway).chat(anyString(), any(), anyString(), any());
+            var events = service.start("page", request, "admin").block().collectList().toFuture();
+            assertThat(events).isNotDone();
+            if (timeout) {
+                clock.advanceTimeBy(java.time.Duration.ofMinutes(10));
+            } else {
+                service.cancel("page", request.runId()).block();
+            }
+            assertThat(events).isDone();
+            assertThat(cancelled).isTrue();
+            assertThat(service.runs().contains("page")).isFalse();
+            assertThat(service.result("page", request.runId()).block().status())
+                .isEqualTo(timeout ? "incomplete" : "cancelled");
+            if (resume) verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
+                anyString(), any(), any(), any());
+            if (resume && timeout) {
+                assertThat(service.checkpoint("page", "page", "admin").block().document().html())
+                    .isEqualTo("<p>Preserve me</p>");
+            }
+        } finally {
+            lookup.tryEmitEmpty();
+            service.stop();
+            reactor.test.scheduler.VirtualTimeScheduler.reset();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void slugLookupFailureRequiresRepairBeforeCommit(boolean resume, boolean repair) {
+        usePageWithoutPath();
+        var request = request();
+        if (resume) {
+            when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                return copy.setSlug(Map.of("slug", "activity"))
+                    .thenMany(Flux.error(new AiGenerationException(
+                        AiGenerationException.Reason.TRUNCATED)));
+            });
+            service.start("page", request, "admin").block().blockLast();
+            request = resumeRequest(service.checkpoint("page", "page", "admin").block(),
+                UUID.randomUUID().toString());
+            when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(request.runId()),
+                eq("old-revision"), any(), any(), any())).thenReturn(Mono.just(fixture.changed));
+        }
+        clearInvocations(pages);
+        when(pages.checkSlugAvailable(anyString(), anyString()))
+            .thenReturn(Mono.error(new IllegalStateException("lookup unavailable")), Mono.empty());
+        doAnswer(i -> {
+            PageWorkingCopy copy = i.getArgument(3);
+            // The provider turns tool RuntimeExceptions into tool results and may still STOP.
+            return copy.update(Map.of("html", "<p>Before lookup failure</p>"))
+                .then(resume ? Mono.empty() : copy.setSlug(Map.of("slug", "activity")))
+                .onErrorResume(RuntimeException.class, error -> Mono.empty())
+                .then(Mono.defer(() -> {
+                    assertThat(checkpoints.values()).singleElement().satisfies(checkpoint ->
+                        assertThat(checkpoint.getSpec().isInvalidSlugUpdate()).isTrue());
+                    return repair ? copy.setSlug(Map.of("slug", "activity")) : Mono.empty();
+                }))
+                .then(copy.update(Map.of("html", "<p>Final requested content</p>")))
+                .onErrorResume(RuntimeException.class, error -> Mono.empty())
+                .thenMany(Flux.empty());
+        }).when(gateway).chat(anyString(), any(), anyString(), any());
+
+        service.start("page", request, "admin").block().blockLast();
+
+        assertThat(service.result("page", request.runId()).block().status())
+            .isEqualTo(repair ? "completed" : "failed");
+        verify(pages, times(repair ? 2 : 1)).checkSlugAvailable("activity", "page");
+        if (repair) {
+            verify(pages).saveAi(eq("page"), eq(1L),
+                org.mockito.ArgumentMatchers.argThat(document ->
+                    "<p>Final requested content</p>".equals(document.html())),
+                eq("admin"), eq(request.runId()), eq("old-revision"), eq("activity"), any(), any());
+        } else {
+            verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
+                anyString(), any(), any(), any());
+            assertThat(service.checkpoint("page", "page", "admin").block().document().html())
+                .isEqualTo("<p>Final requested content</p>");
+        }
     }
 
     @Test
@@ -881,6 +1104,89 @@ class PageChatServiceTest {
         assertThat(result.status()).isEqualTo("failed");
         assertThat(result.error()).isEqualTo(AiGenerationException.Reason.CALL_FAILED.message);
         assertThat(result.recovery().canResume()).isTrue();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void preparationCompletionWaitsForCancellationPersistence(boolean resume, boolean cancelFails) {
+        usePageWithoutPath();
+        var request = request();
+        var lookup = Sinks.<Void>empty();
+        var theme = Sinks.<run.halo.aipagebuilder.theme.ThemeStyleContext>one();
+        var cancellationWrite = Sinks.<Void>empty();
+        try {
+            if (resume) {
+                when(gateway.chat(anyString(), any(), anyString(), any())).thenAnswer(i -> {
+                    PageWorkingCopy copy = i.getArgument(3);
+                    return copy.setSlug(Map.of("slug", "activity"))
+                        .thenMany(Flux.error(new AiGenerationException(
+                            AiGenerationException.Reason.TRUNCATED)));
+                });
+                service.start("page", request, "admin").block().blockLast();
+                request = resumeRequest(service.checkpoint("page", "page", "admin").block(),
+                    UUID.randomUUID().toString());
+                when(pages.checkSlugAvailable(anyString(), anyString())).thenReturn(lookup.asMono());
+            } else {
+                when(themes.current()).thenReturn(theme.asMono());
+            }
+            clearInvocations(gateway);
+            doAnswer(i -> {
+                PageWorkingCopy copy = i.getArgument(3);
+                return copy.update(Map.of("html", "<p>Continued after cancellation failed</p>"))
+                    .thenMany(Flux.empty());
+            }).when(gateway).chat(anyString(), any(), anyString(), any());
+            when(pages.saveAi(eq("page"), eq(1L), any(), eq("admin"), eq(request.runId()),
+                eq("old-revision"), any(), any(), any())).thenReturn(Mono.just(fixture.changed));
+            var events = service.start("page", request, "admin").block().collectList().toFuture();
+            when(client.update(any(PageChatSession.class))).thenAnswer(i -> {
+                PageChatSession session = i.getArgument(0);
+                var write = Mono.fromSupplier(() -> {
+                    session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+                    stored.put(session.getMetadata().getName(), Json.deepCopy(session));
+                    return session;
+                });
+                return session.getSpec().getActive() != null
+                    && "cancelled".equals(session.getSpec().getActive().status())
+                    ? cancellationWrite.asMono().then(write) : write;
+            });
+            var cancellation = service.cancel("page", request.runId()).toFuture();
+            lookup.tryEmitEmpty();
+            theme.tryEmitValue(run.halo.aipagebuilder.theme.ThemeStyleContext.unavailable());
+            assertThat(cancellation).isNotDone();
+            assertThat(events).isNotDone();
+            verify(gateway, never()).chat(anyString(), any(), anyString(), any());
+
+            if (cancelFails) {
+                cancellationWrite.tryEmitError(new IllegalStateException("storage unavailable"));
+                assertThat(cancellation).isCompletedExceptionally();
+            } else {
+                cancellationWrite.tryEmitEmpty();
+                assertThat(cancellation.join().status()).isEqualTo("cancelled");
+            }
+
+            assertThat(events).isDone();
+            assertThat(events.join()).extracting(event -> event.get("type"))
+                .contains(cancelFails ? "finish" : "abort").doesNotContain("error");
+            assertThat(service.result("page", request.runId()).block().status())
+                .isEqualTo(cancelFails ? "completed" : "cancelled");
+            assertThat(service.runs().contains("page")).isFalse();
+            assertThat(stored.get("page").getSpec().getActive()).isNull();
+            verify(gateway, times(cancelFails ? 1 : 0)).chat(anyString(), any(), anyString(), any());
+            if (cancelFails) {
+                verify(pages).saveAi(eq("page"), eq(1L),
+                    org.mockito.ArgumentMatchers.argThat(document ->
+                        "<p>Continued after cancellation failed</p>".equals(document.html())),
+                    eq("admin"), eq(request.runId()), eq("old-revision"), any(), any(), any());
+            } else {
+                verify(pages, never()).saveAi(anyString(), any(), any(), anyString(), anyString(),
+                    anyString(), any(), any(), any());
+            }
+        } finally {
+            lookup.tryEmitEmpty();
+            theme.tryEmitValue(run.halo.aipagebuilder.theme.ThemeStyleContext.unavailable());
+            cancellationWrite.tryEmitEmpty();
+            service.stop();
+        }
     }
 
     @Test
