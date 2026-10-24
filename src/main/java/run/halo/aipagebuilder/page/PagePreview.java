@@ -15,9 +15,6 @@ import run.halo.aipagebuilder.model.PageDocument;
 /** Owns preview isolation, including the request used during deferred template rendering. */
 @Component
 public class PagePreview {
-    /** Public site documents that theme widgets fetch without exposing any API. */
-    private static final List<String> PUBLIC_PATHS =
-        List.of("/rss.xml", "/feed.xml", "/sitemap.xml", "/feed/");
     private final PageRenderer renderer;
     private final PublicApiCatalog publicApiCatalog;
     private final PageOrigins origins;
@@ -58,7 +55,8 @@ public class PagePreview {
         var base = origins.servingOrigin(request);
         // Public paths live below the context path, so every source must name it too.
         var origin = scopedOrigin(base, request.requestPath().contextPath().value());
-        var paths = Stream.concat(allowedPrefixes().stream(), PUBLIC_PATHS.stream()).toList();
+        var paths = Stream.concat(allowedPrefixes().stream(), PreviewPublicPaths.ALL.stream())
+            .toList();
         var sources = origin == null ? List.<String>of()
             : paths.stream().map(prefix -> origin + prefix).distinct().toList();
         // A trailing slash also allows resources below a configured deployment sub-path.
@@ -73,7 +71,9 @@ public class PagePreview {
 
     /** Adds the deployment path the preview document is served under. */
     private static String scopedOrigin(String base, String contextPath) {
-        if (base == null || contextPath.isEmpty()) return base;
+        if (base == null || contextPath.isEmpty()) {
+            return base;
+        }
         // The external URL fallback may already carry the configured path. Compare the
         // suffix as plain text so a malformed authority or path cannot throw here.
         var path = base.indexOf('/', base.indexOf("://") + 3);

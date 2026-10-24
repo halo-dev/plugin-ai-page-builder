@@ -17,15 +17,13 @@ import run.halo.app.security.AdditionalWebFilter;
  */
 @Component
 public class PreviewAssetCorsFilter implements AdditionalWebFilter {
-    private static final List<String> ASSET_PREFIXES =
-        List.of("/themes/", "/plugins/", "/feed/");
-    private static final List<String> PUBLIC_FILES =
-        List.of("/rss.xml", "/feed.xml", "/sitemap.xml");
+    private static final List<String> ASSET_PREFIXES = List.of("/themes/", "/plugins/");
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         var path = exchange.getRequest().getPath().pathWithinApplication().value();
-        if (ASSET_PREFIXES.stream().anyMatch(path::startsWith) || PUBLIC_FILES.contains(path)) {
+        if (ASSET_PREFIXES.stream().anyMatch(path::startsWith)
+            || PreviewPublicPaths.matches(path)) {
             exchange.getResponse().getHeaders()
                 .set(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         }

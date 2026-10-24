@@ -38,8 +38,10 @@ final class PreviewStorageShim {
                 data.clear();
               },
               key: function (index) {
+                // Web Storage converts the argument to an unsigned long before indexing.
+                index = +index >>> 0;
                 var keys = Array.from(data.keys());
-                return index >= 0 && index < keys.length ? keys[index] : null;
+                return index < keys.length ? keys[index] : null;
               }
             };
             Object.defineProperty(api, 'length', {
@@ -123,7 +125,8 @@ final class PreviewStorageShim {
                     if (!isNaN(parsed)) expires = parsed;
                   }
                 });
-                var expired = maxAge !== null ? maxAge <= 0 : expires !== null && expires < Date.now();
+                var expired = maxAge !== null ? maxAge <= 0
+                  : expires !== null && expires < Date.now();
                 if (expired) delete jar[name];
                 else jar[name] = pair.slice(index + 1).trim();
               }
@@ -143,7 +146,9 @@ final class PreviewStorageShim {
     static String inject(String html) {
         var head = HEAD.matcher(html);
         while (head.find()) {
-            if (head.group().startsWith("<!--")) continue;
+            if (head.group().startsWith("<!--")) {
+                continue;
+            }
             return insertAt(html, head.end());
         }
         // Keep the doctype first so a document without <head> stays in standards mode.
