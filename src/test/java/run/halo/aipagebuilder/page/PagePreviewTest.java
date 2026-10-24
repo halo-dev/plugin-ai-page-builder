@@ -230,7 +230,10 @@ class PagePreviewTest {
             source.substring(source.indexOf(',') + 1)), StandardCharsets.UTF_8));
         assertThat(inner.select("base")).hasSize(1);
         assertThat(inner.selectFirst("base").attr("href")).isEqualTo("https://example.test/");
-        assertThat(inner.selectFirst("script").data()).contains("window.probe");
+        assertThat(inner.selectFirst("script").attr("data-ai-page-builder"))
+            .isEqualTo("preview-storage");
+        assertThat(inner.select("script").stream().map(element -> element.data()).toList())
+            .anyMatch(data -> data.contains("window.probe"));
         assertThat(inner.selectFirst("meta[http-equiv=Content-Security-Policy]").attr("content"))
             .contains("frame-src 'none'");
     }

@@ -10,10 +10,10 @@ import run.halo.app.security.AdditionalWebFilter;
 
 /**
  * Sandboxed previews run in an opaque origin, so the theme CSS, module scripts and fonts they
- * reference are cross-origin CORS requests. Those assets are public, so allow every origin
- * without granting the preview page same-origin access to the site. The response must not
- * depend on the request Origin: shared caches ignore {@code Vary: Origin}, and a cached
- * no-CORS copy would keep breaking the preview.
+ * reference, as well as the feeds their widgets fetch, are cross-origin requests. Those
+ * resources are public, so allow every origin without granting the preview page same-origin
+ * access to the site. The response must not depend on the request Origin: shared caches ignore
+ * {@code Vary: Origin}, and a cached no-CORS copy would keep breaking the preview.
  */
 @Component
 public class PreviewAssetCorsFilter implements AdditionalWebFilter {
@@ -22,7 +22,8 @@ public class PreviewAssetCorsFilter implements AdditionalWebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         var path = exchange.getRequest().getPath().pathWithinApplication().value();
-        if (ASSET_PREFIXES.stream().anyMatch(path::startsWith)) {
+        if (ASSET_PREFIXES.stream().anyMatch(path::startsWith)
+            || PreviewPublicPaths.matches(path)) {
             exchange.getResponse().getHeaders()
                 .set(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
         }

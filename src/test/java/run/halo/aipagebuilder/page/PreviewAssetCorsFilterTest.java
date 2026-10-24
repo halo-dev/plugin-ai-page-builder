@@ -61,6 +61,25 @@ class PreviewAssetCorsFilterTest {
     }
 
     @Test
+    void allowsSandboxedOriginForPublicFeeds() {
+        for (var path : List.of("/rss.xml", "/feed.xml", "/sitemap.xml",
+            "/feed/categories/uncategorized", "/feed/authors/ryan")) {
+            var exchange = exchange(path, "null");
+            filter.filter(exchange, chain).block();
+            assertThat(allowOrigin(exchange)).as(path).isEqualTo("*");
+        }
+    }
+
+    @Test
+    void leavesSimilarPathsUntouched() {
+        for (var path : List.of("/rss.xml.bak", "/feeds", "/sitemap")) {
+            var exchange = exchange(path, "null");
+            filter.filter(exchange, chain).block();
+            assertThat(allowOrigin(exchange)).as(path).isNull();
+        }
+    }
+
+    @Test
     void leavesOtherPathsUntouched() {
         var exchange = exchange("/apis/api.content.halo.run/v1alpha1/posts", "null");
         filter.filter(exchange, chain).block();
