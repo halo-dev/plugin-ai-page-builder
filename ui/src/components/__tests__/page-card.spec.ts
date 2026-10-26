@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { mount } from '@vue/test-utils'
 import PageCard from '../PageCard.vue'
-import type { PageSummary } from '../../api/generated'
+import type { PageChatActiveRun, PageSummary } from '../../api/generated'
 
 vi.mock('@halo-dev/components', async () => {
   const { defineComponent, h } = await import('vue')
@@ -19,7 +19,7 @@ vi.mock('@halo-dev/components', async () => {
     VDropdownItem: {
       props: ['disabled'],
       emits: ['click'],
-      template: '<div @click="$emit(\'click\')"><slot /></div>',
+      template: '<div :data-disabled="disabled" @click="$emit(\'click\')"><slot /></div>',
     },
     VStatusDot: defineComponent({
       props: ['state', 'text'],
@@ -67,9 +67,10 @@ function mountCard(
   item: PageSummary,
   disabled = false,
   currentTheme?: PageSummary['publishedTheme'],
+  run?: PageChatActiveRun,
 ) {
   return mount(PageCard, {
-    props: { item, currentTheme, disabled },
+    props: { item, currentTheme, disabled, run },
     global: {
       stubs: { RouterLink: true, PagePreviewCard: true, PublishPagePopper: SlotStub },
       directives: { 'close-popper': {}, tooltip: {} },
@@ -94,6 +95,70 @@ describe('page card', () => {
     expect(wrapper.text()).toContain('访问 ↗')
     expect(wrapper.text()).toContain('更新发布')
     expect(wrapper.text()).toContain('取消发布')
+  })
+
+  it('shows an active run and disables destructive actions while generating', () => {
+    const run: PageChatActiveRun = {
+      pageName: 'page',
+      sessionId: 'page',
+      runId: 'run',
+      status: 'running',
+      startedAt: '2026-10-26T00:00:00Z',
+    }
+    const wrapper = mountCard(summary({ publishedRevision: 'r2' }), false, undefined, run)
+    expect(wrapper.text()).toContain('AI 生成中')
+    const item = (label: string) =>
+      wrapper.findAll('[data-disabled]').find((element) => element.text() === label)!
+    expect(item('设置').attributes('data-disabled')).toBe('true')
+    expect(item('更新发布').attributes('data-disabled')).toBe('true')
+    expect(item('取消发布').attributes('data-disabled')).toBe('true')
+    expect(item('删除页面').attributes('data-disabled')).toBe('true')
+    expect(item('克隆页面').attributes('data-disabled')).toBe('false')
+  })
+
+  it('shows a waiting run instead of a generating one', () => {
+    const wrapper = mountCard(summary(), false, undefined, {
+      pageName: 'page',
+      sessionId: 'page',
+      runId: 'run',
+      status: 'waiting_for_user',
+      startedAt: '2026-10-26T00:00:00Z',
+      pendingQuestion: {
+        id: 'question',
+        createdAt: '2026-10-26T00:00:00Z',
+        questions: [{ id: 'style', title: '想要什么风格？', options: [], allowCustomAnswer: true }],
+      },
+    })
+    expect(wrapper.text()).toContain('等待回答')
+    expect(wrapper.text()).not.toContain('AI 生成中')
+  })
+
+  it('stops an active run from the action menu', async () => {
+    const item = summary()
+    const wrapper = mountCard(item, false, undefined, {
+      pageName: 'page',
+      sessionId: 'page',
+      runId: 'run',
+      status: 'running',
+      startedAt: '2026-10-26T00:00:00Z',
+    })
+    const stop = wrapper.findAll('div').find((node) => node.text() === '停止生成')!
+    expect(stop.attributes('data-disabled')).toBe('false')
+    await stop.trigger('click')
+    expect(wrapper.emitted('stop')).toEqual([[item]])
+    expect(mountCard(summary()).text()).not.toContain('停止生成')
+  })
+
+  it('does not offer stop while the run is saving', () => {
+    const wrapper = mountCard(summary(), false, undefined, {
+      pageName: 'page',
+      sessionId: 'page',
+      runId: 'run',
+      status: 'committing',
+      startedAt: '2026-10-26T00:00:00Z',
+    })
+    expect(wrapper.text()).toContain('保存中')
+    expect(wrapper.text()).not.toContain('停止生成')
   })
 
   it('shows the relative update time on the card', () => {

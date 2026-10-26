@@ -3,6 +3,7 @@ package run.halo.aipagebuilder.theme;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -69,8 +70,9 @@ public class ThemeContextService {
         if (offset < 0 || offset > 2000 || limit < 1 || limit > 100) {
             return Mono.error(new IllegalArgumentException("Invalid file pagination"));
         }
-        return withTheme(themeName, root -> {
-            var folder = sourcePath(root, directory == null ? "templates" : directory, false);
+        var source = directory == null ? "templates" : directory;
+        return withTheme(themeName, source, root -> {
+            var folder = sourcePath(root, source, false);
             var paths = new ArrayList<String>();
             boolean scanTruncated;
             // Do not follow directory symlinks; also bound traversal work for very large themes.
@@ -106,7 +108,7 @@ public class ThemeContextService {
         if (offset < 0 || offset > MAX_SOURCE_BYTES || limit < 1 || limit > 16 * 1024) {
             return Mono.error(new IllegalArgumentException("Invalid source pagination"));
         }
-        return withTheme(themeName, root -> {
+        return withTheme(themeName, path, root -> {
             var read = readSource(root, path);
             var source = read.text();
             var byteTruncated = read.byteTruncated();
@@ -128,7 +130,7 @@ public class ThemeContextService {
             || offset < 0 || offset > MAX_SOURCE_BYTES || limit < 1 || limit > 20) {
             return Mono.error(new IllegalArgumentException("Invalid source search"));
         }
-        return withTheme(themeName, root -> {
+        return withTheme(themeName, path, root -> {
             var read = readSource(root, path);
             var source = read.text();
             var matches = new ArrayList<Map<String, Object>>();
@@ -163,7 +165,7 @@ public class ThemeContextService {
             StandardCharsets.UTF_8), bytes.length > MAX_SOURCE_BYTES);
     }
 
-    private Mono<Map<String, Object>> withTheme(String name, SourceAction action) {
+    private Mono<Map<String, Object>> withTheme(String name, String source, SourceAction action) {
         return activeThemeName().filter(name::equals)
             .switchIfEmpty(Mono.error(new IllegalStateException("Active theme changed")))
             .flatMap(active -> client.fetch(Theme.class, active))
@@ -175,7 +177,14 @@ public class ThemeContextService {
                 }
                 var path = Path.of(theme.getStatus().getLocation());
                 if (!path.isAbsolute()) throw new IllegalStateException("Invalid theme location");
-                return action.apply(path.toRealPath());
+                var root = path.toRealPath();
+                try {
+                    return action.apply(root);
+                } catch (NoSuchFileException error) {
+                    throw new IllegalArgumentException("主题源码路径不存在。"
+                        + "可通过“查找主题文件”获取实际路径后重试。路径：" + source,
+                        error);
+                }
             }).subscribeOn(Schedulers.boundedElastic()))
             .flatMap(result -> activeThemeName().filter(name::equals)
                 .switchIfEmpty(Mono.error(new IllegalStateException("Active theme changed")))

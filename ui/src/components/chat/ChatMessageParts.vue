@@ -85,11 +85,11 @@ function toolIcon(name: string): Component {
         class="my-0.5"
         :icon="toolIcon(part.tool.name)"
         :title="part.tool.label"
-        :summary="part.tool.hint || part.tool.summary"
-        :status="part.tool.status"
+        :summary="part.tool.tone === 'error' ? '' : part.tool.hint || part.tool.summary"
+        :status="part.tool.tone === 'error' ? '失败' : part.tool.status"
         :tone="part.tool.tone"
         :running="part.tool.active"
-        :expandable="part.tool.openable"
+        :expandable="part.tool.openable && part.tool.tone !== 'error'"
       >
         <p
           class="break-all text-xs leading-5"
@@ -98,6 +98,13 @@ function toolIcon(name: string): Component {
           {{ part.tool.summary }}
         </p>
       </ChatDisclosureRow>
+      <p
+        v-if="part.tool.tone === 'error'"
+        class="mb-1 break-all pl-[22px] text-xs leading-5 text-red-500"
+        data-tool-error
+      >
+        {{ part.tool.summary }}
+      </p>
       <ChatQuestions
         v-if="part.tool.question"
         :question="part.tool.question"

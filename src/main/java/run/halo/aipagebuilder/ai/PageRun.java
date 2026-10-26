@@ -78,6 +78,7 @@ final class PageRun {
     private Mono<Void> checkpointWrites = Mono.empty();
     private boolean answering;
     boolean reserving;
+    private boolean admitted;
     private volatile boolean saveStarted;
     private volatile boolean terminalPersisted;
     private volatile String revision;
@@ -410,6 +411,21 @@ final class PageRun {
                     copy.usage());
                 completeEvents(terminalEvents(page));
             }).then();
+    }
+
+    /** A run can only be stopped after its durable reservation exists. */
+    synchronized void markAdmitted() {
+        admitted = true;
+    }
+
+    synchronized boolean admitted() {
+        return admitted;
+    }
+
+    /** Snapshot for the cross-page run list; the caller must not retain run internals. */
+    synchronized ChatApi.ActiveRun summary(String pageName) {
+        return new ChatApi.ActiveRun(pageName, sessionId, request.runId(), status(), createdAt,
+            state == State.WAITING_FOR_USER && !questions.isEmpty() ? questions.getLast() : null);
     }
 
     synchronized ChatApi.Turn turn() {

@@ -191,6 +191,42 @@ class PageChatServiceTest {
     }
 
     @Test
+    void activeRunsListAdmittedWorkAndBackgroundStartNeedsNoStreamSubscriber() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        service.startBackground("page", request(), "admin").block();
+
+        assertThat(service.activeRuns().block().items()).singleElement().satisfies(active -> {
+            assertThat(active.pageName()).isEqualTo("page");
+            assertThat(active.sessionId()).isEqualTo("page");
+            assertThat(active.runId()).isEqualTo(runId);
+            assertThat(active.status()).isEqualTo("running");
+            assertThat(active.pendingQuestion()).isNull();
+            assertThat(active.startedAt()).isNotNull();
+        });
+
+        service.stop();
+        assertThat(service.activeRuns().block().items()).isEmpty();
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(30)
+    void activeRunsHideRunsWithoutADurableReservation() {
+        when(client.listBy(eq(PageChatTurnRecord.class), any(), any())).thenAnswer(i -> {
+            PageRequest request = i.getArgument(2);
+            return request.getPageSize() > 1
+                ? Mono.never()
+                : Mono.just(new ListResult<>(1, 1, 0, List.of()));
+        });
+
+        var starting = service.start("page", request(), "admin").toFuture();
+        assertThat(service.activeRuns().block().items()).isEmpty();
+
+        // Abandoning the start releases the placeholder without waiting for STOP_TIMEOUT.
+        starting.cancel(true);
+        assertThat(starting.isCancelled()).isTrue();
+    }
+
+    @Test
     @org.junit.jupiter.api.Timeout(30)
     void forcedStopRejectsRequestStillPreparingHistory() {
         var readingHistory = new java.util.concurrent.atomic.AtomicBoolean();

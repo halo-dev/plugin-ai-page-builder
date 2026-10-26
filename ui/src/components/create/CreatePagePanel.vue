@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useMutation } from '@tanstack/vue-query'
 import { useLocalStorage } from '@vueuse/core'
 import { Toast } from '@halo-dev/components'
-import { aiPageBuilderAiApi, aiPageBuilderApi } from '../../api/clients'
+import {
+  aiPageBuilderAiApi,
+  aiPageBuilderApi,
+  aiPageBuilderChatApi,
+  type SilentRequestConfig,
+} from '../../api/clients'
 import { errorMessage } from '../../utils/error'
 import { pageKeys, queryClient } from '../../lib/query-client'
+import { markRunStarted } from '../../lib/pending-runs'
 import { promptPresetGroups } from '../../data/promptPresets'
 import ChatComposer from '../chat/ChatComposer.vue'
 import ManualCreateModal from './ManualCreateModal.vue'
@@ -14,6 +20,7 @@ import ImportPageModal from './ImportPageModal.vue'
 
 defineProps<{ autofocus?: boolean }>()
 
+const route = useRoute()
 const router = useRouter()
 const prompt = ref('')
 // Same storage key as the editor chat, so the choice carries over.
@@ -36,14 +43,69 @@ onMounted(async () => {
 })
 
 const createMutation = useMutation({
-  mutationFn: async () =>
-    (
+  mutationFn: async () => {
+    const detail = (
       await aiPageBuilderApi.createPage({
         createPageRequest: { title: '未命名页面', themeLayout: themeLayout.value },
       })
-    ).data,
-  onSuccess: (detail) => {
+    ).data
+    const text = prompt.value.trim()
+    // Start on the server so the run survives leaving the editor immediately.
+    if (!text || !model.value.trim() || !available.value) return { detail, started: false }
+    const runId = crypto.randomUUID()
+    try {
+      await aiPageBuilderChatApi.startPageChatRun({
+        name: detail.page.name,
+        pageChatRequest: {
+          runId,
+          version: detail.page.version,
+          modelName: model.value,
+          prompt: text,
+        },
+      })
+      markRunStarted(detail.page.name)
+      return { detail, started: true }
+    } catch (e) {
+      // The run may have been admitted even though its response was lost. Query this run
+      // id before letting the editor start a second generation for the same prompt.
+      let status: number | undefined
+      let found = false
+      try {
+        await aiPageBuilderChatApi.getPageChatRun({ name: detail.page.name, runId }, {
+          mute: true,
+          timeout: 5000,
+        } as SilentRequestConfig)
+        found = true
+      } catch (cause) {
+        status = (cause as { response?: { status?: number } }).response?.status
+      }
+      if (found) {
+        markRunStarted(detail.page.name)
+        return { detail, started: true }
+      }
+      // Only a definite 404 proves the start never landed; anything else stays uncertain
+      // and must not authorize another generation.
+      return status === 404
+        ? { detail, started: false, startError: e }
+        : { detail, started: false, unknown: true, startError: e }
+    }
+  },
+  onSuccess: ({ detail, started, startError, unknown }) => {
     void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+    if (started) {
+      Toast.success('已开始生成，可在页面列表查看进度')
+      if (route.name !== 'AiPageBuilderPages') {
+        void router.push({ name: 'AiPageBuilderPages' })
+      }
+      return
+    }
+    if (unknown) {
+      // Submitting the prompt again could generate twice, so let the user inspect first.
+      Toast.info('无法确认生成是否已开始，请在编辑器中检查会话。')
+      void router.push({ name: 'AiPageBuilderEditor', params: { name: detail.page.name } })
+      return
+    }
+    if (startError) Toast.error(errorMessage(startError))
     void router.push({
       name: 'AiPageBuilderEditor',
       params: { name: detail.page.name },

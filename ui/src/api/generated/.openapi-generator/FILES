@@ -23,6 +23,8 @@ models/json-patch-inner.ts
 models/move-operation.ts
 models/mutation-request.ts
 models/page-annotation.ts
+models/page-chat-active-run-list.ts
+models/page-chat-active-run.ts
 models/page-chat-answer-item.ts
 models/page-chat-answer-request.ts
 models/page-chat-checkpoint-detail.ts

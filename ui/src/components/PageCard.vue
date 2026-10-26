@@ -9,13 +9,14 @@ import {
 } from '@halo-dev/components'
 import { utils } from '@halo-dev/ui-shared'
 import IconMore from '~icons/mingcute/more-2-line'
-import type { PageSummary, ThemeRef } from '../api/generated'
+import type { PageChatActiveRun, PageSummary, ThemeRef } from '../api/generated'
 import PagePreviewCard from './PagePreviewCard.vue'
 import PublishPagePopper from './PublishPagePopper.vue'
 
 const props = defineProps<{
   item: PageSummary
   currentTheme?: ThemeRef | null
+  run?: PageChatActiveRun
   disabled?: boolean
 }>()
 const emit = defineEmits<{
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   preview: [item: PageSummary]
   visit: [item: PageSummary]
   settings: [item: PageSummary]
+  stop: [item: PageSummary]
   update: [item: PageSummary]
   unpublish: [item: PageSummary]
   clone: [item: PageSummary]
@@ -36,6 +38,22 @@ const status = computed(() =>
       ? { state: 'warning' as const, text: '有未发布修改' }
       : { state: 'success' as const, text: '已发布' }
     : { state: 'default' as const, text: '未发布' },
+)
+const generating = computed(() => !!props.run)
+const runStatus = computed(() => {
+  switch (props.run?.status) {
+    case 'waiting_for_user':
+      return { text: '等待回答', class: 'bg-amber-50 text-amber-700' }
+    case 'committing':
+      return { text: '保存中', class: 'bg-blue-50 text-blue-700' }
+    default:
+      return { text: 'AI 生成中', class: 'bg-blue-50 text-blue-700' }
+  }
+})
+const runDetail = computed(() =>
+  props.run?.status === 'waiting_for_user'
+    ? props.run.pendingQuestion?.questions?.[0]?.title || '助手正在等待你的回答'
+    : '助手正在后台生成，完成后会自动保存为草稿',
 )
 const updatedAt = computed(() => utils.date.timeAgo(props.item.updatedAt) ?? '')
 const updatedAtFull = computed(() => utils.date.format(props.item.updatedAt))
@@ -81,8 +99,19 @@ const themeWarning = computed(() => {
         {{ item.slug ? '/' + item.slug : '未设置访问路径' }}
       </p>
       <div class="mt-3.5 flex items-center justify-between gap-2">
-        <div class="flex min-w-0 items-center gap-2">
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
           <VStatusDot :state="status.state" :text="status.text" />
+          <span
+            v-if="run"
+            v-tooltip="runDetail"
+            class="shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] leading-4"
+            :class="runStatus.class"
+          >
+            <span
+              class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle"
+              :class="{ 'animate-pulse': run.status !== 'waiting_for_user' }"
+            />{{ runStatus.text }}
+          </span>
           <span
             v-if="themeWarning"
             v-tooltip="themeWarning.detail"
@@ -116,7 +145,19 @@ const themeWarning = computed(() => {
             <IconMore />
           </VButton>
           <template #popper>
-            <VDropdownItem v-close-popper :disabled="disabled" @click="emit('settings', item)">
+            <VDropdownItem
+              v-if="run && run.status !== 'committing'"
+              v-close-popper
+              :disabled="disabled"
+              @click="emit('stop', item)"
+            >
+              停止生成
+            </VDropdownItem>
+            <VDropdownItem
+              v-close-popper
+              :disabled="disabled || generating"
+              @click="emit('settings', item)"
+            >
               设置
             </VDropdownItem>
             <PublishPagePopper
@@ -125,12 +166,17 @@ const themeWarning = computed(() => {
               :title="item.title"
               :slug="item.slug"
               :version="item.version"
-              :disabled="disabled"
+              :disabled="disabled || generating"
               placement="left-start"
             >
               <VDropdownItem :disabled="disabled">发布</VDropdownItem>
             </PublishPagePopper>
-            <VDropdownItem v-else v-close-popper :disabled="disabled" @click="emit('update', item)">
+            <VDropdownItem
+              v-else
+              v-close-popper
+              :disabled="disabled || generating"
+              @click="emit('update', item)"
+            >
               更新发布
             </VDropdownItem>
             <VDropdownItem v-close-popper :disabled="disabled" @click="emit('clone', item)">
@@ -143,7 +189,7 @@ const themeWarning = computed(() => {
             <VDropdownItem
               v-if="item.publishedRevision"
               v-close-popper
-              :disabled="disabled"
+              :disabled="disabled || generating"
               type="danger"
               @click="emit('unpublish', item)"
             >
@@ -152,7 +198,7 @@ const themeWarning = computed(() => {
             <VDropdownItem
               v-close-popper
               type="danger"
-              :disabled="disabled"
+              :disabled="disabled || generating"
               @click="emit('remove', item)"
             >
               删除页面
