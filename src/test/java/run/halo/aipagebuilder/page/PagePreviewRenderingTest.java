@@ -65,7 +65,9 @@ class PagePreviewRenderingTest {
                 + "style-src http://localhost/ 'unsafe-inline'; "
                 + "img-src * data: blob:; font-src * data:; media-src *; connect-src "
                 + "http://localhost/apis/api.content.halo.run/v1alpha1/ "
-                + "http://localhost/apis/api.photo.halo.run/v1alpha1/; "
+                + "http://localhost/apis/api.photo.halo.run/v1alpha1/ "
+                + "http://localhost/rss.xml http://localhost/feed.xml "
+                + "http://localhost/sitemap.xml http://localhost/feed/; "
                 + "base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; "
                 + "form-action 'none'");
         var published = (RenderingResponse) renderer.render(request, "about", "about", themeLayout,
@@ -77,7 +79,7 @@ class PagePreviewRenderingTest {
     }
 
     @Test
-    void previewsWithoutPublicApisBlockEveryConnection() {
+    void previewsWithoutApisKeepOnlyPublicFeeds() {
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of());
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
             .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
@@ -85,7 +87,10 @@ class PagePreviewRenderingTest {
         var preview = (RenderingResponse) previews.render(request, "about", "about", true,
             document, "About", "Description").block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("connect-src 'none'").doesNotContain("allow-same-origin");
+            .contains("connect-src http://localhost/rss.xml http://localhost/feed.xml "
+                + "http://localhost/sitemap.xml http://localhost/feed/;")
+            .doesNotContain("/apis/")
+            .doesNotContain("allow-same-origin");
     }
 
     @Test
@@ -135,11 +140,27 @@ class PagePreviewRenderingTest {
             external).render(request, "about", "about", true, document, "About", "Description").block();
         var policy = preview.headers().getFirst("Content-Security-Policy");
         assertThat(policy)
-            .contains("connect-src http://localhost/apis/api.content.halo.run/v1alpha1/;")
+            .contains("connect-src http://localhost/apis/api.content.halo.run/v1alpha1/ "
+                + "http://localhost/rss.xml")
             .contains("script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'")
             .contains("style-src http://localhost/ 'unsafe-inline'")
             .doesNotContain("pages.example.com");
         assertThat(configuredRenderer.origin(request)).isEqualTo("https://pages.example.com/site");
+    }
+
+    @Test
+    void malformedOriginsAreScopedWithoutFailingThePreview() {
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of());
+        when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
+            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/site/p/about")
+            .contextPath("/site").header("Host", "[").build());
+        var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog,
+            requestBasedExternalUrl()).render(ServerRequest.create(exchange,
+            HandlerStrategies.withDefaults().messageReaders()), "about", "about", true, document,
+            "About", "Description").block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+            .contains("connect-src http://[/site/rss.xml");
     }
 
     @Test
@@ -158,12 +179,13 @@ class PagePreviewRenderingTest {
         var policy = preview.headers().getFirst("Content-Security-Policy");
         assertThat(policy)
             .contains("connect-src "
-                + "https://pages.example.com/site/apis/api.content.halo.run/v1alpha1/;")
+                + "https://pages.example.com/site/apis/api.content.halo.run/v1alpha1/ "
+                + "https://pages.example.com/site/rss.xml")
             .contains("script-src https://pages.example.com/site/ 'unsafe-inline' 'unsafe-eval'");
     }
 
     @Test
-    void previewsBlockApisWhenTheCatalogIsUnavailable() {
+    void previewsKeepPublicFeedsWhenTheCatalogIsUnavailable() {
         when(publicApiCatalog.publicPathPrefixes())
             .thenThrow(new IllegalStateException("接口目录正在变化，请重试"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
@@ -172,7 +194,8 @@ class PagePreviewRenderingTest {
         var preview = (RenderingResponse) previews.render(request, "about", "about", true,
             document, "About", "Description").block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("connect-src 'none'");
+            .contains("connect-src http://localhost/rss.xml")
+            .doesNotContain("/apis/");
     }
 
     private static ExternalUrlSupplier requestBasedExternalUrl() {
