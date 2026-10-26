@@ -20,6 +20,7 @@ import type {
 import { authenticatedChatFetch } from '../api/stream'
 import type { PreparedPage } from '../editor/annotations'
 import { restoreConversation } from '../editor/chat-display'
+import { markRunStarted } from '../lib/pending-runs'
 import { useStreamingPreview, type StreamingPreview } from './useStreamingPreview'
 
 import { activeRunStatuses as activeStatuses, useConversationRun } from './useConversationRun'
@@ -410,6 +411,8 @@ export function usePageChat(options: {
       checkpointPreview.value = undefined
       recovery.value = undefined
       run.begin(request.runId)
+      // Remember the start in case it finishes before the page list is mounted.
+      markRunStarted(options.name)
       lastPrompt.value = text
       chat.clearError()
       const sending = chat.sendMessage({ text })

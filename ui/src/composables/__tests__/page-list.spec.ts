@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { activeRunsKey, pageKeys, queryClient } from '../../lib/query-client'
+import { markRunStarted } from '../../lib/pending-runs'
 import { usePageListQuery } from '../usePageListQuery'
 
 const api = vi.hoisted(() => ({
@@ -57,6 +58,18 @@ describe('page list runs', () => {
     expect(second.text()).toBe('0')
     expect(invalidate).toHaveBeenCalledWith({ queryKey: pageKeys.all })
     second.unmount()
+    invalidate.mockRestore()
+  })
+
+  it('refreshes the list when a locally started run finishes before the first poll', async () => {
+    // The list mounts after the run already completed, so it never sees the run active.
+    api.activeRuns.mockResolvedValue({ data: { items: [] } })
+    markRunStarted('page')
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    const wrapper = mount(Harness)
+    await flushPromises()
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: pageKeys.all })
+    wrapper.unmount()
     invalidate.mockRestore()
   })
 

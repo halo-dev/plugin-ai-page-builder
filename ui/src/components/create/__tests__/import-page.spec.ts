@@ -40,17 +40,24 @@ const mocks = vi.hoisted(() => ({
     >(),
   push: vi.fn<(location: unknown) => unknown>(),
   startRun: vi.fn<(request: unknown) => Promise<unknown>>(),
+  getRun: vi.fn<(request: unknown, options?: unknown) => Promise<unknown>>(),
+  createPage: vi.fn<() => Promise<unknown>>(),
   status: vi.fn<() => Promise<unknown>>(),
   toastError: vi.fn<(message: string) => void>(),
   toastInfo: vi.fn<(message: string) => void>(),
+  toastSuccess: vi.fn<(message: string) => void>(),
 }))
 vi.mock('../../../api/clients', () => ({
   aiPageBuilderApi: {
     importPage: mocks.importPage,
     reviewPageImport: mocks.reviewPageImport,
+    createPage: mocks.createPage,
   },
   aiPageBuilderAiApi: { getAiPageBuilderAiStatus: mocks.status },
-  aiPageBuilderChatApi: { startPageChatRun: mocks.startRun },
+  aiPageBuilderChatApi: {
+    startPageChatRun: mocks.startRun,
+    getPageChatRun: mocks.getRun,
+  },
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ name: 'AiPageBuilderNew' }),
@@ -61,7 +68,11 @@ vi.mock('@halo-dev/components', async (importOriginal) => {
   const { defineComponent, h } = await import('vue')
   return {
     ...original,
-    Toast: { error: mocks.toastError, info: mocks.toastInfo },
+    Toast: {
+      error: mocks.toastError,
+      info: mocks.toastInfo,
+      success: mocks.toastSuccess,
+    },
     VButton: defineComponent({
       props: ['disabled', 'loading'],
       setup:
@@ -80,6 +91,7 @@ beforeEach(() => {
   queryClient.clear()
   mocks.reviewPageImport.mockResolvedValue({ data: report('safe') })
   mocks.importPage.mockResolvedValue({ data: { page: { name: 'imported-page' } } })
+  mocks.createPage.mockResolvedValue({ data: { page: { name: 'new-page', version: 1 } } })
   mocks.status.mockResolvedValue({ data: { available: true, message: '' } })
 })
 
@@ -448,5 +460,89 @@ describe('page archive import', () => {
     await wrapper.get('[role=dialog]').trigger('keyup', { key: 'Escape' })
     await vi.advanceTimersByTimeAsync(250)
     expect(wrapper.emitted('close')).toHaveLength(1)
+  })
+})
+
+const ComposerStub = defineComponent({
+  props: {
+    prompt: { type: String, default: '' },
+    model: { type: String, default: '' },
+  },
+  emits: ['update:prompt', 'update:model', 'send'],
+  setup(_props, { emit }) {
+    return () =>
+      h(
+        'button',
+        {
+          'data-test': 'send',
+          onClick: () => {
+            emit('update:prompt', '生成一个页面')
+            emit('update:model', 'model-a')
+            emit('send')
+          },
+        },
+        'send',
+      )
+  },
+})
+
+function createPanel() {
+  return mount(CreatePagePanel, {
+    global: {
+      stubs: { ChatComposer: ComposerStub, ManualCreateModal: true, teleport: true },
+      components: { FormKit: FormKitStub },
+    },
+  })
+}
+
+describe('background page creation', () => {
+  it('keeps a lost start response as a started run', async () => {
+    mocks.startRun.mockRejectedValue(new Error('proxy error'))
+    mocks.getRun.mockResolvedValue({ data: { runId: 'run', status: 'running' } })
+    const wrapper = createPanel()
+    await flushPromises()
+    await wrapper.get('[data-test=send]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.getRun).toHaveBeenCalledTimes(1)
+    expect(mocks.getRun.mock.calls[0]![1]).toMatchObject({ mute: true })
+    expect(mocks.push).toHaveBeenCalledWith({ name: 'AiPageBuilderPages' })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('已开始生成，可在页面列表查看进度')
+  })
+
+  it('falls back to the editor when the start is definitely missing', async () => {
+    mocks.startRun.mockRejectedValue(new Error('proxy error'))
+    mocks.getRun.mockRejectedValue(
+      Object.assign(new Error('missing'), { response: { status: 404 } }),
+    )
+    const wrapper = createPanel()
+    await flushPromises()
+    await wrapper.get('[data-test=send]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.push).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'AiPageBuilderEditor',
+        state: expect.objectContaining({ aiPrompt: '生成一个页面', aiModel: 'model-a' }),
+      }),
+    )
+    expect(mocks.toastError).toHaveBeenCalled()
+  })
+
+  it('does not resubmit the prompt when the outcome is unknown', async () => {
+    mocks.startRun.mockRejectedValue(new Error('proxy error'))
+    mocks.getRun.mockRejectedValue(
+      Object.assign(new Error('gateway'), { response: { status: 502 } }),
+    )
+    const wrapper = createPanel()
+    await flushPromises()
+    await wrapper.get('[data-test=send]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.push).toHaveBeenCalledWith({
+      name: 'AiPageBuilderEditor',
+      params: { name: 'new-page' },
+    })
+    expect(mocks.toastInfo).toHaveBeenCalledWith('无法确认生成是否已开始，请在编辑器中检查会话。')
   })
 })

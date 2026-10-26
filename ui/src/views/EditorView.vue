@@ -222,8 +222,12 @@ async function saveDraft() {
   }
 }
 function back() {
-  if (agentActive.value && agentConfirmed.value)
-    Toast.info('助手将在后台继续生成，可在页面列表查看进度。')
+  if (agentActive.value)
+    Toast.info(
+      agentConfirmed.value
+        ? '助手将在后台继续生成，可在页面列表查看进度。'
+        : '尚未确认助手已接收本轮生成，离开可能会中断生成。',
+    )
   void router.push({ name: 'AiPageBuilderPages' })
 }
 function preview() {

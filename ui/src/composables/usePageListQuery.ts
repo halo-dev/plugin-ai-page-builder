@@ -3,6 +3,7 @@ import { useRouteQuery } from '@vueuse/router'
 import { useQuery } from '@tanstack/vue-query'
 import { aiPageBuilderApi, aiPageBuilderChatApi, type SilentRequestConfig } from '../api/clients'
 import { activeRunsKey, pageKeys, queryClient } from '../lib/query-client'
+import { takeFinishedStarts } from '../lib/pending-runs'
 
 export function usePageListQuery() {
   const page = useRouteQuery<number>('page', 1, {
@@ -52,9 +53,15 @@ export function usePageListQuery() {
   watch(
     activeRuns,
     (current) => {
+      // Before the first response there is no evidence either way; an immediate call
+      // against an empty cache must not consume locally recorded starts.
+      if (!activeRunsQuery.isSuccess.value) return
       const changed = [...seenActive].some(([name, runId]) => current.get(name)?.runId !== runId)
       seenActive = new Map([...current].map(([name, run]) => [name, run.runId]))
-      if (changed) void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+      // A run started here can finish before this list mounts, leaving no active-to-absent
+      // transition to observe; treat a missing local start as finished instead.
+      if (changed || takeFinishedStarts(current.keys()).length)
+        void queryClient.invalidateQueries({ queryKey: pageKeys.all })
     },
     { immediate: true },
   )
