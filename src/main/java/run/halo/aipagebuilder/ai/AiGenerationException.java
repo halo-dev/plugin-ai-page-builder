@@ -7,7 +7,7 @@ final class AiGenerationException extends RuntimeException {
         MODEL_UNAVAILABLE("model-resolution",
             "AI 模型不可用，请检查 AI Foundation 是否已启用，并配置可用的默认或指定文本模型。"),
         CALL_FAILED("model-call",
-            "AI 生成失败：模型调用未成功，请检查供应商连接、凭据和模型配置后重试。"),
+            "生成过程中发生异常，草稿未更新。请查看本轮工具错误；若没有具体原因，请到 AI Foundation 的用量统计查看失败调用详情后重试。"),
         TRUNCATED("model-finish",
             "本次输出被截断，自动恢复次数已用完。可从已保存的进度继续生成。"),
         RUN_TIMEOUT("run-timeout",
