@@ -214,7 +214,12 @@ watch(blankPage, () => (activePresetGroup.value = 0))
       @create="createSession"
       @delete="confirmDelete"
     />
-    <div ref="feed" class="min-h-0 flex-1 overflow-auto px-4 py-4" role="log" aria-label="页面对话">
+    <div
+      ref="feed"
+      class="min-h-0 flex-1 overflow-auto px-4 py-4 [@media(min-height:480px)]:min-h-[20%]"
+      role="log"
+      aria-label="页面对话"
+    >
       <div v-if="hasMore" class="mb-4 text-center">
         <button
           type="button"
@@ -266,100 +271,103 @@ watch(blankPage, () => (activePresetGroup.value = 0))
       </div>
       <p v-else-if="notice" class="text-xs text-gray-400" role="status">{{ notice }}</p>
     </div>
-    <div class="shrink-0 px-3 pb-3">
-      <AnnotationTray
-        v-model:open="annotationsOpen"
-        :annotations="annotations"
-        :running="running"
-        :disabled="disabled"
-        @remove="emit('removeAnnotation', $event)"
-      />
-      <div
-        v-if="recovery && !running"
-        class="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
-        role="status"
-      >
-        <p>进度已保留，尚未写入草稿。继续生成会使用原模型，开始新一轮调用。</p>
-        <p v-if="resumeBlocked" class="mt-1">{{ resumeBlocked }}</p>
-        <p v-else-if="error" class="mt-1">{{ error }}</p>
-        <div class="mt-2 flex flex-wrap gap-3">
+    <div class="flex min-h-0 flex-col px-3 pb-3">
+      <div class="min-h-0 flex-1 overflow-y-auto">
+        <AnnotationTray
+          v-model:open="annotationsOpen"
+          :annotations="annotations"
+          :running="running"
+          :disabled="disabled"
+          @remove="emit('removeAnnotation', $event)"
+        />
+        <div
+          v-if="recovery && !running"
+          class="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
+          role="status"
+        >
+          <p>进度已保留，尚未写入草稿。继续生成会使用原模型，开始新一轮调用。</p>
+          <p v-if="resumeBlocked" class="mt-1">{{ resumeBlocked }}</p>
+          <p v-else-if="error" class="mt-1">{{ error }}</p>
+          <div class="mt-2 flex flex-wrap gap-3">
+            <button
+              type="button"
+              class="font-medium underline"
+              :disabled="disabled || !canResume"
+              @click="resume"
+            >
+              继续生成
+            </button>
+            <button
+              type="button"
+              class="underline"
+              :disabled="previewLoading || sessionBusy"
+              @click="viewCheckpoint"
+            >
+              {{ viewingCheckpoint ? '返回草稿' : '查看进度' }}
+            </button>
+            <button type="button" class="underline" :disabled="disabled || !canSend" @click="retry">
+              重新生成
+            </button>
+          </div>
+        </div>
+        <div
+          v-if="refreshError"
+          class="mb-2 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
+          role="alert"
+        >
+          <p class="min-w-0 flex-1">{{ refreshError }}</p>
           <button
             type="button"
-            class="font-medium underline"
-            :disabled="disabled || !canResume"
-            @click="resume"
+            class="shrink-0 font-medium underline"
+            :disabled="refreshing || sessionBusy"
+            @click="retryRefresh"
           >
-            继续生成
+            刷新会话
+          </button>
+        </div>
+        <div
+          v-if="error && (!recovery || running)"
+          class="mb-2 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-700"
+          role="alert"
+        >
+          <p class="min-w-0 flex-1">{{ error }}</p>
+          <button
+            v-if="activeRun"
+            type="button"
+            class="shrink-0 font-medium underline"
+            @click="reconcile"
+          >
+            检查运行结果
           </button>
           <button
+            v-else-if="canSend && lastPrompt"
             type="button"
-            class="underline"
-            :disabled="previewLoading || sessionBusy"
-            @click="viewCheckpoint"
+            class="shrink-0 font-medium underline"
+            :disabled="disabled"
+            @click="retry"
           >
-            {{ viewingCheckpoint ? '返回草稿' : '查看进度' }}
+            重试
           </button>
-          <button type="button" class="underline" :disabled="disabled || !canSend" @click="retry">
-            重新生成
+          <button v-else type="button" class="shrink-0 font-medium underline" @click="recover">
+            重新加载会话
+          </button>
+        </div>
+        <div
+          v-if="!loading && !available"
+          class="mb-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-500"
+        >
+          <p class="min-w-0 flex-1">{{ statusMessage || 'AI 服务尚未启用，仍可手动编辑页面。' }}</p>
+          <button
+            type="button"
+            class="shrink-0 font-medium text-gray-700 underline"
+            @click="checkStatus"
+          >
+            重新检测
           </button>
         </div>
       </div>
-      <div
-        v-if="refreshError"
-        class="mb-2 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
-        role="alert"
-      >
-        <p class="min-w-0 flex-1">{{ refreshError }}</p>
-        <button
-          type="button"
-          class="shrink-0 font-medium underline"
-          :disabled="refreshing || sessionBusy"
-          @click="retryRefresh"
-        >
-          刷新会话
-        </button>
-      </div>
-      <div
-        v-if="error && (!recovery || running)"
-        class="mb-2 flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-700"
-        role="alert"
-      >
-        <p class="min-w-0 flex-1">{{ error }}</p>
-        <button
-          v-if="activeRun"
-          type="button"
-          class="shrink-0 font-medium underline"
-          @click="reconcile"
-        >
-          检查运行结果
-        </button>
-        <button
-          v-else-if="canSend && lastPrompt"
-          type="button"
-          class="shrink-0 font-medium underline"
-          :disabled="disabled"
-          @click="retry"
-        >
-          重试
-        </button>
-        <button v-else type="button" class="shrink-0 font-medium underline" @click="recover">
-          重新加载会话
-        </button>
-      </div>
-      <div
-        v-if="!loading && !available"
-        class="mb-2 flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-500"
-      >
-        <p class="min-w-0 flex-1">{{ statusMessage || 'AI 服务尚未启用，仍可手动编辑页面。' }}</p>
-        <button
-          type="button"
-          class="shrink-0 font-medium text-gray-700 underline"
-          @click="checkStatus"
-        >
-          重新检测
-        </button>
-      </div>
       <ChatComposer
+        class="shrink-0"
         v-model:prompt="prompt"
         v-model:model="modelName"
         :disabled="disabled"

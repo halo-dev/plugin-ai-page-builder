@@ -419,13 +419,14 @@ public class PageService {
         });
     }
 
-    private Mono<Void> checkSlugAvailable(String slug, String name) {
+    public Mono<Void> checkSlugAvailable(String slug, String name) {
         return Mono.defer(() -> {
             PagePaths.validate(slug);
             return client.listAll(ThemePage.class, slugOptions(slug), Sort.unsorted())
                 .filter(page -> !Objects.equals(name, page.getMetadata().getName()))
                 .hasElements().flatMap(occupied -> occupied
-                    ? Mono.error(conflict("Slug already exists")) : Mono.empty());
+                    ? Mono.error(conflict("访问路径“" + slug + "”已被占用，请选择其他路径"))
+                    : Mono.empty());
         });
     }
 
