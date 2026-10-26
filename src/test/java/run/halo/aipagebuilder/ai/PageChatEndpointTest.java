@@ -100,6 +100,23 @@ class PageChatEndpointTest {
     }
 
     @Test
+    void listsActiveRunsAndStartsBackgroundRuns() {
+        when(service.activeRuns()).thenReturn(Mono.just(new ChatApi.ActiveRunList(List.of(
+            new ChatApi.ActiveRun("page", "page", "run", "running",
+                java.time.Instant.now(), null)))));
+        when(service.startBackground(eq("page"), any(), eq("admin"))).thenReturn(Mono.empty());
+
+        admin().get().uri("/pages/chat/runs").exchange().expectStatus().isOk()
+            .expectBody().jsonPath("$.items[0].pageName").isEqualTo("page");
+        admin().post().uri("/pages/page/chat/runs")
+            .bodyValue(Map.of("runId", "run", "version", 1, "modelName", "model", "prompt", "Hi"))
+            .exchange().expectStatus().isNoContent();
+
+        WebTestClient.bindToRouterFunction(endpoint.endpoint()).build()
+            .get().uri("/pages/chat/runs").exchange().expectStatus().isForbidden();
+    }
+
+    @Test
     void answersRequireAdminAndBindPageRunQuestionAndActor() {
         when(service.answer(eq("page"), eq("run"), eq("question"), any(), eq("admin")))
             .thenReturn(Mono.just(new ChatApi.Run("run", "running", null, null, null)));

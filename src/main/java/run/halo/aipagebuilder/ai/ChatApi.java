@@ -117,6 +117,13 @@ public final class ChatApi {
         }
     }
 
+    @Schema(name = "PageChatActiveRun", requiredProperties = {"pageName", "sessionId", "runId", "status", "startedAt"})
+    public record ActiveRun(String pageName, String sessionId, String runId, String status,
+                            Instant startedAt, Question pendingQuestion) { }
+
+    @Schema(name = "PageChatActiveRunList", requiredProperties = {"items"})
+    public record ActiveRunList(List<ActiveRun> items) { }
+
     @Schema(name = "PageChatRecovery", requiredProperties = {"sourceRunId", "checkpointVersion", "canResume", "updatedAt"})
     public record Recovery(String sourceRunId, Long checkpointVersion, boolean canResume,
                            String blockedReason, Instant updatedAt) { }

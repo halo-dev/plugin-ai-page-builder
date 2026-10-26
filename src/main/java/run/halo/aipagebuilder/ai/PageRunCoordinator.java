@@ -27,6 +27,7 @@ final class PageRunCoordinator {
     synchronized void start() { stopping = false; }
     synchronized PageRun get(String name) { return active.get(name); }
     synchronized boolean contains(String name) { return active.containsKey(name); }
+    synchronized Map<String, PageRun> snapshot() { return Map.copyOf(active); }
 
     synchronized void reserve(String name, PageRun run) {
         if (stopping) throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "插件正在停止，请稍后重试");

@@ -28,6 +28,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   committed: [page: PageDetail]
   running: [value: boolean]
+  active: [value: boolean]
+  admitted: [value: boolean]
+  confirmed: [value: boolean]
   preview: [value: StreamingPreview | undefined]
   completed: []
   removeAnnotation: [id: string]
@@ -67,6 +70,8 @@ const {
   error,
   notice,
   running,
+  admitted,
+  confirmed,
   activeRun,
   waitingForUser,
   pendingQuestion,
@@ -109,6 +114,15 @@ watch(preview, (value) => emit('preview', value), { immediate: true })
 watch([running, loading], ([value, fetching]) => emit('running', value || fetching), {
   immediate: true,
 })
+// Distinguishes a real run from the initial conversation load: only a run keeps going
+// after the editor closes.
+watch(
+  () => !!activeRun.value,
+  (value) => emit('active', value),
+  { immediate: true },
+)
+watch(admitted, (value) => emit('admitted', value), { immediate: true })
+watch(confirmed, (value) => emit('confirmed', value), { immediate: true })
 // Streaming emits many deltas per paint; coalescing the layout read and the scroll
 // into one animation frame keeps long conversations responsive.
 let scrollFrame = 0

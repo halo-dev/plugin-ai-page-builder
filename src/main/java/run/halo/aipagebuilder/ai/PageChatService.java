@@ -268,6 +268,7 @@ public class PageChatService {
                     }
                     return pages.reserveRun(name, request.version(), () -> client.update(session).then())
                         .then(Mono.defer(() -> {
+                            run.markAdmitted();
                             run.prepared.tryEmitEmpty();
                             if (run.memory != null && checkpoint == null) run.memory.prompt(request.prompt());
                             run.accepted.tryEmitValue(run.events.asFlux());
@@ -295,6 +296,20 @@ public class PageChatService {
                 }
             });
         });
+    }
+
+    /** Runs owned by this process, for the cross-page list. */
+    public Mono<ChatApi.ActiveRunList> activeRuns() {
+        return Mono.fromSupplier(() -> new ChatApi.ActiveRunList(runs.snapshot().entrySet().stream()
+            .filter(entry -> entry.getValue().admitted())
+            .map(entry -> entry.getValue().summary(entry.getKey()))
+            .sorted(java.util.Comparator.comparing(ChatApi.ActiveRun::startedAt))
+            .toList()));
+    }
+
+    /** Accepts a run without keeping an observer attached; execution is independent of SSE. */
+    public Mono<Void> startBackground(String name, ChatApi.Request request, String actor) {
+        return start(name, request, actor).then();
     }
 
     public void start() {

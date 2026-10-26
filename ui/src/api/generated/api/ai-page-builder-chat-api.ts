@@ -24,6 +24,8 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { CreatePageChatSessionRequest } from '../models';
 // @ts-ignore
+import type { PageChatActiveRunList } from '../models';
+// @ts-ignore
 import type { PageChatAnswerRequest } from '../models';
 // @ts-ignore
 import type { PageChatCheckpointDetail } from '../models';
@@ -435,6 +437,43 @@ export const AiPageBuilderChatApiAxiosParamCreator = function (configuration?: C
         },
         /**
          * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listActivePageChatRuns: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/chat/runs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication basicAuth required
+            // http basic authentication required
+            setBasicAuthToObject(localVarRequestOptions, configuration)
+
+            // authentication bearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+
+    
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
          * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -538,6 +577,53 @@ export const AiPageBuilderChatApiAxiosParamCreator = function (configuration?: C
             // verify required parameter 'pageChatRequest' is not null or undefined
             assertParamExists('runPageChat', 'pageChatRequest', pageChatRequest)
             const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/{name}/chat`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication basicAuth required
+            // http basic authentication required
+            setBasicAuthToObject(localVarRequestOptions, configuration)
+
+            // authentication bearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+
+    
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(pageChatRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Starts a run without streaming; results are available from the session and run endpoints
+         * @param {string} name 
+         * @param {PageChatRequest} pageChatRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        startPageChatRun: async (name: string, pageChatRequest: PageChatRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('startPageChatRun', 'name', name)
+            // verify required parameter 'pageChatRequest' is not null or undefined
+            assertParamExists('startPageChatRun', 'pageChatRequest', pageChatRequest)
+            const localVarPath = `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/{name}/chat/runs`
                 .replace(`{${"name"}}`, encodeURIComponent(String(name)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -785,6 +871,17 @@ export const AiPageBuilderChatApiFp = function(configuration?: Configuration) {
         },
         /**
          * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listActivePageChatRuns(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PageChatActiveRunList>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listActivePageChatRuns(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderChatApi.listActivePageChatRuns']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
          * @param {string} name 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -820,6 +917,19 @@ export const AiPageBuilderChatApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.runPageChat(name, pageChatRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AiPageBuilderChatApi.runPageChat']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Starts a run without streaming; results are available from the session and run endpoints
+         * @param {string} name 
+         * @param {PageChatRequest} pageChatRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async startPageChatRun(name: string, pageChatRequest: PageChatRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.startPageChatRun(name, pageChatRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AiPageBuilderChatApi.startPageChatRun']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -931,6 +1041,14 @@ export const AiPageBuilderChatApiFactory = function (configuration?: Configurati
         },
         /**
          * 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listActivePageChatRuns(options?: RawAxiosRequestConfig): AxiosPromise<PageChatActiveRunList> {
+            return localVarFp.listActivePageChatRuns(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
          * @param {AiPageBuilderChatApiListPageChatSessionsRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -955,6 +1073,15 @@ export const AiPageBuilderChatApiFactory = function (configuration?: Configurati
          */
         runPageChat(requestParameters: AiPageBuilderChatApiRunPageChatRequest, options?: RawAxiosRequestConfig): AxiosPromise<string> {
             return localVarFp.runPageChat(requestParameters.name, requestParameters.pageChatRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Starts a run without streaming; results are available from the session and run endpoints
+         * @param {AiPageBuilderChatApiStartPageChatRunRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        startPageChatRun(requestParameters: AiPageBuilderChatApiStartPageChatRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.startPageChatRun(requestParameters.name, requestParameters.pageChatRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * 
@@ -1223,6 +1350,27 @@ export interface AiPageBuilderChatApiRunPageChatRequest {
 }
 
 /**
+ * Request parameters for startPageChatRun operation in AiPageBuilderChatApi.
+ * @export
+ * @interface AiPageBuilderChatApiStartPageChatRunRequest
+ */
+export interface AiPageBuilderChatApiStartPageChatRunRequest {
+    /**
+     * 
+     * @type {string}
+     * @memberof AiPageBuilderChatApiStartPageChatRun
+     */
+    readonly name: string
+
+    /**
+     * 
+     * @type {PageChatRequest}
+     * @memberof AiPageBuilderChatApiStartPageChatRun
+     */
+    readonly pageChatRequest: PageChatRequest
+}
+
+/**
  * Request parameters for steerPageChatRun operation in AiPageBuilderChatApi.
  * @export
  * @interface AiPageBuilderChatApiSteerPageChatRunRequest
@@ -1360,6 +1508,16 @@ export class AiPageBuilderChatApi extends BaseAPI {
 
     /**
      * 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof AiPageBuilderChatApi
+     */
+    public listActivePageChatRuns(options?: RawAxiosRequestConfig) {
+        return AiPageBuilderChatApiFp(this.configuration).listActivePageChatRuns(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
      * @param {AiPageBuilderChatApiListPageChatSessionsRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -1389,6 +1547,17 @@ export class AiPageBuilderChatApi extends BaseAPI {
      */
     public runPageChat(requestParameters: AiPageBuilderChatApiRunPageChatRequest, options?: RawAxiosRequestConfig) {
         return AiPageBuilderChatApiFp(this.configuration).runPageChat(requestParameters.name, requestParameters.pageChatRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Starts a run without streaming; results are available from the session and run endpoints
+     * @param {AiPageBuilderChatApiStartPageChatRunRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     * @memberof AiPageBuilderChatApi
+     */
+    public startPageChatRun(requestParameters: AiPageBuilderChatApiStartPageChatRunRequest, options?: RawAxiosRequestConfig) {
+        return AiPageBuilderChatApiFp(this.configuration).startPageChatRun(requestParameters.name, requestParameters.pageChatRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

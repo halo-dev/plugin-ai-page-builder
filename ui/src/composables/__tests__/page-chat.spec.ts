@@ -396,6 +396,8 @@ describe('persistent page chat', () => {
     await state.recover()
     expect(state.waitingForUser.value).toBe(true)
     expect(state.running.value).toBe(true)
+    // A run recovered from the server was already admitted; leaving the page is safe.
+    expect(state.admitted.value).toBe(true)
     expect(state.sessionBusy.value).toBe(true)
     expect(state.canSend.value).toBe(false)
     expect(state.pendingQuestion.value).toEqual(question)
@@ -570,6 +572,86 @@ describe('persistent page chat', () => {
     finish()
     await sending
   })
+  it('marks a new run admitted only after the server exposes it', async () => {
+    const state = setup()
+    await state.recover()
+    let finish!: () => void
+    sdk.send.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    api.chat.getPageChatRun.mockImplementation((options) => {
+      const { runId } = options as { runId: string }
+      return Promise.reject({ response: { status: 404 }, runId })
+    })
+    const sending = state.send('Write it')
+    await vi.advanceTimersByTimeAsync(0)
+    const runId = state.activeRun.value?.runId
+    expect(runId).toBeTruthy()
+    expect(state.admitted.value).toBe(false)
+
+    api.chat.getPageChatRun.mockImplementation((options) => {
+      const { runId: requested } = options as { runId: string }
+      return requested === runId
+        ? Promise.resolve({ data: { runId, status: 'running' } })
+        : Promise.reject({ response: { status: 404 } })
+    })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(state.admitted.value).toBe(true)
+    expect(state.confirmed.value).toBe(true)
+    finish()
+    await sending
+  })
+  it('keeps probing admission through transient failures', async () => {
+    const state = setup()
+    await state.recover()
+    let finish!: () => void
+    sdk.send.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    api.chat.getPageChatRun.mockRejectedValueOnce(new Error('502'))
+    const sending = state.send('Write it')
+    await vi.advanceTimersByTimeAsync(0)
+    const runId = state.activeRun.value?.runId
+    expect(state.admitted.value).toBe(false)
+
+    api.chat.getPageChatRun.mockImplementation((options) => {
+      const { runId: requested } = options as { runId: string }
+      return Promise.resolve({ data: { runId: requested, status: 'running' } })
+    })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(state.admitted.value).toBe(true)
+    expect(runId).toBeTruthy()
+    finish()
+    await sending
+  })
+  it('unlocks leaving when admission never gets confirmed', async () => {
+    const state = setup()
+    await state.recover()
+    let finish!: () => void
+    sdk.send.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    api.chat.getPageChatRun.mockRejectedValue(new Error('down'))
+    const sending = state.send('Write it')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(state.admitted.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(20_100)
+    expect(state.admitted.value).toBe(true)
+    // The fallback allows leaving but is not proof the run survives the editor.
+    expect(state.confirmed.value).toBe(false)
+    finish()
+    await sending
+  })
+  it('keeps reconciling after a transient failure', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    api.chat.getPageChatRun.mockRejectedValueOnce(new Error('timeout'))
+    await state.reconcile()
+    expect(state.error.value).toBe('timeout 请重新检查运行结果。')
+
+    api.chat.getPageChatRun.mockResolvedValue({
+      data: { runId: 'waiting', status: 'completed', page, revision: 'r2' },
+    })
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(state.error.value).toBe('')
+    expect(state.activeRun.value).toBeUndefined()
+  })
+
   it('loads server history and sends only the bound prompt/version without automatic tool loops', async () => {
     const state = setup()
     await state.recover()

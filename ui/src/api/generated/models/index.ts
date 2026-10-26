@@ -10,6 +10,8 @@ export * from './json-patch-inner';
 export * from './move-operation';
 export * from './mutation-request';
 export * from './page-annotation';
+export * from './page-chat-active-run';
+export * from './page-chat-active-run-list';
 export * from './page-chat-answer-item';
 export * from './page-chat-answer-request';
 export * from './page-chat-checkpoint-detail';
