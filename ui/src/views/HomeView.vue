@@ -15,7 +15,7 @@ import {
 import { utils } from '@halo-dev/ui-shared'
 import IconAddCircle from '~icons/mingcute/add-circle-line'
 import IconFileAi from '~icons/tabler/file-ai'
-import { aiPageBuilderApi, pagePreviewUrl } from '../api/clients'
+import { aiPageBuilderApi, aiPageBuilderChatApi, pagePreviewUrl } from '../api/clients'
 import type { PageSummary } from '../api/generated'
 import { errorMessage } from '../utils/error'
 import { confirmDialog } from '../utils/confirm'
@@ -23,15 +23,26 @@ import { usePageWrites } from '../composables/usePageWrites'
 import { usePageListQuery } from '../composables/usePageListQuery'
 import { usePageSettingsEditor } from '../composables/usePageSettingsEditor'
 import { usePublicSiteUrl } from '../composables/usePublicSiteUrl'
-import { pageKeys, queryClient } from '../lib/query-client'
+import { activeRunsKey, pageKeys, queryClient } from '../lib/query-client'
 import ClonePageModal from '../components/ClonePageModal.vue'
 import PageCard from '../components/PageCard.vue'
 import PageSettings from '../components/PageSettings.vue'
 import CreatePagePanel from '../components/create/CreatePagePanel.vue'
 
 const router = useRouter()
-const { page, size, keyword, status, sort, listQuery, items, total, currentTheme, showToolbar } =
-  usePageListQuery()
+const {
+  page,
+  size,
+  keyword,
+  status,
+  sort,
+  listQuery,
+  items,
+  total,
+  currentTheme,
+  activeRuns,
+  showToolbar,
+} = usePageListQuery()
 const statusItems = [
   { label: '全部', value: undefined },
   { label: '已发布', value: 'published' },
@@ -73,6 +84,21 @@ const exportMutation = useMutation({
     link.remove()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
     Toast.success('已导出保存的草稿')
+  },
+  onError: (e) => Toast.error(errorMessage(e)),
+  queryClient,
+})
+const stopRunMutation = useMutation({
+  mutationFn: async (item: PageSummary) => {
+    const run = activeRuns.value.get(item.name)
+    if (!run) return false
+    await aiPageBuilderChatApi.cancelPageChatRun({ name: item.name, runId: run.runId })
+    return true
+  },
+  onSuccess: (stopped) => {
+    if (stopped) Toast.success('已停止生成')
+    void queryClient.invalidateQueries({ queryKey: activeRunsKey })
+    void queryClient.invalidateQueries({ queryKey: pageKeys.all })
   },
   onError: (e) => Toast.error(errorMessage(e)),
   queryClient,
@@ -181,11 +207,13 @@ const {
         :key="item.name"
         :item="item"
         :current-theme="currentTheme"
+        :run="activeRuns.get(item.name)"
         :disabled="mutating"
         @open="openEditor(item.name)"
         @preview="preview"
         @visit="open"
         @settings="openSettings"
+        @stop="stopRunMutation.mutate"
         @update="publishUpdate"
         @unpublish="confirmUnpublish"
         @clone="cloneTarget = $event"

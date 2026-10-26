@@ -77,6 +77,8 @@ const {
   resetSession,
   writes,
 } = useWorkingDocument()
+// The run keeps going on the server; only the brief pre-admission window must block leaving.
+const agentAdmitted = shallowRef(true)
 const {
   annotations,
   add: addAnnotation,
@@ -170,7 +172,12 @@ async function load() {
 watch(() => route.params.name, load, { immediate: true })
 useUnsavedChangesGuard({
   dirty: () => dirty.value,
-  locked: () => locked.value,
+  blocked: () =>
+    busy.value || preparing.value
+      ? '请等待当前操作完成'
+      : agentRunning.value && !agentAdmitted.value
+        ? '正在提交给助手，请稍候'
+        : '',
   confirm: () => confirmDialog('离开工作台？', '当前修改尚未保存，离开将丢失这些修改。'),
 })
 useEditorShortcuts({
@@ -203,6 +210,10 @@ async function saveDraft() {
   } catch (e) {
     Toast.error(errorMessage(e))
   }
+}
+function back() {
+  if (agentRunning.value) Toast.info('助手将在后台继续生成，可在页面列表查看进度。')
+  void router.push({ name: 'AiPageBuilderPages' })
 }
 function preview() {
   if (!detail.value) return
@@ -284,7 +295,7 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
       :public-url="publicUrl"
       :scripted="!!working?.js"
       :writes="writes"
-      @back="router.push({ name: 'AiPageBuilderPages' })"
+      @back="back"
       @undo="move('undo')"
       @redo="move('redo')"
       @settings="settingsOpen = true"
@@ -349,6 +360,7 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
           @completed="clearAnnotations"
           @preview="streamPreview = $event"
           @running="agentRunning = $event"
+          @admitted="agentAdmitted = $event"
           @committed="adopt($event)"
         />
         <section

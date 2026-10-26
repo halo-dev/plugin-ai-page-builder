@@ -297,6 +297,19 @@ public class PageChatService {
         });
     }
 
+    /** Runs owned by this process, for the cross-page list. */
+    public Mono<ChatApi.ActiveRunList> activeRuns() {
+        return Mono.fromSupplier(() -> new ChatApi.ActiveRunList(runs.snapshot().entrySet().stream()
+            .map(entry -> entry.getValue().summary(entry.getKey()))
+            .sorted(java.util.Comparator.comparing(ChatApi.ActiveRun::startedAt))
+            .toList()));
+    }
+
+    /** Accepts a run without keeping an observer attached; execution is independent of SSE. */
+    public Mono<Void> startBackground(String name, ChatApi.Request request, String actor) {
+        return start(name, request, actor).then();
+    }
+
     public void start() {
         runs.start();
     }

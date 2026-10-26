@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useMutation } from '@tanstack/vue-query'
 import { useLocalStorage } from '@vueuse/core'
 import { Toast } from '@halo-dev/components'
-import { aiPageBuilderAiApi, aiPageBuilderApi } from '../../api/clients'
+import { aiPageBuilderAiApi, aiPageBuilderApi, aiPageBuilderChatApi } from '../../api/clients'
 import { errorMessage } from '../../utils/error'
 import { pageKeys, queryClient } from '../../lib/query-client'
 import { promptPresetGroups } from '../../data/promptPresets'
@@ -14,6 +14,7 @@ import ImportPageModal from './ImportPageModal.vue'
 
 defineProps<{ autofocus?: boolean }>()
 
+const route = useRoute()
 const router = useRouter()
 const prompt = ref('')
 // Same storage key as the editor chat, so the choice carries over.
@@ -36,14 +37,40 @@ onMounted(async () => {
 })
 
 const createMutation = useMutation({
-  mutationFn: async () =>
-    (
+  mutationFn: async () => {
+    const detail = (
       await aiPageBuilderApi.createPage({
         createPageRequest: { title: '未命名页面', themeLayout: themeLayout.value },
       })
-    ).data,
-  onSuccess: (detail) => {
+    ).data
+    const text = prompt.value.trim()
+    // Start on the server so the run survives leaving the editor immediately.
+    if (!text || !model.value.trim() || !available.value) return { detail, started: false }
+    try {
+      await aiPageBuilderChatApi.startPageChatRun({
+        name: detail.page.name,
+        pageChatRequest: {
+          runId: crypto.randomUUID(),
+          version: detail.page.version,
+          modelName: model.value,
+          prompt: text,
+        },
+      })
+      return { detail, started: true }
+    } catch (e) {
+      return { detail, started: false, startError: e }
+    }
+  },
+  onSuccess: ({ detail, started, startError }) => {
     void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+    if (started) {
+      Toast.success('已开始生成，可在页面列表查看进度')
+      if (route.name !== 'AiPageBuilderPages') {
+        void router.push({ name: 'AiPageBuilderPages' })
+      }
+      return
+    }
+    if (startError) Toast.error(errorMessage(startError))
     void router.push({
       name: 'AiPageBuilderEditor',
       params: { name: detail.page.name },

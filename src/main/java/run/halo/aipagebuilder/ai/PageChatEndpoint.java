@@ -84,6 +84,19 @@ public class PageChatEndpoint implements CustomEndpoint {
                 builder -> named(builder, "runPageChat", String.class)
                     .description("Halo UIMessage SSE; page commit is emitted as data-page-committed before finish")
                     .requestBody(requestBodyBuilder().required(true).implementation(ChatApi.Request.class)))
+            .GET("/pages/chat/runs", request -> json(chats.activeRuns()),
+                builder -> builder.operationId("listActivePageChatRuns").tag("AiPageBuilderChat")
+                    .response(responseBuilder().responseCode("200")
+                        .implementation(ChatApi.ActiveRunList.class)))
+            .POST("/pages/{name}/chat/runs", request -> body(request, ChatApi.Request.class)
+                    .flatMap(input -> actor().flatMap(actor -> chats.startBackground(
+                        request.pathVariable("name"), input, actor)))
+                    .then(ServerResponse.noContent().build()),
+                builder -> named(builder, "startPageChatRun", String.class)
+                    .description("Starts a run without streaming; results are available from the session and run endpoints")
+                    .requestBody(requestBodyBuilder().required(true)
+                        .implementation(ChatApi.Request.class))
+                    .response(responseBuilder().responseCode("204")))
             .GET("/pages/{name}/chat/runs/{runId}", request -> json(chats.result(
                     request.pathVariable("name"), request.pathVariable("runId"))),
                 builder -> run(builder, "getPageChatRun"))

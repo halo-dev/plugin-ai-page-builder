@@ -191,6 +191,24 @@ class PageChatServiceTest {
     }
 
     @Test
+    void activeRunsListAdmittedWorkAndBackgroundStartNeedsNoStreamSubscriber() {
+        when(gateway.chat(anyString(), any(), anyString(), any())).thenReturn(Flux.never());
+        service.startBackground("page", request(), "admin").block();
+
+        assertThat(service.activeRuns().block().items()).singleElement().satisfies(active -> {
+            assertThat(active.pageName()).isEqualTo("page");
+            assertThat(active.sessionId()).isEqualTo("page");
+            assertThat(active.runId()).isEqualTo(runId);
+            assertThat(active.status()).isEqualTo("running");
+            assertThat(active.pendingQuestion()).isNull();
+            assertThat(active.startedAt()).isNotNull();
+        });
+
+        service.stop();
+        assertThat(service.activeRuns().block().items()).isEmpty();
+    }
+
+    @Test
     @org.junit.jupiter.api.Timeout(30)
     void forcedStopRejectsRequestStillPreparingHistory() {
         var readingHistory = new java.util.concurrent.atomic.AtomicBoolean();

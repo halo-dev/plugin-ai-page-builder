@@ -28,6 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   committed: [page: PageDetail]
   running: [value: boolean]
+  admitted: [value: boolean]
   preview: [value: StreamingPreview | undefined]
   completed: []
   removeAnnotation: [id: string]
@@ -67,6 +68,7 @@ const {
   error,
   notice,
   running,
+  admitted,
   activeRun,
   waitingForUser,
   pendingQuestion,
@@ -109,6 +111,7 @@ watch(preview, (value) => emit('preview', value), { immediate: true })
 watch([running, loading], ([value, fetching]) => emit('running', value || fetching), {
   immediate: true,
 })
+watch(admitted, (value) => emit('admitted', value), { immediate: true })
 // Streaming emits many deltas per paint; coalescing the layout read and the scroll
 // into one animation frame keeps long conversations responsive.
 let scrollFrame = 0

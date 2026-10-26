@@ -12,6 +12,9 @@ export const queryClient = new QueryClient({
   },
 })
 
+// Kept outside pageKeys.all so finishing a run does not invalidate its own poll.
+export const activeRunsKey = ['ai-page-builder-active-runs'] as const
+
 export const pageKeys = {
   all: ['ai-page-builder'] as const,
   list: (params: { page: number; size: number; keyword: string }) =>

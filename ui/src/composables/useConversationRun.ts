@@ -26,6 +26,8 @@ export function useConversationRun(options: {
   completed?: () => void
 }) {
   const activeRun = shallowRef<PageChatRun>()
+  // Proof that the server admitted the run; a local begin() alone can still be aborted.
+  const admittedRunId = shallowRef<string>()
   const questions = shallowRef<PageChatQuestion[]>([])
   const error = shallowRef('')
   const notice = shallowRef('')
@@ -67,6 +69,7 @@ export function useConversationRun(options: {
     refreshSequence++
     clearTimeout(polling)
     activeRun.value = undefined
+    admittedRunId.value = undefined
     questions.value = []
     error.value = ''
     notice.value = ''
@@ -89,6 +92,8 @@ export function useConversationRun(options: {
     ) {
       begin(run.runId)
       activeRun.value = run
+      // A server snapshot means the run was admitted even if this tab never saw it start.
+      admittedRunId.value = run.runId
     }
     for (const question of restoredQuestions) remember(question)
     if (activeRun.value?.pendingQuestion) remember(activeRun.value.pendingQuestion)
@@ -142,6 +147,7 @@ export function useConversationRun(options: {
     observation++
     if (activeRunStatuses.includes(result.status)) {
       activeRun.value = result
+      admittedRunId.value = result.runId
       error.value = ''
       if (result.pendingQuestion) remember(result.pendingQuestion)
       notice.value =
@@ -183,6 +189,29 @@ export function useConversationRun(options: {
     if (first && result.status === 'completed') options.completed?.()
     await retryRefresh()
   }
+  /**
+   * Wait until the server exposes the run. The request that starts it may not have been
+   * received yet, and aborting before admission discards the run.
+   */
+  async function awaitAdmission(runId: string) {
+    const deadline = Date.now() + 20_000
+    while (
+      !disposed &&
+      activeRun.value?.runId === runId &&
+      admittedRunId.value !== runId &&
+      Date.now() < deadline
+    ) {
+      try {
+        const result = await options.transport.get(runId)
+        if (activeRun.value?.runId === runId && result.runId === runId) admittedRunId.value = runId
+        return
+      } catch (cause) {
+        if ((cause as { response?: { status?: number } }).response?.status !== 404) return
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+  }
+
   async function reconcile() {
     const run = activeRun.value
     if (!run || disposed) return
@@ -259,6 +288,8 @@ export function useConversationRun(options: {
   })
   return {
     activeRun: computed(() => activeRun.value),
+    admitted: computed(() => !!activeRun.value && admittedRunId.value === activeRun.value.runId),
+    awaitAdmission,
     questions: computed(() => questions.value),
     waitingForUser: computed(() => activeRun.value?.status === 'waiting_for_user'),
     pendingQuestion: computed(() => activeRun.value?.pendingQuestion),

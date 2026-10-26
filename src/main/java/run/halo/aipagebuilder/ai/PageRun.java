@@ -412,6 +412,12 @@ final class PageRun {
             }).then();
     }
 
+    /** Snapshot for the cross-page run list; the caller must not retain run internals. */
+    synchronized ChatApi.ActiveRun summary(String pageName) {
+        return new ChatApi.ActiveRun(pageName, sessionId, request.runId(), status(), createdAt,
+            state == State.WAITING_FOR_USER && !questions.isEmpty() ? questions.getLast() : null);
+    }
+
     synchronized ChatApi.Turn turn() {
         return new ChatApi.Turn(request.runId(), actor, createdAt, request.prompt(), text.toString(),
             copy.summaries(), status(), revision, error, display.snapshot(status(), copy.memoryOutcomes()),

@@ -1,8 +1,8 @@
 import { computed, watch } from 'vue'
 import { useRouteQuery } from '@vueuse/router'
 import { useQuery } from '@tanstack/vue-query'
-import { aiPageBuilderApi } from '../api/clients'
-import { pageKeys, queryClient } from '../lib/query-client'
+import { aiPageBuilderApi, aiPageBuilderChatApi } from '../api/clients'
+import { activeRunsKey, pageKeys, queryClient } from '../lib/query-client'
 
 export function usePageListQuery() {
   const page = useRouteQuery<number>('page', 1, {
@@ -30,6 +30,27 @@ export function usePageListQuery() {
     keepPreviousData: true,
     queryClient,
   })
+  const activeRunsQuery = useQuery({
+    queryKey: activeRunsKey,
+    queryFn: async () => (await aiPageBuilderChatApi.listActivePageChatRuns()).data,
+    refetchInterval: 2000,
+    queryClient,
+  })
+  const activeRuns = computed(
+    () => new Map((activeRunsQuery.data.value?.items || []).map((run) => [run.pageName, run])),
+  )
+  // A finished run changes the page's draft and thumbnail; refresh the cards once it leaves.
+  let seenActive = new Set<string>()
+  // Seed from cached runs: on remount the watcher would otherwise miss the runs already listed.
+  watch(
+    activeRuns,
+    (current) => {
+      const finished = [...seenActive].filter((name) => !current.has(name))
+      seenActive = new Set(current.keys())
+      if (finished.length) void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+    },
+    { immediate: true },
+  )
   const items = computed(() => listQuery.data.value?.items || [])
   const total = computed(() => listQuery.data.value?.total || 0)
   const currentTheme = computed(() => listQuery.data.value?.currentTheme)
@@ -43,5 +64,17 @@ export function usePageListQuery() {
       listQuery.isLoading.value ||
       listQuery.isError.value,
   )
-  return { page, size, keyword, status, sort, listQuery, items, total, currentTheme, showToolbar }
+  return {
+    page,
+    size,
+    keyword,
+    status,
+    sort,
+    listQuery,
+    items,
+    total,
+    currentTheme,
+    activeRuns,
+    showToolbar,
+  }
 }

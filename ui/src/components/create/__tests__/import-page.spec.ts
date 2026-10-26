@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
       ) => Promise<unknown>
     >(),
   push: vi.fn<(location: unknown) => unknown>(),
+  startRun: vi.fn<(request: unknown) => Promise<unknown>>(),
   status: vi.fn<() => Promise<unknown>>(),
   toastError: vi.fn<(message: string) => void>(),
   toastInfo: vi.fn<(message: string) => void>(),
@@ -49,8 +50,12 @@ vi.mock('../../../api/clients', () => ({
     reviewPageImport: mocks.reviewPageImport,
   },
   aiPageBuilderAiApi: { getAiPageBuilderAiStatus: mocks.status },
+  aiPageBuilderChatApi: { startPageChatRun: mocks.startRun },
 }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ name: 'AiPageBuilderNew' }),
+  useRouter: () => ({ push: mocks.push }),
+}))
 vi.mock('@halo-dev/components', async (importOriginal) => {
   const original = await importOriginal<typeof import('@halo-dev/components')>()
   const { defineComponent, h } = await import('vue')

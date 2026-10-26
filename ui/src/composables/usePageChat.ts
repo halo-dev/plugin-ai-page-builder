@@ -83,6 +83,8 @@ export function usePageChat(options: {
   })
   const {
     activeRun,
+    admitted: runAdmitted,
+    awaitAdmission,
     questions,
     waitingForUser,
     pendingQuestion,
@@ -179,6 +181,8 @@ export function usePageChat(options: {
     ]
   })
   const running = computed(() => !!activeRun.value || chat.isLoading.value)
+  // Leaving is safe only once the server owns the run; no active run is trivially safe.
+  const admitted = computed(() => !activeRun.value || runAdmitted.value)
   const canSend = computed(
     () =>
       available.value &&
@@ -397,7 +401,9 @@ export function usePageChat(options: {
       run.begin(request.runId)
       lastPrompt.value = text
       chat.clearError()
-      await chat.sendMessage({ text })
+      const sending = chat.sendMessage({ text })
+      void awaitAdmission(request.runId)
+      await sending
       await reconcile()
       return !error.value
     } catch (e) {
@@ -483,7 +489,9 @@ export function usePageChat(options: {
       streamPreview.seedBaseline(saved.document)
       lastPrompt.value = request.prompt
       chat.clearError()
-      await chat.sendMessage({ text: '继续生成' })
+      const sending = chat.sendMessage({ text: '继续生成' })
+      void awaitAdmission(request.runId)
+      await sending
       await reconcile()
       return !error.value
     } catch (e) {
@@ -595,6 +603,7 @@ export function usePageChat(options: {
     error,
     notice,
     running,
+    admitted,
     preparing,
     activeRun,
     waitingForUser,

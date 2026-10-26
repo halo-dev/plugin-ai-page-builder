@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   clone: vi.fn<(...args: unknown[]) => unknown>(),
   export: vi.fn<(...args: unknown[]) => unknown>(),
   create: vi.fn<(...args: unknown[]) => unknown>(),
+  activeRuns: vi.fn<(...args: unknown[]) => unknown>(),
+  startRun: vi.fn<(...args: unknown[]) => unknown>(),
+  cancelRun: vi.fn<(...args: unknown[]) => unknown>(),
   status: vi.fn<(...args: unknown[]) => unknown>(),
   push: vi.fn<(location: unknown) => void>(),
   submit: vi.fn<() => void>(),
@@ -23,6 +26,11 @@ vi.mock('../../api/clients', () => ({
     exportPage: mocks.export,
   },
   aiPageBuilderAiApi: { getAiPageBuilderAiStatus: mocks.status },
+  aiPageBuilderChatApi: {
+    listActivePageChatRuns: mocks.activeRuns,
+    startPageChatRun: mocks.startRun,
+    cancelPageChatRun: mocks.cancelRun,
+  },
   pagePreviewUrl: (name: string) => `/preview/${name}`,
   getPublicSiteUrl: () => Promise.resolve('https://www.example.com'),
 }))
@@ -112,6 +120,9 @@ beforeEach(() => {
   mocks.list.mockResolvedValue({ data: { items: [], total: 0 } })
   mocks.create.mockResolvedValue({ data: { page: { name: 'created' } } })
   mocks.status.mockResolvedValue({ data: { available: true, message: '' } })
+  mocks.activeRuns.mockResolvedValue({ data: { items: [] } })
+  mocks.startRun.mockResolvedValue({ data: undefined })
+  mocks.cancelRun.mockResolvedValue({ data: { runId: 'run', status: 'cancelled' } })
 })
 
 describe('page creation', () => {
@@ -352,6 +363,70 @@ describe('page creation', () => {
     })
     wrapper.unmount()
   })
+  it('starts the run on the server and returns to the list when a model is selected', async () => {
+    localStorage.setItem('ai-page-builder:model-name', 'tool-model')
+    mocks.create.mockResolvedValue({ data: { page: { name: 'created', version: 3 } } })
+    const wrapper = mount(HomeView, { global: { stubs: { FormKit, SearchInput } } })
+    try {
+      await flushPromises()
+      await wrapper
+        .findAll('button')
+        .find((button) => button.text() === '公司介绍')!
+        .trigger('click')
+      const prompt = wrapper.get('textarea').element.value
+      await wrapper.get('button[aria-label="发送"]').trigger('click')
+      await flushPromises()
+      expect(mocks.startRun).toHaveBeenCalledWith({
+        name: 'created',
+        pageChatRequest: expect.objectContaining({
+          version: 3,
+          modelName: 'tool-model',
+          prompt,
+        }),
+      })
+      expect(mocks.push).toHaveBeenCalledWith({ name: 'AiPageBuilderPages' })
+    } finally {
+      localStorage.clear()
+      wrapper.unmount()
+    }
+  })
+
+  it('stops a background run from the page list', async () => {
+    mocks.list.mockResolvedValue({
+      data: {
+        items: [{ name: 'original', slug: 'original', title: 'Original', version: 1 }],
+        total: 1,
+      },
+    })
+    mocks.activeRuns.mockResolvedValue({
+      data: {
+        items: [
+          {
+            pageName: 'original',
+            sessionId: 'original',
+            runId: 'run',
+            status: 'running',
+            startedAt: '2026-10-26T00:00:00Z',
+          },
+        ],
+      },
+    })
+    const wrapper = mount(HomeView, {
+      global: {
+        stubs: { FormKit, SearchInput, PagePreviewCard: true, RouterLink: true },
+        directives: { 'close-popper': {} },
+      },
+    })
+    await flushPromises()
+    await wrapper
+      .findAll('div')
+      .find((node) => node.text() === '停止生成')!
+      .trigger('click')
+    await flushPromises()
+    expect(mocks.cancelRun).toHaveBeenCalledWith({ name: 'original', runId: 'run' })
+    wrapper.unmount()
+  })
+
   it('keeps a manual title-only creation entry and submits through the FormKit node', async () => {
     const wrapper = mount(HomeView, { global: { stubs: { FormKit, SearchInput } } })
     await flushPromises()
