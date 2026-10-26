@@ -18,7 +18,8 @@ class ChatFailureReasonTest {
             assertThat(PageChatService.failureReason(new AiGenerationException(reason), copy)).isEqualTo(reason);
         }
         assertThat(PageChatService.failureReason(new RuntimeException("private-response"), copy).message)
-            .doesNotContain("private-response");
+            .contains("工具错误", "AI Foundation", "用量统计")
+            .doesNotContain("private-response", "凭据", "供应商连接");
     }
 
     @Test

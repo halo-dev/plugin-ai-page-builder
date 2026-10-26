@@ -230,13 +230,16 @@ function displayParts(
           : (part as ToolPart).errorText || ''
     // "读取完成" is the old history fallback; it repeats the row's own state and
     // would turn every settled restore row into a meaningless summary.
-    const summary = rawSummary === '读取完成' ? '' : rawSummary
-    // A failure keeps its reason readable: the row shows one truncated line, so
-    // the body must stay available even though the call did not succeed.
+    const summary =
+      failed && !rawSummary.trim()
+        ? '工具执行未完成，未收到具体错误信息。请查看本轮结束提示。'
+        : rawSummary === '读取完成'
+          ? ''
+          : rawSummary
+    // Failures are shown in full below the row; successful details remain collapsible.
     const openable = summary.trim() !== ''
     // The first segment of a read summary is its subject (path, keyword, title),
-    // which tells repeated calls apart without expanding the row. A failure's
-    // first segment can be the useful part of the error, so it stays inline.
+    // which tells repeated calls apart without expanding the row.
     const hint =
       !failed && openable && summary.includes(' · ') ? summary.slice(0, summary.indexOf(' · ')) : ''
     return [

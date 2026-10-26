@@ -155,19 +155,89 @@ describe('streaming conversation rendering', () => {
         expect(wrapper.text()).toContain('读取接口文档')
         expect(wrapper.find('[data-tone="error"]').exists()).toBe(status === 'error')
         if (status === 'error') {
-          // The failure reads inline in red, but the row stays expandable so a
-          // narrow panel can reveal the part the row truncates.
-          expect(wrapper.get('[data-disclosure-row]').text()).toContain(summary)
+          expect(wrapper.get('[data-tool-error]').text()).toBe(summary)
+          expect(wrapper.find('[data-expandable]').exists()).toBe(false)
+        } else {
+          expect(wrapper.get('[data-disclosure-row]').attributes('aria-expanded')).toBe('false')
+          await wrapper.get('[data-disclosure-row]').trigger('click')
+          expect(wrapper.get('[data-disclosure-body]').text()).toBe(summary)
         }
         expect(wrapper.get('[data-disclosure-row]').text()).not.toContain('完成')
-        expect(wrapper.get('[data-disclosure-row]').attributes('aria-expanded')).toBe('false')
-        await wrapper.get('[data-disclosure-row]').trigger('click')
-        expect(wrapper.get('[data-disclosure-body]').text()).toBe(summary)
         expect(wrapper.text()).not.toContain('GET /')
         wrapper.unmount()
       }
     },
   )
+  it('shows a tool failure immediately while streaming and after restoring history', async () => {
+    const error =
+      '主题源码路径不存在。可通过“查找主题文件”获取实际路径后重试。路径：templates/header.html'
+    let state = createUIMessageReducer()
+    state = applyUIMessageChunk(state, {
+      type: 'tool-input-available',
+      toolCallId: 'read',
+      toolName: 'read_theme_file',
+      input: { path: 'templates/header.html' },
+    })
+    const wrapper = mount(ChatMessageParts, {
+      props: displayProps({ message: state.message, active: true }),
+    })
+    expect(wrapper.find('[data-tool-error]').exists()).toBe(false)
+    state = applyUIMessageChunk(state, {
+      type: 'tool-output-available',
+      toolCallId: 'read',
+      toolName: 'read_theme_file',
+      output: { error },
+    })
+    await wrapper.setProps(displayProps({ message: state.message, active: true }))
+    expect(wrapper.get('[data-tool-error]').text()).toBe(error)
+    expect(wrapper.find('[data-running]').exists()).toBe(false)
+    const restored = restoreConversation([
+      {
+        runId: 'history',
+        actor: 'user',
+        createdAt: '2026-01-01T00:00:00Z',
+        prompt: '读取主题',
+        text: '',
+        tools: [],
+        status: 'completed',
+        parts: [
+          {
+            type: 'tool',
+            id: 'read',
+            toolName: 'read_theme_file',
+            status: 'error',
+            summary: error,
+          },
+        ],
+      },
+    ]).messages[1]!
+    await wrapper.setProps(displayProps({ message: restored }))
+    expect(wrapper.get('[data-tool-error]').text()).toBe(error)
+    expect(wrapper.find('[data-expandable]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('explains when a failed tool has no reported reason', () => {
+    const wrapper = mount(ChatMessageParts, {
+      props: displayProps({
+        message: {
+          id: 'm',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-read_theme_file',
+              toolName: 'read_theme_file',
+              toolCallId: 'read',
+              state: 'output-error',
+              errorText: '',
+            },
+          ],
+        },
+      }),
+    })
+    expect(wrapper.get('[data-tool-error]').text()).toContain('未收到具体错误信息')
+    expect(wrapper.get('[data-tool-error]').text()).toContain('本轮结束提示')
+    wrapper.unmount()
+  })
   it('shows a read subject inline and keeps the count in details', async () => {
     const wrapper = mount(ChatMessageParts, {
       props: displayProps({
