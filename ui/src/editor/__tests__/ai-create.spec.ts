@@ -365,7 +365,7 @@ describe('page creation', () => {
     })
     wrapper.unmount()
   })
-  it('starts the run on the server and returns to the list when a model is selected', async () => {
+  it('starts the run on the server and opens the workbench when a model is selected', async () => {
     localStorage.setItem('ai-page-builder:model-name', 'tool-model')
     mocks.create.mockResolvedValue({ data: { page: { name: 'created', version: 3 } } })
     const wrapper = mount(HomeView, { global: { stubs: { FormKit, SearchInput } } })
@@ -386,7 +386,10 @@ describe('page creation', () => {
           prompt,
         }),
       })
-      expect(mocks.push).toHaveBeenCalledWith({ name: 'AiPageBuilderPages' })
+      expect(mocks.push).toHaveBeenCalledWith({
+        name: 'AiPageBuilderEditor',
+        params: { name: 'created' },
+      })
     } finally {
       localStorage.clear()
       wrapper.unmount()

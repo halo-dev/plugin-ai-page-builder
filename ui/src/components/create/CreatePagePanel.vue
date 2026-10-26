@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useMutation } from '@tanstack/vue-query'
 import { useLocalStorage } from '@vueuse/core'
 import { Toast } from '@halo-dev/components'
@@ -20,7 +20,6 @@ import ImportPageModal from './ImportPageModal.vue'
 
 defineProps<{ autofocus?: boolean }>()
 
-const route = useRoute()
 const router = useRouter()
 const prompt = ref('')
 // Same storage key as the editor chat, so the choice carries over.
@@ -93,10 +92,8 @@ const createMutation = useMutation({
   onSuccess: ({ detail, started, startError, unknown }) => {
     void queryClient.invalidateQueries({ queryKey: pageKeys.all })
     if (started) {
-      Toast.success('已开始生成，可在页面列表查看进度')
-      if (route.name !== 'AiPageBuilderPages') {
-        void router.push({ name: 'AiPageBuilderPages' })
-      }
+      Toast.success('已开始生成')
+      void router.push({ name: 'AiPageBuilderEditor', params: { name: detail.page.name } })
       return
     }
     if (unknown) {
