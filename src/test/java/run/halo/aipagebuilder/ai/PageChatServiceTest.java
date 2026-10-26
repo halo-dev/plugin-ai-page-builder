@@ -210,6 +210,23 @@ class PageChatServiceTest {
 
     @Test
     @org.junit.jupiter.api.Timeout(30)
+    void activeRunsHideRunsWithoutADurableReservation() {
+        when(client.listBy(eq(PageChatTurnRecord.class), any(), any())).thenAnswer(i -> {
+            PageRequest request = i.getArgument(2);
+            return request.getPageSize() > 1
+                ? Mono.never()
+                : Mono.just(new ListResult<>(1, 1, 0, List.of()));
+        });
+
+        var starting = service.start("page", request(), "admin").toFuture();
+        assertThat(service.activeRuns().block().items()).isEmpty();
+
+        service.stop();
+        assertThat(starting).isCompletedExceptionally();
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(30)
     void forcedStopRejectsRequestStillPreparingHistory() {
         var readingHistory = new java.util.concurrent.atomic.AtomicBoolean();
         var cancelled = new java.util.concurrent.atomic.AtomicBoolean();

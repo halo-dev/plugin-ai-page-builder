@@ -92,7 +92,9 @@ public class PageChatEndpoint implements CustomEndpoint {
                     .flatMap(input -> actor().flatMap(actor -> chats.startBackground(
                         request.pathVariable("name"), input, actor)))
                     .then(ServerResponse.noContent().build()),
-                builder -> named(builder, "startPageChatRun", String.class)
+                builder -> builder.operationId("startPageChatRun").tag("AiPageBuilderChat")
+                    .parameter(parameterBuilder().name("name").in(ParameterIn.PATH).required(true)
+                        .implementation(String.class))
                     .description("Starts a run without streaming; results are available from the session and run endpoints")
                     .requestBody(requestBodyBuilder().required(true)
                         .implementation(ChatApi.Request.class))

@@ -79,6 +79,8 @@ const {
 } = useWorkingDocument()
 // The run keeps going on the server; only the brief pre-admission window must block leaving.
 const agentAdmitted = shallowRef(true)
+// A run keeps going after this editor closes; a session load does not.
+const agentActive = shallowRef(false)
 const {
   annotations,
   add: addAnnotation,
@@ -187,6 +189,12 @@ useEditorShortcuts({
 })
 onBeforeUnmount(() => {
   loadId++
+  // The run commits after this editor closes, so the cached detail is stale; the page
+  // list watcher cannot invalidate it when no list is mounted.
+  const name = detail.value?.page.name
+  if (agentActive.value && name) {
+    void queryClient.invalidateQueries({ queryKey: pageKeys.detail(name) })
+  }
   window.removeEventListener('focus', refreshThemeContext)
 })
 async function reload() {
@@ -212,7 +220,8 @@ async function saveDraft() {
   }
 }
 function back() {
-  if (agentRunning.value) Toast.info('助手将在后台继续生成，可在页面列表查看进度。')
+  if (agentActive.value && agentAdmitted.value)
+    Toast.info('助手将在后台继续生成，可在页面列表查看进度。')
   void router.push({ name: 'AiPageBuilderPages' })
 }
 function preview() {
@@ -360,6 +369,7 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
           @completed="clearAnnotations"
           @preview="streamPreview = $event"
           @running="agentRunning = $event"
+          @active="agentActive = $event"
           @admitted="agentAdmitted = $event"
           @committed="adopt($event)"
         />

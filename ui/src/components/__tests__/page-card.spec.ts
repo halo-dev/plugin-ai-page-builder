@@ -149,6 +149,18 @@ describe('page card', () => {
     expect(mountCard(summary()).text()).not.toContain('停止生成')
   })
 
+  it('does not offer stop while the run is saving', () => {
+    const wrapper = mountCard(summary(), false, undefined, {
+      pageName: 'page',
+      sessionId: 'page',
+      runId: 'run',
+      status: 'committing',
+      startedAt: '2026-10-26T00:00:00Z',
+    })
+    expect(wrapper.text()).toContain('保存中')
+    expect(wrapper.text()).not.toContain('停止生成')
+  })
+
   it('shows the relative update time on the card', () => {
     const wrapper = mountCard(summary({ updatedAt: '2026-10-16T10:15:09Z' }))
     expect(wrapper.text()).toContain('timeAgo:2026-10-16T10:15:09Z')

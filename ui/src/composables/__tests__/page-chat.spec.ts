@@ -598,6 +598,41 @@ describe('persistent page chat', () => {
     finish()
     await sending
   })
+  it('keeps probing admission through transient failures', async () => {
+    const state = setup()
+    await state.recover()
+    let finish!: () => void
+    sdk.send.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    api.chat.getPageChatRun.mockRejectedValueOnce(new Error('502'))
+    const sending = state.send('Write it')
+    await vi.advanceTimersByTimeAsync(0)
+    const runId = state.activeRun.value?.runId
+    expect(state.admitted.value).toBe(false)
+
+    api.chat.getPageChatRun.mockImplementation((options) => {
+      const { runId: requested } = options as { runId: string }
+      return Promise.resolve({ data: { runId: requested, status: 'running' } })
+    })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(state.admitted.value).toBe(true)
+    expect(runId).toBeTruthy()
+    finish()
+    await sending
+  })
+  it('unlocks leaving when admission never gets confirmed', async () => {
+    const state = setup()
+    await state.recover()
+    let finish!: () => void
+    sdk.send.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)))
+    api.chat.getPageChatRun.mockRejectedValue(new Error('down'))
+    const sending = state.send('Write it')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(state.admitted.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(20_100)
+    expect(state.admitted.value).toBe(true)
+    finish()
+    await sending
+  })
 
   it('loads server history and sends only the bound prompt/version without automatic tool loops', async () => {
     const state = setup()

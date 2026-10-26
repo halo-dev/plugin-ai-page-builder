@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
+import { Toast } from '@halo-dev/components'
 import HomeView from '../../views/HomeView.vue'
 import CreatePageView from '../../views/CreatePageView.vue'
 import { queryClient } from '../../lib/query-client'
@@ -97,6 +98,7 @@ vi.mock('@halo-dev/components', async () => {
     Toast: {
       error: vi.fn<(message: string) => void>(),
       success: vi.fn<(message: string) => void>(),
+      info: vi.fn<(message: string) => void>(),
     },
   }
 })
@@ -424,6 +426,44 @@ describe('page creation', () => {
       .trigger('click')
     await flushPromises()
     expect(mocks.cancelRun).toHaveBeenCalledWith({ name: 'original', runId: 'run' })
+    wrapper.unmount()
+  })
+
+  it('does not claim a stop when the run already finished', async () => {
+    mocks.list.mockResolvedValue({
+      data: {
+        items: [{ name: 'original', slug: 'original', title: 'Original', version: 1 }],
+        total: 1,
+      },
+    })
+    mocks.activeRuns.mockResolvedValue({
+      data: {
+        items: [
+          {
+            pageName: 'original',
+            sessionId: 'original',
+            runId: 'run',
+            status: 'running',
+            startedAt: '2026-10-26T00:00:00Z',
+          },
+        ],
+      },
+    })
+    mocks.cancelRun.mockResolvedValue({ data: { runId: 'run', status: 'completed' } })
+    const wrapper = mount(HomeView, {
+      global: {
+        stubs: { FormKit, SearchInput, PagePreviewCard: true, RouterLink: true },
+        directives: { 'close-popper': {} },
+      },
+    })
+    await flushPromises()
+    await wrapper
+      .findAll('div')
+      .find((node) => node.text() === '停止生成')!
+      .trigger('click')
+    await flushPromises()
+    expect(Toast.success).not.toHaveBeenCalledWith('已停止生成')
+    expect(Toast.info).toHaveBeenCalledWith('本轮已结束，无需停止')
     wrapper.unmount()
   })
 

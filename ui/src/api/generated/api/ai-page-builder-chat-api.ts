@@ -926,7 +926,7 @@ export const AiPageBuilderChatApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async startPageChatRun(name: string, pageChatRequest: PageChatRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
+        async startPageChatRun(name: string, pageChatRequest: PageChatRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.startPageChatRun(name, pageChatRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AiPageBuilderChatApi.startPageChatRun']?.[localVarOperationServerIndex]?.url;
@@ -1080,7 +1080,7 @@ export const AiPageBuilderChatApiFactory = function (configuration?: Configurati
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        startPageChatRun(requestParameters: AiPageBuilderChatApiStartPageChatRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<string> {
+        startPageChatRun(requestParameters: AiPageBuilderChatApiStartPageChatRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.startPageChatRun(requestParameters.name, requestParameters.pageChatRequest, options).then((request) => request(axios, basePath));
         },
         /**

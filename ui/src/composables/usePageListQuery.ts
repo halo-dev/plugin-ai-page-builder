@@ -40,14 +40,15 @@ export function usePageListQuery() {
     () => new Map((activeRunsQuery.data.value?.items || []).map((run) => [run.pageName, run])),
   )
   // A finished run changes the page's draft and thumbnail; refresh the cards once it leaves.
-  let seenActive = new Set<string>()
+  // Compare run ids too: another run can take over the same page between two polls.
   // Seed from cached runs: on remount the watcher would otherwise miss the runs already listed.
+  let seenActive = new Map<string, string>()
   watch(
     activeRuns,
     (current) => {
-      const finished = [...seenActive].filter((name) => !current.has(name))
-      seenActive = new Set(current.keys())
-      if (finished.length) void queryClient.invalidateQueries({ queryKey: pageKeys.all })
+      const changed = [...seenActive].some(([name, runId]) => current.get(name)?.runId !== runId)
+      seenActive = new Map([...current].map(([name, run]) => [name, run.runId]))
+      if (changed) void queryClient.invalidateQueries({ queryKey: pageKeys.all })
     },
     { immediate: true },
   )

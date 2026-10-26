@@ -146,7 +146,7 @@ const themeWarning = computed(() => {
           </VButton>
           <template #popper>
             <VDropdownItem
-              v-if="run"
+              v-if="run && run.status !== 'committing'"
               v-close-popper
               :disabled="disabled"
               @click="emit('stop', item)"

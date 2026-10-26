@@ -91,12 +91,16 @@ const exportMutation = useMutation({
 const stopRunMutation = useMutation({
   mutationFn: async (item: PageSummary) => {
     const run = activeRuns.value.get(item.name)
-    if (!run) return false
-    await aiPageBuilderChatApi.cancelPageChatRun({ name: item.name, runId: run.runId })
-    return true
+    if (!run) return undefined
+    const { data } = await aiPageBuilderChatApi.cancelPageChatRun({
+      name: item.name,
+      runId: run.runId,
+    })
+    return data.status
   },
-  onSuccess: (stopped) => {
-    if (stopped) Toast.success('已停止生成')
+  onSuccess: (status) => {
+    if (status === 'cancelled') Toast.success('已停止生成')
+    else if (status) Toast.info('本轮已结束，无需停止')
     void queryClient.invalidateQueries({ queryKey: activeRunsKey })
     void queryClient.invalidateQueries({ queryKey: pageKeys.all })
   },

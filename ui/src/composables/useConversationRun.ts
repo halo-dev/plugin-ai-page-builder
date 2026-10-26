@@ -205,11 +205,15 @@ export function useConversationRun(options: {
         const result = await options.transport.get(runId)
         if (activeRun.value?.runId === runId && result.runId === runId) admittedRunId.value = runId
         return
-      } catch (cause) {
-        if ((cause as { response?: { status?: number } }).response?.status !== 404) return
+      } catch {
+        // A missing run is expected until the start request lands; transient failures
+        // must not end the wait either, or the editor stays locked for the whole turn.
       }
       await new Promise((resolve) => setTimeout(resolve, 300))
     }
+    // An unconfirmed probe must not keep the editor locked for the whole turn; the user is
+    // trying to leave a run that the server may well be executing.
+    if (!disposed && activeRun.value?.runId === runId) admittedRunId.value = runId
   }
 
   async function reconcile() {

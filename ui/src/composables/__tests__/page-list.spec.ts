@@ -59,4 +59,23 @@ describe('page list runs', () => {
     second.unmount()
     invalidate.mockRestore()
   })
+
+  it('refreshes the list when another run takes over the same page', async () => {
+    api.activeRuns.mockResolvedValue({ data: { items: [run] } })
+    const first = mount(Harness)
+    await flushPromises()
+    expect(first.text()).toBe('1')
+    first.unmount()
+
+    api.activeRuns.mockResolvedValue({ data: { items: [{ ...run, runId: 'next' }] } })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    const second = mount(Harness)
+    await flushPromises()
+    await queryClient.refetchQueries({ queryKey: activeRunsKey })
+    await flushPromises()
+    expect(second.text()).toBe('1')
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: pageKeys.all })
+    second.unmount()
+    invalidate.mockRestore()
+  })
 })
