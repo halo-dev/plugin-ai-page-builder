@@ -6,6 +6,7 @@ import {
   prepareChatRequest,
   aiPageBuilderAiApi,
   aiPageBuilderChatApi,
+  type SilentRequestConfig,
 } from '../api/clients'
 import { errorMessage } from '../utils/error'
 import type {
@@ -57,8 +58,15 @@ export function usePageChat(options: {
   let sessionsApplied = 0
   const run = useConversationRun({
     transport: {
+      // Polling for admission treats 404 as "not yet"; mute it so an expected miss does not
+      // raise a Console toast, and bound it so a hung request cannot defeat the deadline.
       get: async (runId) =>
-        (await aiPageBuilderChatApi.getPageChatRun({ name: options.name, runId })).data,
+        (
+          await aiPageBuilderChatApi.getPageChatRun({ name: options.name, runId }, {
+            mute: true,
+            timeout: 3000,
+          } as SilentRequestConfig)
+        ).data,
       answer: async (runId, questionId, answers) =>
         (
           await aiPageBuilderChatApi.answerPageChatQuestion({
@@ -84,6 +92,7 @@ export function usePageChat(options: {
   const {
     activeRun,
     admitted: runAdmitted,
+    confirmed: runConfirmed,
     awaitAdmission,
     questions,
     waitingForUser,
@@ -183,6 +192,8 @@ export function usePageChat(options: {
   const running = computed(() => !!activeRun.value || chat.isLoading.value)
   // Leaving is safe only once the server owns the run; no active run is trivially safe.
   const admitted = computed(() => !activeRun.value || runAdmitted.value)
+  // Only a confirmed run is known to survive the editor; the timeout fallback is not.
+  const confirmed = computed(() => !activeRun.value || runConfirmed.value)
   const canSend = computed(
     () =>
       available.value &&
@@ -604,6 +615,7 @@ export function usePageChat(options: {
     notice,
     running,
     admitted,
+    confirmed,
     preparing,
     activeRun,
     waitingForUser,

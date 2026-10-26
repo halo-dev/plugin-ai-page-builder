@@ -30,6 +30,7 @@ const emit = defineEmits<{
   running: [value: boolean]
   active: [value: boolean]
   admitted: [value: boolean]
+  confirmed: [value: boolean]
   preview: [value: StreamingPreview | undefined]
   completed: []
   removeAnnotation: [id: string]
@@ -70,6 +71,7 @@ const {
   notice,
   running,
   admitted,
+  confirmed,
   activeRun,
   waitingForUser,
   pendingQuestion,
@@ -120,6 +122,7 @@ watch(
   { immediate: true },
 )
 watch(admitted, (value) => emit('admitted', value), { immediate: true })
+watch(confirmed, (value) => emit('confirmed', value), { immediate: true })
 // Streaming emits many deltas per paint; coalescing the layout read and the scroll
 // into one animation frame keeps long conversations responsive.
 let scrollFrame = 0

@@ -79,6 +79,8 @@ const {
 } = useWorkingDocument()
 // The run keeps going on the server; only the brief pre-admission window must block leaving.
 const agentAdmitted = shallowRef(true)
+// Only a confirmed run is known to continue after leaving; the timeout fallback is not.
+const agentConfirmed = shallowRef(true)
 // A run keeps going after this editor closes; a session load does not.
 const agentActive = shallowRef(false)
 const {
@@ -220,7 +222,7 @@ async function saveDraft() {
   }
 }
 function back() {
-  if (agentActive.value && agentAdmitted.value)
+  if (agentActive.value && agentConfirmed.value)
     Toast.info('助手将在后台继续生成，可在页面列表查看进度。')
   void router.push({ name: 'AiPageBuilderPages' })
 }
@@ -371,6 +373,7 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
           @running="agentRunning = $event"
           @active="agentActive = $event"
           @admitted="agentAdmitted = $event"
+          @confirmed="agentConfirmed = $event"
           @committed="adopt($event)"
         />
         <section

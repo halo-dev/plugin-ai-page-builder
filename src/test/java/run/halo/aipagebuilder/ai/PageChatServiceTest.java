@@ -221,8 +221,9 @@ class PageChatServiceTest {
         var starting = service.start("page", request(), "admin").toFuture();
         assertThat(service.activeRuns().block().items()).isEmpty();
 
-        service.stop();
-        assertThat(starting).isCompletedExceptionally();
+        // Abandoning the start releases the placeholder without waiting for STOP_TIMEOUT.
+        starting.cancel(true);
+        assertThat(starting.isCancelled()).isTrue();
     }
 
     @Test

@@ -1,7 +1,7 @@
 import { computed, watch } from 'vue'
 import { useRouteQuery } from '@vueuse/router'
 import { useQuery } from '@tanstack/vue-query'
-import { aiPageBuilderApi, aiPageBuilderChatApi } from '../api/clients'
+import { aiPageBuilderApi, aiPageBuilderChatApi, type SilentRequestConfig } from '../api/clients'
 import { activeRunsKey, pageKeys, queryClient } from '../lib/query-client'
 
 export function usePageListQuery() {
@@ -32,7 +32,13 @@ export function usePageListQuery() {
   })
   const activeRunsQuery = useQuery({
     queryKey: activeRunsKey,
-    queryFn: async () => (await aiPageBuilderChatApi.listActivePageChatRuns()).data,
+    // Polling every 2s: a transient failure must not stack Console toasts.
+    queryFn: async () =>
+      (
+        await aiPageBuilderChatApi.listActivePageChatRuns({
+          mute: true,
+        } as SilentRequestConfig)
+      ).data,
     refetchInterval: 2000,
     queryClient,
   })

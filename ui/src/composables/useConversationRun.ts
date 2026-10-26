@@ -28,6 +28,9 @@ export function useConversationRun(options: {
   const activeRun = shallowRef<PageChatRun>()
   // Proof that the server admitted the run; a local begin() alone can still be aborted.
   const admittedRunId = shallowRef<string>()
+  // Same proof without the timeout fallback: leaving is allowed either way, but only a
+  // confirmed run provably keeps running after the editor closes.
+  const confirmedRunId = shallowRef<string>()
   const questions = shallowRef<PageChatQuestion[]>([])
   const error = shallowRef('')
   const notice = shallowRef('')
@@ -70,6 +73,7 @@ export function useConversationRun(options: {
     clearTimeout(polling)
     activeRun.value = undefined
     admittedRunId.value = undefined
+    confirmedRunId.value = undefined
     questions.value = []
     error.value = ''
     notice.value = ''
@@ -94,6 +98,7 @@ export function useConversationRun(options: {
       activeRun.value = run
       // A server snapshot means the run was admitted even if this tab never saw it start.
       admittedRunId.value = run.runId
+      confirmedRunId.value = run.runId
     }
     for (const question of restoredQuestions) remember(question)
     if (activeRun.value?.pendingQuestion) remember(activeRun.value.pendingQuestion)
@@ -148,6 +153,7 @@ export function useConversationRun(options: {
     if (activeRunStatuses.includes(result.status)) {
       activeRun.value = result
       admittedRunId.value = result.runId
+      confirmedRunId.value = result.runId
       error.value = ''
       if (result.pendingQuestion) remember(result.pendingQuestion)
       notice.value =
@@ -203,7 +209,10 @@ export function useConversationRun(options: {
     ) {
       try {
         const result = await options.transport.get(runId)
-        if (activeRun.value?.runId === runId && result.runId === runId) admittedRunId.value = runId
+        if (activeRun.value?.runId === runId && result.runId === runId) {
+          admittedRunId.value = runId
+          confirmedRunId.value = runId
+        }
         return
       } catch {
         // A missing run is expected until the start request lands; transient failures
@@ -212,7 +221,8 @@ export function useConversationRun(options: {
       await new Promise((resolve) => setTimeout(resolve, 300))
     }
     // An unconfirmed probe must not keep the editor locked for the whole turn; the user is
-    // trying to leave a run that the server may well be executing.
+    // trying to leave a run that the server may well be executing. This does not count as
+    // confirmation: nothing proves the run outlives the editor.
     if (!disposed && activeRun.value?.runId === runId) admittedRunId.value = runId
   }
 
@@ -293,6 +303,7 @@ export function useConversationRun(options: {
   return {
     activeRun: computed(() => activeRun.value),
     admitted: computed(() => !!activeRun.value && admittedRunId.value === activeRun.value.runId),
+    confirmed: computed(() => !!activeRun.value && confirmedRunId.value === activeRun.value.runId),
     awaitAdmission,
     questions: computed(() => questions.value),
     waitingForUser: computed(() => activeRun.value?.status === 'waiting_for_user'),

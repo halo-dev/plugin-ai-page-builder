@@ -595,6 +595,7 @@ describe('persistent page chat', () => {
     })
     await vi.advanceTimersByTimeAsync(300)
     expect(state.admitted.value).toBe(true)
+    expect(state.confirmed.value).toBe(true)
     finish()
     await sending
   })
@@ -630,6 +631,8 @@ describe('persistent page chat', () => {
     expect(state.admitted.value).toBe(false)
     await vi.advanceTimersByTimeAsync(20_100)
     expect(state.admitted.value).toBe(true)
+    // The fallback allows leaving but is not proof the run survives the editor.
+    expect(state.confirmed.value).toBe(false)
     finish()
     await sending
   })
