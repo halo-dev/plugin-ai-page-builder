@@ -636,6 +636,21 @@ describe('persistent page chat', () => {
     finish()
     await sending
   })
+  it('keeps reconciling after a transient failure', async () => {
+    waitingConversation()
+    const state = setup()
+    await state.recover()
+    api.chat.getPageChatRun.mockRejectedValueOnce(new Error('timeout'))
+    await state.reconcile()
+    expect(state.error.value).toBe('timeout 请重新检查运行结果。')
+
+    api.chat.getPageChatRun.mockResolvedValue({
+      data: { runId: 'waiting', status: 'completed', page, revision: 'r2' },
+    })
+    await vi.advanceTimersByTimeAsync(1500)
+    expect(state.error.value).toBe('')
+    expect(state.activeRun.value).toBeUndefined()
+  })
 
   it('loads server history and sends only the bound prompt/version without automatic tool loops', async () => {
     const state = setup()

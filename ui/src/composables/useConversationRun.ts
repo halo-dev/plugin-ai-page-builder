@@ -243,8 +243,10 @@ export function useConversationRun(options: {
         await retryRefresh()
         return
       }
-      // An unknown outcome cannot unlock editing or authorize another generation.
+      // An unknown outcome cannot unlock editing or authorize another generation, but a
+      // transient failure must not end reconciliation: keep polling and show the error.
       error.value = `${errorMessage(cause)} 请重新检查运行结果。`
+      schedule()
     }
   }
   async function answerQuestion(questionId: string, answers: PageChatAnswerItem[]) {
