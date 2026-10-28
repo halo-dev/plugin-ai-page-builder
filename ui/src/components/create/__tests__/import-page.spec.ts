@@ -60,7 +60,6 @@ vi.mock('../../../api/clients', () => ({
   },
 }))
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ name: 'AiPageBuilderNew' }),
   useRouter: () => ({ push: mocks.push }),
 }))
 vi.mock('@halo-dev/components', async (importOriginal) => {
@@ -506,8 +505,11 @@ describe('background page creation', () => {
 
     expect(mocks.getRun).toHaveBeenCalledTimes(1)
     expect(mocks.getRun.mock.calls[0]![1]).toMatchObject({ mute: true })
-    expect(mocks.push).toHaveBeenCalledWith({ name: 'AiPageBuilderPages' })
-    expect(mocks.toastSuccess).toHaveBeenCalledWith('已开始生成，可在页面列表查看进度')
+    expect(mocks.push).toHaveBeenCalledWith({
+      name: 'AiPageBuilderEditor',
+      params: { name: 'new-page' },
+    })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('已开始生成')
   })
 
   it('falls back to the editor when the start is definitely missing', async () => {
