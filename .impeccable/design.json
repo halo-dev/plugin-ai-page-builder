@@ -1,0 +1,555 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-31T14:52:18Z",
+  "title": "Design System: AI Page Builder",
+  "extensions": {
+    "colorMeta": {
+      "graphite-ink": {
+        "role": "primary",
+        "displayName": "Graphite Ink",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "graphite-hover": {
+        "role": "primary",
+        "displayName": "Graphite Hover",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "tool-gray": {
+        "role": "neutral",
+        "displayName": "Tool Gray",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "muted-gray": {
+        "role": "neutral",
+        "displayName": "Muted Gray",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "quiet-gray": {
+        "role": "neutral",
+        "displayName": "Quiet Gray",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "divider": {
+        "role": "neutral",
+        "displayName": "Divider",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "canvas-ground": {
+        "role": "neutral",
+        "displayName": "Canvas Ground",
+        "tonalRamp": [
+          "#111827",
+          "#374151",
+          "#4b5563",
+          "#6b7280",
+          "#9ca3af",
+          "#d1d5db",
+          "#e5e7eb",
+          "#f9fafb"
+        ]
+      },
+      "console-navy": {
+        "role": "primary",
+        "displayName": "Console Navy",
+        "tonalRamp": [
+          "oklch(15% 0.040 267)",
+          "oklch(21% 0.053 267)",
+          "oklch(30% 0.053 267)",
+          "oklch(40% 0.048 267)",
+          "oklch(55% 0.038 267)",
+          "oklch(70% 0.026 267)",
+          "oklch(82% 0.018 267)",
+          "oklch(95% 0.010 267)"
+        ]
+      },
+      "halo-mint": {
+        "role": "secondary",
+        "displayName": "Halo Mint",
+        "tonalRamp": [
+          "oklch(15% 0.050 167)",
+          "oklch(30% 0.090 167)",
+          "oklch(45% 0.120 167)",
+          "oklch(60% 0.129 167)",
+          "oklch(70% 0.129 167)",
+          "oklch(76% 0.129 167)",
+          "oklch(87% 0.080 167)",
+          "oklch(95% 0.040 167)"
+        ]
+      },
+      "selection-indigo": {
+        "role": "tertiary",
+        "displayName": "Selection Indigo",
+        "tonalRamp": [
+          "#1e1b4b",
+          "#312e81",
+          "#3730a3",
+          "#4338ca",
+          "#4f46e5",
+          "#6366f1",
+          "#a5b4fc",
+          "#eef2ff"
+        ]
+      },
+      "published-emerald": {
+        "role": "tertiary",
+        "displayName": "Published Emerald",
+        "tonalRamp": [
+          "#022c22",
+          "#064e3b",
+          "#065f46",
+          "#047857",
+          "#059669",
+          "#10b981",
+          "#6ee7b7",
+          "#ecfdf5"
+        ]
+      },
+      "published-surface": {
+        "role": "tertiary",
+        "displayName": "Published Surface",
+        "tonalRamp": [
+          "#022c22",
+          "#064e3b",
+          "#065f46",
+          "#047857",
+          "#059669",
+          "#10b981",
+          "#6ee7b7",
+          "#ecfdf5"
+        ]
+      },
+      "attention-amber": {
+        "role": "tertiary",
+        "displayName": "Attention Amber",
+        "tonalRamp": [
+          "#451a03",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#f59e0b",
+          "#fcd34d",
+          "#fffbeb"
+        ]
+      },
+      "attention-surface": {
+        "role": "tertiary",
+        "displayName": "Attention Surface",
+        "tonalRamp": [
+          "#451a03",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#f59e0b",
+          "#fcd34d",
+          "#fffbeb"
+        ]
+      },
+      "failure-red": {
+        "role": "tertiary",
+        "displayName": "Failure Red",
+        "tonalRamp": [
+          "#450a0a",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#ef4444",
+          "#fca5a5",
+          "#fef2f2"
+        ]
+      },
+      "failure-surface": {
+        "role": "tertiary",
+        "displayName": "Failure Surface",
+        "tonalRamp": [
+          "#450a0a",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#ef4444",
+          "#fca5a5",
+          "#fef2f2"
+        ]
+      },
+      "info-blue": {
+        "role": "tertiary",
+        "displayName": "Info Blue",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1e40af",
+          "#1d4ed8",
+          "#2563eb",
+          "#3b82f6",
+          "#93c5fd",
+          "#eff6ff"
+        ]
+      },
+      "info-surface": {
+        "role": "tertiary",
+        "displayName": "Info Surface",
+        "tonalRamp": [
+          "#172554",
+          "#1e3a8a",
+          "#1e40af",
+          "#1d4ed8",
+          "#2563eb",
+          "#3b82f6",
+          "#93c5fd",
+          "#eff6ff"
+        ]
+      },
+      "script-violet": {
+        "role": "tertiary",
+        "displayName": "Script Violet",
+        "tonalRamp": [
+          "#3b0764",
+          "#581c87",
+          "#6b21a8",
+          "#7e22ce",
+          "#9333ea",
+          "#a855f7",
+          "#d8b4fe",
+          "#faf5ff"
+        ]
+      },
+      "script-surface": {
+        "role": "tertiary",
+        "displayName": "Script Surface",
+        "tonalRamp": [
+          "#3b0764",
+          "#581c87",
+          "#6b21a8",
+          "#7e22ce",
+          "#9333ea",
+          "#a855f7",
+          "#d8b4fe",
+          "#faf5ff"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Page Title",
+        "purpose": "Console-owned page headers on the list and create screens."
+      },
+      "heading": {
+        "displayName": "Heading",
+        "purpose": "Workbench title, page-card titles, modal titles, and section headers."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default UI copy, tool rows, inputs, and compact controls."
+      },
+      "message": {
+        "displayName": "Message",
+        "purpose": "Conversation content, user bubbles, and assistant prose."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Buttons, segmented items, and compact field labels. Console forms use 14px/500 labels."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Metadata, helper text, and chips. This is the metadata floor."
+      },
+      "badge": {
+        "displayName": "Badge",
+        "purpose": "Revision and run badges only."
+      },
+      "code": {
+        "displayName": "Code",
+        "purpose": "Source editor and code blocks."
+      }
+    },
+    "shadows": [
+      {
+        "name": "composer-lift",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "The chat composer and the active segmented thumb."
+      },
+      {
+        "name": "card-hover",
+        "value": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+        "purpose": "Page cards on hover only; resting cards are flat."
+      },
+      {
+        "name": "floating-panel",
+        "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+        "purpose": "The element inspector, dropdowns, and popovers."
+      },
+      {
+        "name": "console-modal",
+        "value": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+        "purpose": "Halo-owned modals only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "150ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Color, border, and shadow changes on hover, focus, and selection."
+      },
+      {
+        "name": "running-pulse",
+        "value": "1.6s ease-in-out infinite",
+        "purpose": "Pulses only the leading glyph of a running tool row; disabled under prefers-reduced-motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The ink-filled action that carries the main task in plugin-owned chrome.",
+      "html": "<button class=\"ds-btn-primary\" type=\"button\">生成页面</button>",
+      "css": ".ds-btn-primary {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  gap: 6px;\n  height: 32px;\n  padding: 0 12px;\n  border: 0;\n  border-radius: 8px;\n  background: #111827;\n  color: #ffffff;\n  font-family: ui-sans-serif, system-ui, sans-serif;\n  font-size: 13px;\n  font-weight: 500;\n  line-height: 20px;\n  white-space: nowrap;\n  cursor: pointer;\n  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-btn-primary:hover { background: #374151; }\n.ds-btn-primary:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }\n.ds-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "A hairline-bordered secondary action for previews and non-destructive moves.",
+      "html": "<button class=\"ds-btn-outline\" type=\"button\">预览</button>",
+      "css": ".ds-btn-outline {\n  box-sizing: border-box;\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  gap: 6px;\n  height: 32px;\n  padding: 0 12px;\n  border: 1px solid #e5e7eb;\n  border-radius: 8px;\n  background: #ffffff;\n  color: #374151;\n  font-family: ui-sans-serif, system-ui, sans-serif;\n  font-size: 13px;\n  font-weight: 500;\n  line-height: 20px;\n  white-space: nowrap;\n  cursor: pointer;\n  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-btn-outline:hover { background: #f9fafb; border-color: #d1d5db; }\n.ds-btn-outline:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }"
+    },
+    {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "icon-button",
+      "description": "A 32px square for quiet, reversible actions in the workbench header and toolbars.",
+      "html": "<button class=\"ds-icon-btn\" type=\"button\" aria-label=\"更多操作\">\n  <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"currentColor\" aria-hidden=\"true\">\n    <circle cx=\"5\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><circle cx=\"19\" cy=\"12\" r=\"2\"/>\n  </svg>\n</button>",
+      "css": ".ds-icon-btn {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  width: 32px;\n  height: 32px;\n  padding: 0;\n  border: 0;\n  border-radius: 8px;\n  background: transparent;\n  color: #4b5563;\n  cursor: pointer;\n  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-icon-btn:hover { background: #f3f4f6; color: #111827; }\n.ds-icon-btn:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }\n.ds-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip-published",
+      "description": "A tinted pill that names one status axis; text, surface, and hue agree.",
+      "html": "<span class=\"ds-chip ds-chip-published\">发布：已发布</span>",
+      "css": ".ds-chip {\n  box-sizing: border-box;\n  display: inline-flex;\n  align-items: center;\n  gap: 4px;\n  height: 24px;\n  padding: 2px 8px;\n  border-radius: 9999px;\n  font-family: ui-sans-serif, system-ui, sans-serif;\n  font-size: 12px;\n  font-weight: 400;\n  line-height: 16px;\n  white-space: nowrap;\n}\n.ds-chip-published { background: #ecfdf5; color: #047857; }"
+    },
+    {
+      "name": "Plugin Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "The compact 13px field used inside workbench panels, with help text that stays readable.",
+      "html": "<label class=\"ds-field\">\n  <span class=\"ds-field-label\">页面路径</span>\n  <input class=\"ds-input\" value=\"/about\" />\n  <span class=\"ds-field-help\">以 / 开头，发布后不可重复。</span>\n</label>",
+      "css": ".ds-field {\n  display: flex;\n  flex-direction: column;\n  gap: 6px;\n  font-family: ui-sans-serif, system-ui, sans-serif;\n}\n.ds-field-label { color: #6b7280; font-size: 13px; font-weight: 500; line-height: 20px; }\n.ds-input {\n  box-sizing: border-box;\n  width: 100%;\n  height: 34px;\n  padding: 6px 10px;\n  border: 1px solid #e5e7eb;\n  border-radius: 8px;\n  background: #ffffff;\n  color: #111827;\n  font-family: inherit;\n  font-size: 13px;\n  line-height: 20px;\n  outline: none;\n  transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-input:focus { border-color: #9ca3af; }\n.ds-input:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }\n.ds-field-help { color: #6b7280; font-size: 12px; line-height: 16px; }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "A quiet toggle group; the active option is a white thumb on a gray track.",
+      "html": "<div class=\"ds-segmented\" role=\"group\" aria-label=\"源码语言\">\n  <button class=\"ds-segment ds-segment-active\" type=\"button\" aria-pressed=\"true\">HTML</button>\n  <button class=\"ds-segment\" type=\"button\" aria-pressed=\"false\">CSS</button>\n  <button class=\"ds-segment\" type=\"button\" aria-pressed=\"false\">JS</button>\n</div>",
+      "css": ".ds-segmented {\n  box-sizing: border-box;\n  display: inline-flex;\n  align-items: center;\n  gap: 2px;\n  height: 32px;\n  padding: 2px;\n  border-radius: 8px;\n  background: #f3f4f6;\n}\n.ds-segment {\n  height: 28px;\n  padding: 0 10px;\n  border: 0;\n  border-radius: 6px;\n  background: transparent;\n  color: #4b5563;\n  font-family: ui-sans-serif, system-ui, sans-serif;\n  font-size: 12px;\n  font-weight: 500;\n  line-height: 20px;\n  cursor: pointer;\n  transition: color 150ms cubic-bezier(0.4, 0, 0.2, 1), background-color 150ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-segment:hover { color: #111827; }\n.ds-segment-active { background: #ffffff; color: #111827; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); }\n.ds-segment:focus-visible { outline: 2px solid #4ccba0; outline-offset: 1px; }"
+    },
+    {
+      "name": "Page Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A flat paper card that lifts on hover; the page list's repeating unit.",
+      "html": "<article class=\"ds-card\">\n  <div class=\"ds-card-head\">\n    <h3 class=\"ds-card-title\">关于我们</h3>\n    <span class=\"ds-card-status\">已发布</span>\n  </div>\n  <p class=\"ds-card-meta\">/about · 2 天前</p>\n  <div class=\"ds-card-actions\">\n    <button class=\"ds-card-link\" type=\"button\">访问</button>\n    <button class=\"ds-card-icon\" type=\"button\" aria-label=\"更多操作\">⋯</button>\n  </div>\n</article>",
+      "css": ".ds-card {\n  box-sizing: border-box;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  padding: 16px;\n  border: 1px solid #e5e7eb;\n  border-radius: 8px;\n  background: #ffffff;\n  font-family: ui-sans-serif, system-ui, sans-serif;\n  transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1), box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-card:hover { border-color: #d1d5db; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }\n.ds-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }\n.ds-card-title { margin: 0; color: #1f2937; font-size: 14px; font-weight: 600; line-height: 20px; }\n.ds-card-status { border-radius: 9999px; background: #ecfdf5; color: #047857; font-size: 10px; line-height: 16px; padding: 2px 8px; white-space: nowrap; }\n.ds-card-meta { margin: 0; color: #6b7280; font-size: 12px; line-height: 16px; }\n.ds-card-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 4px; }\n.ds-card-link { box-sizing: border-box; height: 28px; padding: 0 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; color: #6b7280; font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }\n.ds-card-link:hover { background: #f9fafb; color: #111827; }\n.ds-card-icon { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: #4b5563; font-size: 14px; cursor: pointer; }\n.ds-card-icon:hover { background: #f3f4f6; color: #111827; }\n.ds-card-link:focus-visible, .ds-card-icon:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }"
+    },
+    {
+      "name": "Chat Composer",
+      "kind": "custom",
+      "refersTo": "chat-composer",
+      "description": "The 16px conversational surface where the page brief is written and sent.",
+      "html": "<form class=\"ds-composer\">\n  <textarea class=\"ds-composer-input\" rows=\"2\" placeholder=\"描述你想要的页面，或直接说出要改的地方\"></textarea>\n  <div class=\"ds-composer-footer\">\n    <button class=\"ds-composer-model\" type=\"button\">\n      Claude Sonnet\n      <svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"m6 9 6 6 6-6\"/></svg>\n    </button>\n    <button class=\"ds-composer-send\" type=\"submit\" aria-label=\"发送\">\n      <svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 19V5M5 12l7-7 7 7\"/></svg>\n    </button>\n  </div>\n</form>",
+      "css": ".ds-composer {\n  box-sizing: border-box;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  padding: 10px;\n  border: 1px solid #e5e7eb;\n  border-radius: 16px;\n  background: #ffffff;\n  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);\n  font-family: ui-sans-serif, system-ui, sans-serif;\n  transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-composer:focus-within { border-color: #9ca3af; }\n.ds-composer-input {\n  width: 100%;\n  min-height: 44px;\n  padding: 2px 4px;\n  border: 0;\n  background: transparent;\n  color: #111827;\n  font-family: inherit;\n  font-size: 13px;\n  line-height: 24px;\n  resize: none;\n  outline: none;\n}\n.ds-composer-input::placeholder { color: #6b7280; }\n.ds-composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }\n.ds-composer-model {\n  display: inline-flex;\n  align-items: center;\n  gap: 4px;\n  height: 28px;\n  padding: 0 8px;\n  border: 0;\n  border-radius: 6px;\n  background: #f3f4f6;\n  color: #4b5563;\n  font-family: inherit;\n  font-size: 12px;\n  cursor: pointer;\n}\n.ds-composer-model:hover { color: #111827; }\n.ds-composer-send {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  width: 32px;\n  height: 32px;\n  padding: 0;\n  border: 0;\n  border-radius: 9999px;\n  background: #111827;\n  color: #ffffff;\n  cursor: pointer;\n  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-composer-send:hover { background: #374151; }\n.ds-composer-model:focus-visible, .ds-composer-send:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }"
+    },
+    {
+      "name": "Element Inspector",
+      "kind": "custom",
+      "refersTo": "inspector",
+      "description": "The signature floating panel that appears at the selected canvas element.",
+      "html": "<aside class=\"ds-inspector\" role=\"dialog\" aria-label=\"元素设置\">\n  <div class=\"ds-inspector-head\">\n    <div>\n      <p class=\"ds-inspector-kicker\">已选中</p>\n      <h3 class=\"ds-inspector-title\">主视觉区块</h3>\n    </div>\n    <button class=\"ds-inspector-close\" type=\"button\" aria-label=\"关闭\">\n      <svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg>\n    </button>\n  </div>\n  <p class=\"ds-inspector-path\">section.hero</p>\n  <label class=\"ds-inspector-field\">\n    <span>修改说明</span>\n    <textarea rows=\"2\" placeholder=\"例如：把标题改成更口语的表达\"></textarea>\n  </label>\n  <div class=\"ds-inspector-actions\">\n    <button class=\"ds-inspector-cancel\" type=\"button\">取消</button>\n    <button class=\"ds-inspector-apply\" type=\"button\">交给 AI 修改</button>\n  </div>\n</aside>",
+      "css": ".ds-inspector {\n  box-sizing: border-box;\n  width: 288px;\n  padding: 12px;\n  border: 1px solid #e5e7eb;\n  border-radius: 12px;\n  background: #ffffff;\n  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);\n  font-family: ui-sans-serif, system-ui, sans-serif;\n}\n.ds-inspector-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }\n.ds-inspector-kicker { margin: 0 0 2px; color: #6b7280; font-size: 12px; line-height: 16px; }\n.ds-inspector-title { margin: 0; color: #111827; font-size: 14px; font-weight: 600; line-height: 20px; }\n.ds-inspector-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #4b5563; cursor: pointer; }\n.ds-inspector-close:hover { background: #f3f4f6; color: #111827; }\n.ds-inspector-path { margin: 4px 0 10px; color: #6b7280; font-family: monospace; font-size: 12px; line-height: 16px; }\n.ds-inspector-field { display: flex; flex-direction: column; gap: 6px; color: #6b7280; font-size: 12px; font-weight: 500; line-height: 16px; }\n.ds-inspector-field textarea { box-sizing: border-box; width: 100%; padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 8px; color: #111827; font-family: inherit; font-size: 13px; font-weight: 400; line-height: 20px; resize: vertical; outline: none; }\n.ds-inspector-field textarea:focus { border-color: #9ca3af; }\n.ds-inspector-field textarea:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }\n.ds-inspector-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }\n.ds-inspector-cancel, .ds-inspector-apply { height: 28px; padding: 0 10px; border-radius: 8px; font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }\n.ds-inspector-cancel { border: 0; background: transparent; color: #4b5563; }\n.ds-inspector-cancel:hover { background: #f3f4f6; color: #111827; }\n.ds-inspector-apply { border: 0; background: #111827; color: #ffffff; }\n.ds-inspector-apply:hover { background: #374151; }\n.ds-inspector-close:focus-visible, .ds-inspector-cancel:focus-visible, .ds-inspector-apply:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }"
+    },
+    {
+      "name": "Console Primary Button",
+      "kind": "button",
+      "description": "The Halo-owned 4px-radius action used in list headers and dialog footers; keep it out of the workbench toolbar.",
+      "html": "<button class=\"ds-btn-console\" type=\"button\">新建页面</button>",
+      "css": ".ds-btn-console {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  height: 36px;\n  padding: 0 16px;\n  border: 0;\n  border-radius: 4px;\n  background: #0e1731;\n  color: #ffffff;\n  font-family: ui-sans-serif, system-ui, sans-serif;\n  font-size: 14px;\n  font-weight: 400;\n  line-height: 20px;\n  cursor: pointer;\n  transition: filter 150ms cubic-bezier(0.4, 0, 0.2, 1);\n}\n.ds-btn-console:hover { filter: brightness(1.15); }\n.ds-btn-console:focus-visible { outline: 2px solid #4ccba0; outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Theme Atelier",
+    "overview": "AI Page Builder is a theme-aware workbench rather than a generic page builder. The current theme is the material; the page is the workpiece; the interface is a set of precise instruments arranged around the canvas. The system is restrained, exact, and trustworthy: white paper surfaces on a quiet gray ground, hairline borders, graphite type, and chroma reserved for state. Nothing in the chrome competes with the page being edited.\n\nThe product lives inside Halo, so it inherits Console primitives for standard navigation, forms, dialogs, and list buttons. The plugin-owned surfaces are deliberately more authored but still Console-compatible: 8px controls, 12px floating panels, 16px conversational surfaces, 13px default UI text, and compact 32px controls. The canvas receives the largest and calmest area; hints and validation overlays appear only when needed and never resize it.\n\nDensity is compact without feeling cramped. The workbench is read and scanned for long stretches, so supporting text never falls below gray-500, metadata never falls below 12px, and semantic color is always paired with a label, not used alone. The one overt visual gesture is the indigo canvas selection language: it marks exactly where the user is working, then gets out of the way.",
+    "keyCharacteristics": [
+      "Graphite on paper: ink and gray neutrals carry structure; white and gray-50 carry surfaces.",
+      "Rare mint: Halo mint appears only at focus, active, or creation-choice moments, never as decoration.",
+      "Semantic tint: published, attention, failure, info, and script states each use one hue for text, surface, and border.",
+      "Flat at rest, lifted on intent: borders and tonal layering first, shadows only for floating layers and hover lift.",
+      "Precise type: 13px default UI, 14px conversation, 12px metadata floor, 10–11px badges only."
+    ],
+    "rules": [
+      {
+        "name": "The Rare Mint Rule",
+        "body": "Halo mint covers at most about 10% of any screen. It marks focus, active, or a selected creation choice; if it is filling a surface, it has become decoration and should be removed.",
+        "section": "colors"
+      },
+      {
+        "name": "The Same-Hue Tint Rule",
+        "body": "A status surface, its text, and its border come from the same hue. Use the 700 text on the 50 surface — never gray text on a tinted status surface.",
+        "section": "colors"
+      },
+      {
+        "name": "The No Chroma in Structure Rule",
+        "body": "Grays carry layout, hierarchy, and borders. Chroma only encodes state, canvas selection, or the single focus accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The 12px Floor Rule",
+        "body": "Supporting text never goes below 12px. 10–11px exists only for badges that sit beside a title or status.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Face Rule",
+        "body": "Do not introduce a display face. Use weight, size, and spacing to create hierarchy; the Console-native sans is the brand.",
+        "section": "typography"
+      },
+      {
+        "name": "The 13px Default Rule",
+        "body": "The workbench's default UI text is 13px. Reserve 14px for conversation and page titles, not for dense chrome.",
+        "section": "typography"
+      },
+      {
+        "name": "The Intent Rule",
+        "body": "A surface is flat until it floats or is hovered. If a resting panel needs a shadow to be understood, fix the border or the tonal separation instead.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Two-Radius-System Rule",
+        "body": "Do not mix radii within one surface. Plugin panels use 8/12/16; Console chrome keeps 4. A 4px control inside a 12px plugin panel reads as a different product.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do use graphite ink for primary actions and primary text; let paper and canvas ground carry structure.",
+      "Do keep mint at or below roughly 10% of a screen, reserved for focus, active, and creation choices.",
+      "Do pair status text, surface, and border from one hue: 700 text on the 50 surface.",
+      "Do use 13px as the default UI size, 12px as the metadata floor, and 10–11px only for badges.",
+      "Do keep shadows for floating layers and hover lift; resting surfaces stay flat with a 1px hairline.",
+      "Do keep the canvas the largest calm area; validation and hints float over it without resizing it.",
+      "Do preserve Console-owned primitives in dialogs, forms, and lists, and the plugin's 8/12/16 radii in workbench surfaces."
+    ],
+    "donts": [
+      "Don't use gradients, glass blur, or stacks of colorful large-radius cards; generic SaaS dashboards are the confirmed anti-reference.",
+      "Don't use gradient text; emphasis comes from weight, size, or the semantic hue.",
+      "Don't use quiet gray (#9ca3af) for metadata, help text, or placeholders; it fails AA on paper.",
+      "Don't put gray supporting text on a tinted status surface; tint from the same hue or use the foreground ink.",
+      "Don't mix 4px Console radii into plugin panels, or 12px plugin radii into Console modals.",
+      "Don't add a second display face; the system sans is the voice.",
+      "Don't use 10px outside badges, or let supporting text fall below 12px."
+    ]
+  }
+}
