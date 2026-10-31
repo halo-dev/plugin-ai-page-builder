@@ -126,7 +126,8 @@ public final class ChatApi {
 
     @Schema(name = "PageChatRecovery", requiredProperties = {"sourceRunId", "checkpointVersion", "canResume", "updatedAt"})
     public record Recovery(String sourceRunId, Long checkpointVersion, boolean canResume,
-                           String blockedReason, Instant updatedAt) { }
+                           String blockedReason, Instant updatedAt,
+                           @Schema(nullable = true) String modelName) { }
 
     @Schema(name = "PageChatCheckpointDetail", requiredProperties = {"document", "request", "recovery"})
     public record CheckpointDetail(run.halo.aipagebuilder.model.PageDocument document,

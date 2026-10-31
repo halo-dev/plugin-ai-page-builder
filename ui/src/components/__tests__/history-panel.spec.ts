@@ -68,10 +68,6 @@ vi.mock('../../api/clients', () => ({
   revisionPreviewUrl: (name: string, revision: string) =>
     `/apis/console.api.aipagebuilder.halo.run/v1alpha1/pages/${name}/revisions/${revision}/preview`,
 }))
-// ui-shared's index pulls in pinia, which the console provides at runtime but tests lack.
-vi.mock('@halo-dev/ui-shared', () => ({
-  utils: { date: { timeAgo: (value: string) => `timeAgo:${value}` } },
-}))
 vi.mock('@halo-dev/components', () => ({
   Toast: { success: vi.fn<() => void>(), error: vi.fn<() => void>() },
   VModal: { template: '<div><slot /><slot name="footer" /></div>' },
@@ -116,7 +112,7 @@ function mountPanel(props: Record<string, unknown> = {}) {
 }
 
 async function openDiffTab(wrapper: ReturnType<typeof mountPanel>) {
-  const diffTab = wrapper.findAll('button[role="tab"]').find((tab) => tab.text() === '代码差异')!
+  const diffTab = wrapper.findAll('button').find((tab) => tab.text() === '代码差异')!
   await diffTab.trigger('click')
   await flushPromises()
 }
@@ -135,6 +131,7 @@ describe('HistoryPanel', () => {
   })
 
   it('auto-selects the latest revision and runs it in the sandboxed preview iframe', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-10-21T10:15:09Z').getTime())
     const wrapper = mountPanel()
     await flushPromises()
     const iframe = wrapper.find('iframe')
@@ -147,7 +144,8 @@ describe('HistoryPanel', () => {
     expect(iframe.attributes('srcdoc')).toBeUndefined()
     expect(iframe.attributes('sandbox')).toBe('allow-scripts')
     expect(wrapper.text()).toContain('历史只记录页面内容')
-    expect(wrapper.text()).toContain('timeAgo:2026-10-16T10:15:09Z')
+    expect(wrapper.text()).toContain('5天前')
+    now.mockRestore()
   })
 
   it('switches the preview iframe when another revision is selected', async () => {

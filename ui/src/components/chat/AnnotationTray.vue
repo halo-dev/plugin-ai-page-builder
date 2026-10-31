@@ -25,7 +25,7 @@ const open = defineModel<boolean>('open', { default: false })
         :class="{ 'rotate-90': open }"
       />
       <span class="shrink-0 font-medium">{{ annotations.length }} 条批注</span>
-      <span class="min-w-0 truncate text-gray-400">
+      <span class="min-w-0 truncate text-gray-500">
         {{ annotations[0]?.tag }} · {{ annotations[0]?.summary }}
       </span>
     </button>
@@ -42,7 +42,7 @@ const open = defineModel<boolean>('open', { default: false })
       >
         <div class="min-w-0 flex-1">
           <span class="font-medium">{{ item.tag }}</span> · {{ item.summary }}
-          <p class="truncate text-gray-400">{{ item.comment }}</p>
+          <p class="truncate text-gray-500">{{ item.comment }}</p>
           <p v-if="item.stale">内容已变化，请移除后重新选择</p>
         </div>
         <button

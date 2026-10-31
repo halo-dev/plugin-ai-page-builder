@@ -193,15 +193,17 @@ function keydown(event: KeyboardEvent) {
             validation="required|length:1,200"
             maxlength="200"
           />
-          <FormKit
-            type="text"
-            name="slug"
-            label="访问路径"
-            placeholder="company/about"
-            :validation="slugValidation"
-            maxlength="200"
-            :help="previewUrl"
-          />
+          <div class="apb-publish-slug">
+            <FormKit
+              type="text"
+              name="slug"
+              label="访问路径"
+              placeholder="company/about"
+              :validation="slugValidation"
+              maxlength="200"
+              :help="previewUrl"
+            />
+          </div>
           <div v-if="scriptedState" class="py-4">
             <p class="rounded-md bg-amber-50 px-2.5 py-2 text-xs leading-5 text-amber-700">
               此页面包含脚本，发布后会在访客浏览器中自动执行。
@@ -223,3 +225,12 @@ function keydown(event: KeyboardEvent) {
     </template>
   </VDropdown>
 </template>
+
+<style scoped>
+.apb-publish-slug :deep(.formkit-help) {
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+</style>

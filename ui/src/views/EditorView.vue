@@ -32,7 +32,7 @@ import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
 import { useEditorShortcuts } from '../composables/useEditorShortcuts'
 import type { AnnotationTarget, PreparedPage } from '../editor/annotations'
 import type { StreamingPreview } from '../composables/useStreamingPreview'
-import type { PreviewDevice } from '../editor/preview-canvas'
+import { initialPreviewDevice, type PreviewDevice } from '../editor/preview-canvas'
 import RuntimePreview from '../components/RuntimePreview.vue'
 import StreamingCanvas from '../components/chat/StreamingCanvas.vue'
 
@@ -146,7 +146,8 @@ const mobilePanelOptions = [
   { value: 'chat', label: '对话', icon: IconChat },
   { value: 'canvas', label: '画布', icon: IconCanvas },
 ] as const
-const device = shallowRef<PreviewDevice>('desktop')
+const pageName = computed(() => String(route.params.name || ''))
+const device = shallowRef<PreviewDevice>(initialPreviewDevice())
 let loadId = 0
 async function load() {
   const name = String(route.params.name)
@@ -321,7 +322,7 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
       @open-public="openPublicPage"
     />
     <div
-      v-if="error"
+      v-if="error && detail"
       class="flex shrink-0 flex-wrap items-center gap-2 border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-700"
       role="alert"
     >
@@ -353,9 +354,34 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
       }}」，页面样式可能已不适配。可以让 AI 调整以适配当前主题。
     </div>
     <VLoading v-if="loading" />
+    <div
+      v-else-if="error && !detail"
+      class="flex min-h-0 flex-1 items-center justify-center overflow-auto px-4 py-10"
+      role="alert"
+    >
+      <section
+        class="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm"
+      >
+        <p class="text-sm font-semibold text-gray-900">无法打开页面工作台</p>
+        <p class="mt-2 text-sm leading-6 text-gray-600">{{ error }}</p>
+        <p class="mt-1 text-xs leading-5 text-gray-500">页面标识：{{ pageName }}</p>
+        <div class="mt-5 flex flex-wrap justify-center gap-2">
+          <button type="button" class="apb-btn-primary" @click="reload">
+            <IconRefresh class="text-sm" />
+            重试
+          </button>
+          <button type="button" class="apb-btn-outline" @click="back">返回页面列表</button>
+        </div>
+      </section>
+    </div>
     <template v-else-if="working && detail">
       <div class="border-b border-gray-200 bg-white px-3 py-2 md:hidden">
-        <ApbSegmented v-model="mobilePanel" :options="mobilePanelOptions" aria-label="工作台区域" />
+        <ApbSegmented
+          v-model="mobilePanel"
+          :options="mobilePanelOptions"
+          aria-label="工作台区域"
+          touch
+        />
       </div>
       <div class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] md:grid-cols-[380px_minmax(0,1fr)]">
         <AiPanel
@@ -395,19 +421,23 @@ async function applySettingsAndClose(value: Parameters<typeof applySettings>[0])
             :has-stream-preview="!!streamPreview"
             :root-state-count="rootStates.length"
             :preview-mode-icon="previewModeIcon"
+            :theme-name="themeContext?.displayName || themeContext?.themeName"
+            :theme-layout="detail.page.themeLayout"
             @refresh="runtimePreview?.refresh()"
             @cycle-preview-mode="cyclePreviewMode"
+            @settings="settingsOpen = true"
           />
           <div class="relative min-h-0 flex-1">
             <!-- overlay: the validation notice must never push the canvas up and down -->
             <div
               v-if="!valid"
-              class="absolute inset-x-0 top-0 z-10 border-b px-4 py-2 text-xs leading-5"
-              :class="
+              class="absolute inset-x-0 z-10 border-b px-4 py-2 text-xs leading-5"
+              :class="[
+                view === 'source' && !streamPreview ? 'top-11' : 'top-0',
                 validationState === 'invalid'
                   ? 'border-red-100 bg-red-50 text-red-700'
-                  : 'border-amber-100 bg-amber-50 text-amber-700'
-              "
+                  : 'border-amber-100 bg-amber-50 text-amber-700',
+              ]"
               role="status"
             >
               {{ validationState === 'pending' ? '正在校验源码，画布暂未同步…' : validationError }}

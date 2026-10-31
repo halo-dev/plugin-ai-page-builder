@@ -39,7 +39,7 @@ const activePresets = computed(
           v-for="(group, index) in suggestionGroups"
           :key="group.label"
           type="button"
-          class="rounded-full px-2.5 py-1 text-[11px] transition-colors"
+          class="rounded-full px-2.5 py-1 text-xs transition-colors"
           :class="
             index === activePresetGroup
               ? 'bg-gray-900 text-white'
@@ -51,7 +51,7 @@ const activePresets = computed(
           {{ group.label }}
         </button>
       </div>
-      <p v-else class="mb-1.5 text-[11px] text-gray-400">{{ suggestionGroups[0]?.label }}</p>
+      <p v-else class="mb-1.5 text-xs text-gray-500">{{ suggestionGroups[0]?.label }}</p>
       <div class="flex flex-wrap justify-center gap-1.5">
         <button
           v-for="preset in activePresets"

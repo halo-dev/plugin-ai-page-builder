@@ -48,8 +48,18 @@ export function usePageChat(options: {
   const recovery = shallowRef<PageChatRecovery>()
   const checkpointPreview = shallowRef<StreamingPreview>()
   const previewLoading = shallowRef(false)
-  // Last used model survives reloads and is shared across pages.
-  const modelName = useLocalStorage('ai-page-builder:model-name', '')
+  // Each page keeps its own model; the last used model remains the default for new pages.
+  const defaultModelName = useLocalStorage('ai-page-builder:model-name', '')
+  const modelName = useLocalStorage(
+    `ai-page-builder:model-name:${options.name}`,
+    defaultModelName.value,
+  )
+  watch(modelName, (value) => {
+    if (value.trim()) defaultModelName.value = value
+  })
+  // The model captured by the active request; recovery exposes the interrupted run's model.
+  const activeModelName = shallowRef('')
+  const runModelName = computed(() => activeModelName.value || recovery.value?.modelName || '')
   const lastPrompt = shallowRef('')
   const recovered = shallowRef(false)
   let disposed = false
@@ -408,6 +418,7 @@ export function usePageChat(options: {
         modelName: modelName.value,
         sessionId: sessionId.value,
       }
+      activeModelName.value = request.modelName
       checkpointPreview.value = undefined
       recovery.value = undefined
       run.begin(request.runId)
@@ -497,6 +508,9 @@ export function usePageChat(options: {
         resumeFromRunId: saved.recovery.sourceRunId,
         checkpointVersion: saved.recovery.checkpointVersion,
       }
+      activeModelName.value = request.modelName
+      // The composer must reflect the model the recovery actually uses, not a stale choice.
+      if (saved.request.modelName) modelName.value = saved.request.modelName
       checkpointPreview.value = undefined
       recovery.value = undefined
       run.begin(request.runId)
@@ -614,6 +628,7 @@ export function usePageChat(options: {
     available,
     statusMessage,
     modelName,
+    runModelName,
     error,
     notice,
     running,

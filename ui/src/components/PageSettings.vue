@@ -93,7 +93,7 @@ function submit() {
           v-model="buffer.authorizeRequired"
           type="checkbox"
           name="authorizeRequired"
-          label="禁止公开访问"
+          label="仅管理员可访问"
           help="开启后，公开链接仅超级管理员可以访问，其他访客将看到 404。"
         />
       </FormKit>

@@ -93,14 +93,14 @@ function toolIcon(name: string): Component {
       >
         <p
           class="break-all text-xs leading-5"
-          :class="part.tool.tone === 'error' ? 'text-red-500' : 'text-gray-500'"
+          :class="part.tool.tone === 'error' ? 'text-red-600' : 'text-gray-500'"
         >
           {{ part.tool.summary }}
         </p>
       </ChatDisclosureRow>
       <p
         v-if="part.tool.tone === 'error'"
-        class="mb-1 break-all pl-[22px] text-xs leading-5 text-red-500"
+        class="mb-1 break-all pl-[22px] text-xs leading-5 text-red-600"
         data-tool-error
       >
         {{ part.tool.summary }}

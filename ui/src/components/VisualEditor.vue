@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
+import IconClose from '~icons/mingcute/close-line'
 import CanvasZoomControls from './editor/CanvasZoomControls.vue'
 import ElementInspector from './editor/ElementInspector.vue'
 import type { PageDocument } from '../api/generated'
@@ -67,7 +68,24 @@ const selected = shallowRef<HTMLElement>()
 const selectionEpoch = shallowRef(0)
 const outline = shallowRef<Record<string, string>>()
 const box = shallowRef<{ left: number; top: number; width: number; height: number }>()
+const hovered = shallowRef<HTMLElement>()
+const hoverOutline = shallowRef<Record<string, string>>()
+const HINT_KEY = 'ai-page-builder:canvas-hint-dismissed'
+function hintWasDismissed() {
+  try {
+    return localStorage.getItem(HINT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const hintDismissed = shallowRef(hintWasDismissed())
+const showHint = computed(() => editable.value && !hintDismissed.value)
+const showHoverOutline = computed(
+  () => editable.value && !!hoverOutline.value && hovered.value !== selected.value,
+)
 let originalRootState: { classes: Set<string>; attributes: Map<string, string | null> } | undefined
+let cursorDocument: Document | undefined
+let cursorSheet: CSSStyleSheet | undefined
 let removeListeners = () => {}
 let contentObserver: ResizeObserver | undefined
 
@@ -200,7 +218,7 @@ watch(
   () => [props.rootState, props.rootStates],
   () => {
     applyRootState()
-    updateOutline()
+    updateOverlays()
   },
   { flush: 'post' },
 )
@@ -256,7 +274,90 @@ function updateOutline() {
   }
   box.value = { left, top, width, height }
 }
-watch([scale, viewport, stageSize], updateOutline, { flush: 'post' })
+function updateHoverOutline() {
+  const element = hovered.value
+  if (!editable.value || !element?.isConnected || element === selected.value) {
+    hoverOutline.value = undefined
+    return
+  }
+  const rect = element.getBoundingClientRect()
+  hoverOutline.value = {
+    left: `${rect.left * scale.value}px`,
+    top: `${rect.top * scale.value}px`,
+    width: `${rect.width * scale.value}px`,
+    height: `${rect.height * scale.value}px`,
+  }
+}
+function updateOverlays() {
+  updateOutline()
+  updateHoverOutline()
+}
+watch([scale, viewport, stageSize], updateOverlays, { flush: 'post' })
+function hoverTarget(event: Event): HTMLElement | undefined {
+  const target = event.target as HTMLElement | null
+  const root = containerEl()
+  if (!target || target.nodeType !== 1 || !root || target === root || !root.contains(target))
+    return undefined
+  return target
+}
+function onPointerOver(event: Event) {
+  if (!editable.value) return
+  const target = hoverTarget(event)
+  if (target === hovered.value) return
+  hovered.value = target
+  updateHoverOutline()
+}
+function onPointerOut(event: Event) {
+  if (!editable.value) return
+  const related = (event as MouseEvent).relatedTarget as Node | null
+  const root = containerEl()
+  const NodeType = root?.ownerDocument.defaultView?.Node
+  if (related && root && NodeType && related instanceof NodeType && root.contains(related)) return
+  hovered.value = undefined
+  updateHoverOutline()
+}
+function applyCanvasCursor() {
+  const doc = frame.value?.contentDocument
+  const view = doc?.defaultView
+  if (!doc || !view) return
+  if (doc !== cursorDocument) {
+    cursorDocument = doc
+    cursorSheet = undefined
+  }
+  // Adopted stylesheets style the iframe document without inserting a node, so the
+  // editable DOM keeps exactly the structure the source paths were resolved against.
+  if (!('adoptedStyleSheets' in doc)) return
+  try {
+    if (!cursorSheet) {
+      cursorSheet = new view.CSSStyleSheet()
+      doc.adoptedStyleSheets = [...(doc.adoptedStyleSheets || []), cursorSheet]
+    }
+    cursorSheet.replaceSync(
+      editable.value
+        ? 'html, html * { cursor: crosshair !important; } ' +
+            'html a, html button, html input, html textarea, html select, html [role="button"] { cursor: pointer !important; }'
+        : '',
+    )
+  } catch {
+    // Older engines keep the page's own cursor; hover and the first-run hint remain.
+    cursorSheet = undefined
+  }
+}
+watch(editable, () => {
+  if (!editable.value) {
+    hovered.value = undefined
+    hoverOutline.value = undefined
+  }
+  applyCanvasCursor()
+})
+function dismissHint() {
+  hintDismissed.value = true
+  try {
+    localStorage.setItem(HINT_KEY, '1')
+  } catch {
+    // Storage can be unavailable in private contexts; the hint stays dismissed for this visit.
+  }
+}
 function select(element?: HTMLElement) {
   const root = containerEl()
   // Paths only resolve inside the content container; clicks on theme chrome
@@ -265,7 +366,70 @@ function select(element?: HTMLElement) {
   selected.value = selectedPath.value ? element : undefined
   if (selected.value) contentObserver?.observe(selected.value)
   selectionEpoch.value++
-  updateOutline()
+  if (selected.value && !hintDismissed.value) dismissHint()
+  updateOverlays()
+}
+function closeInspector() {
+  select()
+  stage.value?.focus({ preventScroll: true })
+}
+function reveal(element: HTMLElement) {
+  const stageEl = stage.value
+  if (!stageEl) return
+  const rect = element.getBoundingClientRect()
+  const left = (frameWrap.value?.offsetLeft ?? 0) + rect.left * scale.value
+  const top = (frameWrap.value?.offsetTop ?? 0) + rect.top * scale.value
+  const right = left + rect.width * scale.value
+  const bottom = top + rect.height * scale.value
+  const margin = 24
+  const nextLeft =
+    left < stageEl.scrollLeft + margin
+      ? Math.max(0, left - margin)
+      : right > stageEl.scrollLeft + stageEl.clientWidth - margin
+        ? Math.max(0, right - stageEl.clientWidth + margin)
+        : stageEl.scrollLeft
+  const nextTop =
+    top < stageEl.scrollTop + margin
+      ? Math.max(0, top - margin)
+      : bottom > stageEl.scrollTop + stageEl.clientHeight - margin
+        ? Math.max(0, bottom - stageEl.clientHeight + margin)
+        : stageEl.scrollTop
+  if (nextLeft !== stageEl.scrollLeft || nextTop !== stageEl.scrollTop)
+    stageEl.scrollTo({ left: nextLeft, top: nextTop, behavior: 'smooth' })
+}
+function onStageKeydown(event: KeyboardEvent) {
+  if (!editable.value || event.defaultPrevented || event.altKey || event.metaKey || event.ctrlKey)
+    return
+  if (event.key === 'Escape') {
+    if (!selected.value) return
+    event.preventDefault()
+    closeInspector()
+    return
+  }
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return
+  const eventTarget = event.target as HTMLElement | null
+  // Text fields keep their own arrow-key behavior while an annotation is being written.
+  if (eventTarget?.closest('input, textarea, select, [contenteditable="true"]')) return
+  const root = containerEl()
+  if (!root) return
+  event.preventDefault()
+  const current = selected.value
+  let target: HTMLElement | undefined
+  if (!current) {
+    target = (root.firstElementChild as HTMLElement | null) ?? undefined
+  } else if (event.key === 'ArrowDown') {
+    target = (current.nextElementSibling as HTMLElement | null) ?? undefined
+  } else if (event.key === 'ArrowUp') {
+    target = (current.previousElementSibling as HTMLElement | null) ?? undefined
+  } else if (event.key === 'ArrowLeft') {
+    const parent = current.parentElement
+    target = parent && parent !== root ? parent : undefined
+  } else {
+    target = (current.firstElementChild as HTMLElement | null) ?? undefined
+  }
+  if (!target) return
+  select(target)
+  reveal(target)
 }
 function annotate(target: AnnotationTarget, comment: string) {
   emit('annotate', target, comment)
@@ -293,17 +457,23 @@ function onLoad(event: Event) {
   unsupported.value = false
   if (sameDocument(preview.value.snapshot, props.document)) previewError.value = ''
   ready.value = true
+  hovered.value = undefined
+  hoverOutline.value = undefined
   originalRootState = { classes: new Set(doc.documentElement.classList), attributes: new Map() }
   applyRootState()
   const events = ['click', 'auxclick', 'submit', 'dragstart', 'drop', 'beforeinput']
   events.forEach((type) => doc.addEventListener(type, intercept, true))
+  doc.addEventListener('mouseover', onPointerOver, true)
+  doc.addEventListener('mouseout', onPointerOut, true)
   const layoutEvents = ['scroll', 'transitionend', 'transitioncancel']
-  layoutEvents.forEach((type) => doc.addEventListener(type, updateOutline, true))
-  frame.value?.contentWindow?.addEventListener('resize', updateOutline)
+  layoutEvents.forEach((type) => doc.addEventListener(type, updateOverlays, true))
+  frame.value?.contentWindow?.addEventListener('resize', updateOverlays)
   removeListeners = () => {
     events.forEach((type) => doc.removeEventListener(type, intercept, true))
-    layoutEvents.forEach((type) => doc.removeEventListener(type, updateOutline, true))
-    doc.defaultView?.removeEventListener('resize', updateOutline)
+    doc.removeEventListener('mouseover', onPointerOver, true)
+    doc.removeEventListener('mouseout', onPointerOut, true)
+    layoutEvents.forEach((type) => doc.removeEventListener(type, updateOverlays, true))
+    doc.defaultView?.removeEventListener('resize', updateOverlays)
   }
   rendered.value = preview.value!.snapshot
   const expected = doc.implementation.createHTMLDocument('').body
@@ -319,11 +489,12 @@ function onLoad(event: Event) {
   }
   selected.value = selectedPath.value ? elementAtPath(root, selectedPath.value) : undefined
   if (typeof ResizeObserver !== 'undefined') {
-    contentObserver = new ResizeObserver(updateOutline)
+    contentObserver = new ResizeObserver(updateOverlays)
     contentObserver.observe(root)
     if (selected.value) contentObserver.observe(selected.value)
   }
-  updateOutline()
+  updateOverlays()
+  applyCanvasCursor()
 }
 function apply(edit: CanvasEdit, path = selectedPath.value) {
   if (!editable.value) return
@@ -343,7 +514,32 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex h-full min-w-0 flex-col">
     <div class="relative min-h-0 flex-1 bg-gray-100 p-3">
-      <div ref="stage" class="relative h-full overflow-auto" @scroll="onStageScroll">
+      <div
+        v-if="showHint"
+        class="absolute left-1/2 top-3 z-[3] flex w-[min(92%,30rem)] -translate-x-1/2 items-start gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs leading-5 text-gray-600 shadow-sm"
+        role="status"
+      >
+        <span class="min-w-0 flex-1"
+          >点击画布元素即可编辑或添加批注；聚焦画布后可用方向键选择。</span
+        >
+        <button
+          type="button"
+          class="apb-icon-btn h-6 w-6 shrink-0"
+          aria-label="不再显示画布提示"
+          @click="dismissHint"
+        >
+          <IconClose class="text-sm" />
+        </button>
+      </div>
+      <div
+        ref="stage"
+        class="relative h-full overflow-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gray-900"
+        tabindex="0"
+        role="group"
+        aria-label="页面画布：点击元素编辑，或聚焦后使用方向键选择"
+        @scroll="onStageScroll"
+        @keydown="onStageKeydown"
+      >
         <div ref="frameWrap" class="relative mx-auto bg-white" :style="wrapStyle">
           <iframe
             v-if="preview"
@@ -357,6 +553,11 @@ onBeforeUnmount(() => {
             @load="onLoad"
           />
           <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+            <div
+              v-if="showHoverOutline"
+              class="absolute z-[1] border border-indigo-400 bg-indigo-500/5"
+              :style="hoverOutline"
+            />
             <div
               v-if="outline && editable"
               class="absolute z-[1] border-2 border-indigo-500"
@@ -379,7 +580,7 @@ onBeforeUnmount(() => {
           @edit="apply"
           @annotate="annotate"
           @select-parent="selectParent"
-          @close="select()"
+          @close="closeInspector"
         />
       </div>
       <div v-if="!editable" class="absolute inset-3 z-[2]" aria-hidden="true" />

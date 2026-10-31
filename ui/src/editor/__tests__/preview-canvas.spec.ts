@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { adjustPreviewScale, calculateFitScale, PREVIEW_DEVICES } from '../preview-canvas'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  adjustPreviewScale,
+  calculateFitScale,
+  initialPreviewDevice,
+  PREVIEW_DEVICES,
+} from '../preview-canvas'
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('preview canvas zoom', () => {
   it('fits the viewport into the stage without zooming in', () => {
@@ -15,5 +22,15 @@ describe('preview canvas zoom', () => {
     expect(adjustPreviewScale(1, -1)).toBeCloseTo(0.9)
     expect(adjustPreviewScale(1.25, 1)).toBe(1.25)
     expect(adjustPreviewScale(0.4, -1)).toBe(0.4)
+  })
+  it('opens phones at the mobile width and wider screens at the desktop width', () => {
+    const matchMedia = vi.fn((query: string) => ({
+      matches: query === '(max-width: 767px)',
+      media: query,
+    }))
+    vi.stubGlobal('matchMedia', matchMedia)
+    expect(initialPreviewDevice()).toBe('mobile')
+    matchMedia.mockReturnValue({ matches: false, media: '(max-width: 767px)' })
+    expect(initialPreviewDevice()).toBe('desktop')
   })
 })

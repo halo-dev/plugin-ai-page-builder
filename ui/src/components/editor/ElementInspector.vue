@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, shallowRef, useTemplateRef, type CSSProperties } from 'vue'
+import { computed, nextTick, onMounted, shallowRef, useTemplateRef, type CSSProperties } from 'vue'
 import IconClose from '~icons/mingcute/close-line'
 import ImageReplaceDropdown from '../ImageReplaceDropdown.vue'
 import type { PageDocument } from '../../api/generated'
@@ -26,7 +26,9 @@ const emit = defineEmits<{
 
 const annotationTarget = shallowRef<AnnotationTarget>()
 const annotationComment = shallowRef('')
+const dialog = useTemplateRef<HTMLElement>('dialog')
 const annotationInput = useTemplateRef<HTMLTextAreaElement>('annotationInput')
+onMounted(() => dialog.value?.focus({ preventScroll: true }))
 const annotationCurrent = computed(
   () =>
     annotationTarget.value?.content.html === props.document.html &&
@@ -81,10 +83,13 @@ function replaceImage(url: string) {
 
 <template>
   <div
-    class="absolute z-[3] w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
+    ref="dialog"
+    class="absolute z-[3] w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-gray-400"
     :style="popperStyle"
     role="dialog"
-    aria-label="元素操作"
+    :aria-label="`元素操作：${selected.localName}`"
+    tabindex="-1"
+    @keydown.escape.stop.prevent="emit('close')"
   >
     <div class="mb-2 flex items-center gap-1 text-xs">
       <strong class="font-mono text-gray-700">{{ selected.localName }}</strong>
@@ -118,7 +123,7 @@ function replaceImage(url: string) {
         placeholder="描述要让 AI 做的修改"
         aria-label="修改说明"
       />
-      <p v-if="!annotationCurrent" class="mt-1 text-xs leading-5 text-amber-600">
+      <p v-if="!annotationCurrent" class="mt-1 text-xs leading-5 text-amber-700">
         内容已变化，请重新选择元素。
       </p>
       <div class="mt-2 flex gap-1.5">
@@ -148,6 +153,9 @@ function replaceImage(url: string) {
       >
         让 AI 修改
       </button>
+      <p v-if="(annotationCount || 0) >= 5" class="mb-2 text-xs leading-5 text-gray-500">
+        最多添加 5 条批注，请先在对话下方移除一条。
+      </p>
       <fieldset class="m-0 min-w-0 border-0 p-0" :disabled="!editable">
         <label v-if="textEditable" class="mb-2 flex flex-col gap-1 text-xs text-gray-600">
           文字
@@ -158,7 +166,7 @@ function replaceImage(url: string) {
             @change="apply({ type: 'text', value: valueOf($event) })"
           />
         </label>
-        <p v-else-if="selected.children.length" class="mb-2 text-xs leading-5 text-gray-400">
+        <p v-else-if="selected.children.length" class="mb-2 text-xs leading-5 text-gray-500">
           包含嵌套内容，请选中文字子元素，或在源码中编辑。
         </p>
         <template v-if="selected.localName === 'img'">
@@ -228,7 +236,7 @@ function replaceImage(url: string) {
           删除
         </button>
       </div>
-      <p v-if="!duplicateAllowed" class="mt-1.5 text-xs leading-5 text-gray-400">
+      <p v-if="!duplicateAllowed" class="mt-1.5 text-xs leading-5 text-gray-500">
         此区块包含 ID，复制可能破坏样式或引用。
       </p>
     </template>

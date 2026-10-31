@@ -22,6 +22,7 @@ const composing = shallowRef(false)
 // While a run is active the composer switches to steering: the same box queues
 // follow-up instructions instead of starting a new run.
 const steering = computed(() => props.running && !!props.canSteer)
+const needsModel = computed(() => props.available && !props.running && !model.value.trim())
 const sendDisabled = computed(
   () =>
     props.disabled ||
@@ -67,7 +68,7 @@ watch(prompt, async () => {
     <textarea
       ref="input"
       v-model="prompt"
-      class="block max-h-[min(180px,25dvh)] min-h-[64px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13px] leading-6 outline-none placeholder:text-gray-400"
+      class="block max-h-[min(180px,25dvh)] min-h-[64px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13px] leading-6 outline-none placeholder:text-gray-500"
       aria-label="描述你的想法"
       :placeholder="
         steering
@@ -82,6 +83,9 @@ watch(prompt, async () => {
       @compositionstart="composing = true"
       @compositionend="composing = false"
     />
+    <p v-if="needsModel" class="px-3.5 pb-1 text-xs leading-5 text-gray-600" role="status">
+      请先选择模型后发送
+    </p>
     <div class="flex items-center gap-2 px-2.5 pb-2.5">
       <div class="apb-model min-w-0 flex-1">
         <FormKit

@@ -115,7 +115,7 @@ describe('live questions with the real chat SDK', () => {
     )
     await flushPromises()
     expect(wrapper.text()).toContain('已回答')
-    expect(wrapper.text()).toContain('助手正在处理页面')
+    expect(wrapper.text()).toContain('正在使用「model」处理页面')
     expect(wrapper.text()).toContain('帮我设计页面')
     controller.close()
     wrapper.unmount()

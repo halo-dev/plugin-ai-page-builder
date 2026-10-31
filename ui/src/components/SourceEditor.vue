@@ -17,8 +17,13 @@ function change(value: string) {
 <template>
   <section class="flex h-full min-h-0 min-w-0 flex-col bg-white" aria-label="页面源码">
     <div class="flex h-11 shrink-0 items-center gap-2 border-b border-gray-200 px-3">
-      <ApbSegmented v-model="language" :options="languages" :disabled="disabled" />
-      <span class="ml-auto text-xs text-gray-400">编辑后自动校验</span>
+      <ApbSegmented
+        v-model="language"
+        :options="languages"
+        :disabled="disabled"
+        aria-label="源码语言"
+      />
+      <span class="ml-auto text-xs text-gray-500">编辑后自动校验</span>
     </div>
     <div class="apb-code min-h-0 flex-1 overflow-auto text-[13px]" :inert="disabled || undefined">
       <VCodemirror

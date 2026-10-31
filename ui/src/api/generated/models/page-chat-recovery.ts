@@ -43,6 +43,12 @@ export interface PageChatRecovery {
      * @type {string}
      * @memberof PageChatRecovery
      */
+    'modelName'?: string | null;
+    /**
+     * 
+     * @type {string}
+     * @memberof PageChatRecovery
+     */
     'sourceRunId': string;
     /**
      * 

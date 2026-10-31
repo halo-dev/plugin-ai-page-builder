@@ -43,10 +43,10 @@ const status = computed(() => {
   const page = props.page
   if (page?.publishedRevision) {
     return page.hasUnpublishedChanges
-      ? { chip: 'bg-amber-50 text-amber-700', text: '有未发布修改' }
-      : { chip: 'bg-emerald-50 text-emerald-700', text: '已发布' }
+      ? { chip: 'bg-amber-50 text-amber-700', text: '发布：有未发布修改' }
+      : { chip: 'bg-emerald-50 text-emerald-700', text: '发布：已发布' }
   }
-  return { chip: 'bg-gray-100 text-gray-500', text: '未发布' }
+  return { chip: 'bg-gray-100 text-gray-600', text: '发布：未发布' }
 })
 </script>
 
@@ -64,7 +64,7 @@ const status = computed(() => {
       <IconArrowLeft class="text-base" />
     </button>
     <div class="min-w-0">
-      <h1 class="max-w-56 truncate text-[13px] font-semibold leading-4">{{ title }}</h1>
+      <h1 class="max-w-56 truncate text-sm font-semibold leading-5" :title="title">{{ title }}</h1>
     </div>
     <span v-if="page" class="apb-chip ml-1 shrink-0" :class="status.chip">
       {{ status.text }}

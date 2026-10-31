@@ -67,6 +67,7 @@ const {
   available,
   statusMessage,
   modelName,
+  runModelName,
   error,
   notice,
   running,
@@ -269,21 +270,27 @@ watch(blankPage, () => (activePresetGroup.value = 0))
       </p>
       <div
         v-else-if="running && !loading"
-        class="flex items-center gap-2 text-xs text-gray-400"
+        class="flex items-center gap-2 text-xs text-gray-500"
         role="status"
       >
         <span class="flex gap-1">
           <span
-            class="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]"
+            class="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400 [animation-delay:-0.3s]"
           />
           <span
-            class="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]"
+            class="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400 [animation-delay:-0.15s]"
           />
-          <span class="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+          <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400" />
         </span>
-        {{ activeRun?.status === 'committing' ? '正在保存本轮修改…' : '助手正在处理页面…' }}
+        {{
+          activeRun?.status === 'committing'
+            ? '正在保存本轮修改…'
+            : runModelName
+              ? `正在使用「${runModelName}」处理页面…`
+              : '助手正在处理页面…'
+        }}
       </div>
-      <p v-else-if="notice" class="text-xs text-gray-400" role="status">{{ notice }}</p>
+      <p v-else-if="notice" class="text-xs text-gray-500" role="status">{{ notice }}</p>
     </div>
     <div class="flex min-h-0 flex-col px-3 pb-3">
       <div class="min-h-0 flex-1 overflow-y-auto">
@@ -299,7 +306,12 @@ watch(blankPage, () => (activePresetGroup.value = 0))
           class="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900"
           role="status"
         >
-          <p>进度已保留，尚未写入草稿。继续生成会使用原模型，开始新一轮调用。</p>
+          <p>进度已保留，尚未写入草稿。</p>
+          <p class="mt-1">
+            继续生成会沿用中断时的原模型<template v-if="recovery.modelName"
+              >「{{ recovery.modelName }}」</template
+            >，不使用当前选择的模型。
+          </p>
           <p v-if="resumeBlocked" class="mt-1">{{ resumeBlocked }}</p>
           <p v-else-if="error" class="mt-1">{{ error }}</p>
           <div class="mt-2 flex flex-wrap gap-3">

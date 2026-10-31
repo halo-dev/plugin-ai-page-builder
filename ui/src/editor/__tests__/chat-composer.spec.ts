@@ -102,6 +102,14 @@ describe('lightweight chat composer', () => {
     expect(wrapper.find('button[aria-label="发送补充要求"]').exists()).toBe(false)
     wrapper.unmount()
   })
+  it('explains the disabled send when no model is selected', async () => {
+    const wrapper = composer()
+    await wrapper.setProps({ model: '', canSend: false })
+    expect(wrapper.text()).toContain('请先选择模型后发送')
+    await wrapper.setProps({ model: 'model', canSend: true })
+    expect(wrapper.text()).not.toContain('请先选择模型后发送')
+    wrapper.unmount()
+  })
   it('supports a custom placeholder and a footer slot', async () => {
     const wrapper = mount(ChatComposer, {
       props: {

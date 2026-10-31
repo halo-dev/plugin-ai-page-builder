@@ -1072,6 +1072,8 @@ describe('checkpoint recovery', () => {
     })
     expect(sdk.transport.prepareSendMessagesRequest().body.runId).not.toBe('original-run')
     expect(sdk.send).toHaveBeenCalledWith({ text: '继续生成' })
+    expect(state.modelName.value).toBe('original-model')
+    expect(state.runModelName.value).toBe('original-model')
   })
   it('uses checkpoint HTML for the first CSS-only update without changing the draft', async () => {
     savedProgress()

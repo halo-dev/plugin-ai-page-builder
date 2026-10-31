@@ -170,7 +170,7 @@ function submit() {
           <IconSpinner v-if="submitting" class="animate-spin" />
           {{ submitting ? '正在提交…' : error ? '重新提交' : '提交回答' }}
         </button>
-        <span class="text-gray-400">提交后继续生成</span>
+        <span class="text-gray-500">提交后继续生成</span>
       </div>
     </template>
   </form>

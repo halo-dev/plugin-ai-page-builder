@@ -12,6 +12,15 @@ export const PREVIEW_DEVICES = {
   mobile: { width: 390, height: 844 },
 } as const
 export type PreviewDevice = keyof typeof PREVIEW_DEVICES
+
+// Phones should open at a readable, tappable width instead of a scaled desktop page.
+export function initialPreviewDevice(): PreviewDevice {
+  return typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(max-width: 767px)').matches
+    ? 'mobile'
+    : 'desktop'
+}
 export const MIN_PREVIEW_SCALE = 0.4
 export const MAX_PREVIEW_SCALE = 1.25
 const PREVIEW_SCALE_STEP = 0.1

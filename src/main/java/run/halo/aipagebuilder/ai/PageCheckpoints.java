@@ -73,7 +73,7 @@ final class PageCheckpoints {
             blocked = "页面已变化，不能继续旧进度，请重新生成。";
         } else if (busy || !spec.isAvailable()) blocked = "运行结果尚未确定，请先检查运行状态。";
         return new ChatApi.Recovery(spec.getRequest().runId(), checkpoint.getMetadata().getVersion(),
-            blocked == null, blocked, spec.getUpdatedAt());
+            blocked == null, blocked, spec.getUpdatedAt(), spec.getRequest().modelName());
     }
 
     private static String name(String sessionId) {

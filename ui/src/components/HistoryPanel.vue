@@ -12,7 +12,7 @@ import IconMobile from '~icons/mingcute/cellphone-line'
 import { aiPageBuilderApi, revisionPreviewUrl } from '../api/clients'
 import { pageKeys, queryClient } from '../lib/query-client'
 import type { PageDocument, RevisionSummary } from '../api/generated'
-import type { PreviewDevice } from '../editor/preview-canvas'
+import { initialPreviewDevice, type PreviewDevice } from '../editor/preview-canvas'
 import SourceComparison from './SourceComparison.vue'
 import FixedPreviewViewport from './FixedPreviewViewport.vue'
 import { usePreviewFrame } from '../composables/usePreviewFrame'
@@ -59,11 +59,29 @@ const viewOptions = [
   { value: 'preview', label: '预览', icon: IconEye },
   { value: 'diff', label: '代码差异', icon: IconCode },
 ] as const
-const device = shallowRef<PreviewDevice>('desktop')
+const device = shallowRef<PreviewDevice>(initialPreviewDevice())
 const deviceOptions = [
-  { value: 'desktop', icon: IconDesktop, title: '桌面 1280px' },
-  { value: 'tablet', icon: IconTablet, title: '平板 768px' },
-  { value: 'mobile', icon: IconMobile, title: '手机 390px' },
+  {
+    value: 'desktop',
+    label: '桌面',
+    icon: IconDesktop,
+    title: '桌面 1280px',
+    labelClass: 'md:hidden',
+  },
+  {
+    value: 'tablet',
+    label: '平板',
+    icon: IconTablet,
+    title: '平板 768px',
+    labelClass: 'md:hidden',
+  },
+  {
+    value: 'mobile',
+    label: '手机',
+    icon: IconMobile,
+    title: '手机 390px',
+    labelClass: 'md:hidden',
+  },
 ] as const
 
 // The diff tab compares against the revision's own parent revision, not the current draft
@@ -166,8 +184,14 @@ function refetchDetails() {
                 </template>
               </p>
             </div>
-            <ApbSegmented v-if="view === 'preview'" v-model="device" :options="deviceOptions" />
-            <ApbSegmented v-model="view" :options="viewOptions" />
+            <ApbSegmented
+              v-if="view === 'preview'"
+              v-model="device"
+              :options="deviceOptions"
+              touch
+              aria-label="预览设备"
+            />
+            <ApbSegmented v-model="view" :options="viewOptions" touch aria-label="历史视图" />
             <div class="flex items-center gap-1">
               <button
                 type="button"

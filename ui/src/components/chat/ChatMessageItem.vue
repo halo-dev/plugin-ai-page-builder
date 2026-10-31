@@ -24,13 +24,13 @@ const userText = computed(
 </script>
 
 <template>
-  <article class="mb-6 text-[13px]">
+  <article class="mb-6 text-sm leading-6">
     <div v-if="message.role === 'user'" class="flex justify-end">
       <div class="max-w-[88%] rounded-2xl rounded-br-md bg-gray-100 px-3.5 py-2.5 leading-6">
         <p class="whitespace-pre-wrap">{{ userText }}</p>
         <div v-if="message.annotations.length" class="mt-2 space-y-1 border-t border-gray-200 pt-2">
-          <div v-for="item in message.annotations" :key="item.id" class="text-xs text-gray-500">
-            <span class="font-medium text-gray-600">{{ item.summary }}</span> ·
+          <div v-for="item in message.annotations" :key="item.id" class="text-xs text-gray-600">
+            <span class="font-medium text-gray-700">{{ item.summary }}</span> ·
             {{ item.comment }}
           </div>
         </div>
@@ -56,13 +56,13 @@ const userText = computed(
       <div
         v-if="message.result"
         class="mt-3 flex items-start gap-1.5 text-xs"
-        :class="message.result.failed ? 'text-red-600' : 'text-gray-400'"
+        :class="message.result.failed ? 'text-red-600' : 'text-gray-500'"
       >
         <IconError v-if="message.result.failed" class="mt-0.5 shrink-0" />
         <IconCheck v-else class="mt-0.5 shrink-0 text-emerald-600" />
         <div>
           <p>{{ message.result.text }}</p>
-          <p v-if="message.result.error" class="mt-1 break-all leading-5 text-gray-400">
+          <p v-if="message.result.error" class="mt-1 break-all leading-5 text-gray-500">
             {{ message.result.error }}
           </p>
         </div>

@@ -71,7 +71,7 @@ function toggle() {
 
 <style scoped>
 .apb-disclosure-row {
-  color: #9ca3af;
+  color: #6b7280;
   transition: color 100ms ease;
 }
 .apb-disclosure-row[data-expandable] {
@@ -87,7 +87,7 @@ function toggle() {
 }
 .apb-disclosure-row[data-tone='warn'],
 .apb-disclosure-row[data-tone='warn']:hover {
-  color: #d97706;
+  color: #b45309;
 }
 .apb-disclosure-row:focus-visible {
   border-radius: 4px;
@@ -110,23 +110,17 @@ function toggle() {
 .apb-disclosure-row[aria-expanded='true'] .apb-disclosure-chevron {
   opacity: 1;
 }
-/* Running rows sweep one highlight across title and summary. The gradient is
-   painted into the text, so the base color has to be transparent. */
-.apb-disclosure-row[data-running] .apb-disclosure-title,
-.apb-disclosure-row[data-running] .apb-disclosure-summary {
-  background-image: linear-gradient(90deg, #9ca3af 35%, #e5e7eb 50%, #9ca3af 65%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: apb-disclosure-shimmer 1.8s linear infinite;
+/* Running rows pulse the leading glyph; the text itself stays at full contrast. */
+.apb-disclosure-row[data-running] .apb-disclosure-leading {
+  animation: apb-disclosure-pulse 1.6s ease-in-out infinite;
 }
-@keyframes apb-disclosure-shimmer {
-  from {
-    background-position: 200% 0;
+@keyframes apb-disclosure-pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
-  to {
-    background-position: -200% 0;
+  50% {
+    opacity: 0.4;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -135,10 +129,7 @@ function toggle() {
   .apb-disclosure-chevron {
     transition: none;
   }
-  .apb-disclosure-row[data-running] .apb-disclosure-title,
-  .apb-disclosure-row[data-running] .apb-disclosure-summary {
-    background-image: none;
-    color: inherit;
+  .apb-disclosure-row[data-running] .apb-disclosure-leading {
     animation: none;
   }
 }

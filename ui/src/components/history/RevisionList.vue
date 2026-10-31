@@ -47,12 +47,12 @@ const sourceIcon = (source: string) =>
           >
           <span
             v-if="revision.name === publishedRevision"
-            class="shrink-0 rounded bg-green-50 px-1 text-[10px] leading-4 text-green-600"
+            class="shrink-0 rounded bg-green-50 px-1 text-[10px] leading-4 text-green-700"
             >已发布</span
           >
         </span>
         <span
-          class="flex items-center gap-1 text-[11px] text-gray-400"
+          class="flex items-center gap-1 text-xs text-gray-600"
           :title="fullTime(revision.createdAt)"
         >
           <component :is="sourceIcon(revision.source)" class="shrink-0" />
@@ -61,7 +61,7 @@ const sourceIcon = (source: string) =>
             {{ revision.createdBy }}</span
           >
         </span>
-        <span v-if="revision.theme" class="truncate text-[10px] text-gray-400">
+        <span v-if="revision.theme" class="truncate text-xs text-gray-600">
           主题：{{ revision.theme.displayName || revision.theme.name }}
         </span>
       </button>
