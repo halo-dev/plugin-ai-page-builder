@@ -17,7 +17,9 @@ final class PageRenderCache {
     private final LinkedHashMap<String, Compiled> entries = new LinkedHashMap<>(16, .75f, true);
     private long bytes;
 
-    PageRenderCache(ContentPolicy policy) { this.policy = policy; }
+    PageRenderCache(ContentPolicy policy) {
+        this.policy = policy;
+    }
 
     Compiled compile(String rootId, PageDocument document) {
         // Hash the complete input so cached validation cannot bypass metadata/schema checks.
@@ -27,8 +29,7 @@ final class PageRenderCache {
             if (cached != null) return cached;
         }
         policy.validate(document);
-        var compiled = new Compiled(policy.sanitizeHtml(document.html()),
-            policy.renderCss(document.css(), rootId));
+        var compiled = new Compiled(policy.sanitizeHtml(document.html()), policy.renderCss(document.css(), rootId));
         synchronized (this) {
             var previous = entries.put(key, compiled);
             bytes += compiled.bytes() - (previous == null ? 0 : previous.bytes());
@@ -41,18 +42,23 @@ final class PageRenderCache {
         return compiled;
     }
 
-    synchronized void clear() { entries.clear(); bytes = 0; }
+    synchronized void clear() {
+        entries.clear();
+        bytes = 0;
+    }
 
     private static String hash(String value) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(value.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of()
+                    .formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException(error);
         }
     }
 
     record Compiled(String html, String css) {
-        long bytes() { return 2L * (html.length() + css.length()); }
+        long bytes() {
+            return 2L * (html.length() + css.length());
+        }
     }
 }

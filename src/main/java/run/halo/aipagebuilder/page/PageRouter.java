@@ -23,58 +23,66 @@ public class PageRouter {
     private static final String ROLE_PREFIX = "ROLE_";
 
     @Bean
-    RouterFunction<ServerResponse> aiPageBuilderPublicRoutes(PageService service,
-        PageRenderer renderer) {
+    RouterFunction<ServerResponse> aiPageBuilderPublicRoutes(PageService service, PageRenderer renderer) {
         return request -> {
             if (request.method() != HttpMethod.GET
-                || !RequestPredicates.accept(MediaType.TEXT_HTML).test(request)) {
+                    || !RequestPredicates.accept(MediaType.TEXT_HTML).test(request)) {
                 return Mono.empty();
             }
             var path = request.requestPath().pathWithinApplication().value();
             var slug = path.startsWith("/") ? path.substring(1) : path;
             if (!PagePaths.allowed(slug)) return Mono.empty();
             return service.findPublished(slug)
-                .map(detail -> incoming -> viewer().flatMap(viewer -> {
-                    if (!canRead(detail.page(), viewer)) {
-                        // Reuse the static-resource miss so restricted pages are indistinguishable
-                        // from pages that do not exist.
-                        return Mono.error(new NoResourceFoundException(incoming.uri(), slug));
-                    }
-                    return renderer.render(incoming, detail.page().name(),
-                            detail.page().slug(), detail.page().themeLayout(), detail.document(),
-                            detail.page().title(), detail.page().description(),
-                            viewer.superAdmin(), true)
-                        // Theme layouts can render user-specific markup, and the super
-                        // administrator variant strips scripts. Only anonymous responses may
-                        // be shared by a CDN.
-                        .map(response -> viewer.anonymous()
-                            ? new PageCacheResponse(response) : (ServerResponse) response);
-                }));
+                    .map(detail -> incoming -> viewer().flatMap(viewer -> {
+                        if (!canRead(detail.page(), viewer)) {
+                            // Reuse the static-resource miss so restricted pages are indistinguishable
+                            // from pages that do not exist.
+                            return Mono.error(new NoResourceFoundException(incoming.uri(), slug));
+                        }
+                        return renderer.render(
+                                        incoming,
+                                        detail.page().name(),
+                                        detail.page().slug(),
+                                        detail.page().themeLayout(),
+                                        detail.document(),
+                                        detail.page().title(),
+                                        detail.page().description(),
+                                        viewer.superAdmin(),
+                                        true)
+                                // Theme layouts can render user-specific markup, and the super
+                                // administrator variant strips scripts. Only anonymous responses may
+                                // be shared by a CDN.
+                                .map(response -> viewer.anonymous()
+                                        ? new PageCacheResponse(response)
+                                        : (ServerResponse) response);
+                    }));
         };
     }
 
     /**
-     * Published page scripts must not run with a super administrator's session, including an
-     * impersonated session that can switch back to the original administrator.
+     * Published page scripts must not run with a super administrator's session, including an impersonated session that
+     * can switch back to the original administrator.
      */
     private static Mono<Viewer> viewer() {
         return ReactiveSecurityContextHolder.getContext()
-            .map(SecurityContext::getAuthentication)
-            .filter(authentication -> authentication.isAuthenticated()
-                && !(authentication instanceof AnonymousAuthenticationToken))
-            .map(authentication -> new Viewer(authentication.getName(),
-                roles(authentication.getAuthorities()),
-                authentication.getAuthorities().stream()
-                    .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())
-                        || "ROLE_PREVIOUS_ADMINISTRATOR".equals(authority.getAuthority()))))
-            .defaultIfEmpty(Viewer.ANONYMOUS);
+                .map(SecurityContext::getAuthentication)
+                .filter(authentication ->
+                        authentication.isAuthenticated() && !(authentication instanceof AnonymousAuthenticationToken))
+                .map(authentication -> new Viewer(
+                        authentication.getName(),
+                        roles(authentication.getAuthorities()),
+                        authentication.getAuthorities().stream()
+                                .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())
+                                        || "ROLE_PREVIOUS_ADMINISTRATOR".equals(authority.getAuthority()))))
+                .defaultIfEmpty(Viewer.ANONYMOUS);
     }
 
     private static Set<String> roles(Collection<? extends GrantedAuthority> authorities) {
-        return authorities.stream().map(GrantedAuthority::getAuthority)
-            .filter(authority -> authority.startsWith(ROLE_PREFIX))
-            .map(authority -> authority.substring(ROLE_PREFIX.length()))
-            .collect(Collectors.toSet());
+        return authorities.stream()
+                .map(GrantedAuthority::getAuthority)
+                .filter(authority -> authority.startsWith(ROLE_PREFIX))
+                .map(authority -> authority.substring(ROLE_PREFIX.length()))
+                .collect(Collectors.toSet());
     }
 
     private static boolean canRead(PageApi.PageSummary page, Viewer viewer) {
@@ -88,11 +96,11 @@ public class PageRouter {
             return false;
         }
         return page.members().stream()
-            .filter(member -> member != null && member.name() != null)
-            .anyMatch(member -> member.kind() == ThemePage.MemberType.USER
-                ? viewer.username().equals(member.name())
-                : member.kind() == ThemePage.MemberType.ROLE
-                    && viewer.roles().contains(member.name()));
+                .filter(member -> member != null && member.name() != null)
+                .anyMatch(member -> member.kind() == ThemePage.MemberType.USER
+                        ? viewer.username().equals(member.name())
+                        : member.kind() == ThemePage.MemberType.ROLE
+                                && viewer.roles().contains(member.name()));
     }
 
     private record Viewer(String username, Set<String> roles, boolean superAdmin) {

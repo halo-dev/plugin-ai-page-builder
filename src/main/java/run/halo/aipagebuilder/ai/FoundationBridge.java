@@ -21,9 +21,9 @@ import run.halo.aifoundation.exception.StructuredOutputValidationException;
 import run.halo.aifoundation.exception.UnsupportedModelCapabilityException;
 import run.halo.aifoundation.part.PartType;
 import run.halo.aifoundation.schema.OutputSpec;
-import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.ai.AiGenerationException.Reason;
+import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
 /** Loaded reflectively on demand only. Must never be a Spring/PF4J component. */
 public final class FoundationBridge implements AiGateway {
@@ -85,7 +85,8 @@ public final class FoundationBridge implements AiGateway {
 
     @Override
     public Mono<Boolean> available() {
-        return Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class)).hasElement();
+        return Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class))
+                .hasElement();
     }
 
     @Override
@@ -96,22 +97,23 @@ public final class FoundationBridge implements AiGateway {
     @Override
     public Mono<AiReview> review(String modelName, String system, String prompt) {
         var request = GenerateTextRequest.builder()
-            .system(system)
-            .prompt(prompt)
-            .output(OutputSpec.object(AiReview.class))
-            .temperature(0.1)
-            .maxOutputTokens(3000)
-            .maxRetries(1)
-            .build();
+                .system(system)
+                .prompt(prompt)
+                .output(OutputSpec.object(AiReview.class))
+                .temperature(0.1)
+                .maxOutputTokens(3000)
+                .maxRetries(1)
+                .build();
         return Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class))
-            .switchIfEmpty(Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE)))
-            .flatMap(service -> modelName == null || modelName.isBlank()
-                ? service.languageModel() : service.languageModel(modelName))
-            .switchIfEmpty(Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE)))
-            .flatMap(model -> model.generateText(request))
-            .timeout(Duration.ofSeconds(120))
-            .map(FoundationBridge::convertReview)
-            .onErrorMap(FoundationBridge::reviewError);
+                .switchIfEmpty(Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE)))
+                .flatMap(service -> modelName == null || modelName.isBlank()
+                        ? service.languageModel()
+                        : service.languageModel(modelName))
+                .switchIfEmpty(Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE)))
+                .flatMap(model -> model.generateText(request))
+                .timeout(Duration.ofSeconds(120))
+                .map(FoundationBridge::convertReview)
+                .onErrorMap(FoundationBridge::reviewError);
     }
 
     private static AiReview convertReview(GenerateTextResult result) {
@@ -133,45 +135,58 @@ public final class FoundationBridge implements AiGateway {
             return new AiReviewException(AiReviewException.Reason.TIMEOUT, error);
         }
         if (error instanceof StructuredOutputSchemaException
-            || error instanceof StructuredOutputValidationException
-            || error instanceof IllegalArgumentException) {
+                || error instanceof StructuredOutputValidationException
+                || error instanceof IllegalArgumentException) {
             return new AiReviewException(AiReviewException.Reason.INVALID_OUTPUT, error);
         }
         if (error instanceof DefaultModelNotConfiguredException
-            || error instanceof ModelNotFoundException
-            || error instanceof ModelDisabledException
-            || error instanceof ProviderDisabledException
-            || error instanceof IncompatibleModelTypeException
-            || error instanceof UnsupportedModelCapabilityException) {
+                || error instanceof ModelNotFoundException
+                || error instanceof ModelDisabledException
+                || error instanceof ProviderDisabledException
+                || error instanceof IncompatibleModelTypeException
+                || error instanceof UnsupportedModelCapabilityException) {
             return new AiReviewException(AiReviewException.Reason.UNAVAILABLE, error);
         }
         return new AiReviewException(AiReviewException.Reason.FAILED, error);
     }
 
     @Override
-    public Flux<java.util.Map<String, Object>> chat(String modelName,
-        java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
+    public Flux<java.util.Map<String, Object>> chat(
+            String modelName, java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
         return recoverableAttempt(modelName, history, prompt, copy, copy.restored());
     }
 
-    private Flux<java.util.Map<String, Object>> recoverableAttempt(String modelName,
-        java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy, boolean recovering) {
+    private Flux<java.util.Map<String, Object>> recoverableAttempt(
+            String modelName,
+            java.util.List<ChatApi.Turn> history,
+            String prompt,
+            PageWorkingCopy copy,
+            boolean recovering) {
         return attempt(modelName, history, prompt + (recovering ? "\n" + copy.recoveryContext() : ""), copy)
-            .onErrorResume(error -> {
-            if (error instanceof AiGenerationException known && known.reason() == Reason.TRUNCATED
-                && !copy.checkpointFailed() && copy.budget.recover()) {
-                var recovery = java.util.Map.<String, Object>of("type", "data-generation-recovery",
-                    "name", "generation-recovery", "id", "recovery-" + copy.budget.recoveries(), "data", java.util.Map.of("attempt", copy.budget.recoveries(),
-                        "message", "输出暂时中断，正在从已完成的进度继续生成…"));
-                return Flux.just(recovery).concatWith(recoverableAttempt(modelName, history,
-                    prompt, copy, true));
-            }
-            return Flux.error(error);
-        });
+                .onErrorResume(error -> {
+                    if (error instanceof AiGenerationException known
+                            && known.reason() == Reason.TRUNCATED
+                            && !copy.checkpointFailed()
+                            && copy.budget.recover()) {
+                        var recovery = java.util.Map.<String, Object>of(
+                                "type",
+                                "data-generation-recovery",
+                                "name",
+                                "generation-recovery",
+                                "id",
+                                "recovery-" + copy.budget.recoveries(),
+                                "data",
+                                java.util.Map.of(
+                                        "attempt", copy.budget.recoveries(), "message", "输出暂时中断，正在从已完成的进度继续生成…"));
+                        return Flux.just(recovery)
+                                .concatWith(recoverableAttempt(modelName, history, prompt, copy, true));
+                    }
+                    return Flux.error(error);
+                });
     }
 
-    private Flux<java.util.Map<String, Object>> attempt(String modelName,
-        java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
+    private Flux<java.util.Map<String, Object>> attempt(
+            String modelName, java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
         return Flux.defer(() -> {
             var prefix = "attempt-" + copy.budget.nextAttempt() + "-";
             var segments = new SegmentIds();
@@ -180,15 +195,17 @@ public final class FoundationBridge implements AiGateway {
             var stepStarted = new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
             var messages = new java.util.ArrayList<run.halo.aifoundation.ui.UIMessage<Void>>();
             for (var turn : history) {
-                messages.add(new run.halo.aifoundation.ui.UIMessage<>(turn.runId() + "-user",
-                    run.halo.aifoundation.ui.UIMessageRole.USER,
-                    java.util.List.of(new run.halo.aifoundation.ui.TextPart("text", turn.prompt())), null));
+                messages.add(new run.halo.aifoundation.ui.UIMessage<>(
+                        turn.runId() + "-user",
+                        run.halo.aifoundation.ui.UIMessageRole.USER,
+                        java.util.List.of(new run.halo.aifoundation.ui.TextPart("text", turn.prompt())),
+                        null));
                 var text = turn.text() + "\nTurn result: " + turn.status() + "\nTool summary: "
-                    + Json.toJson(turn.tools())
-                    + "\nUser questions and answers (conversation data): "
-                    + Json.toJson(turn.questions());
-                messages.add(run.halo.aifoundation.ui.UIMessage.assistant(turn.runId(),
-                    java.util.List.of(new run.halo.aifoundation.ui.TextPart("text", text))));
+                        + Json.toJson(turn.tools())
+                        + "\nUser questions and answers (conversation data): "
+                        + Json.toJson(turn.questions());
+                messages.add(run.halo.aifoundation.ui.UIMessage.assistant(
+                        turn.runId(), java.util.List.of(new run.halo.aifoundation.ui.TextPart("text", text))));
             }
             var currentParts = new java.util.ArrayList<run.halo.aifoundation.ui.TextPart>();
             var themeReference = copy.themeReference();
@@ -200,187 +217,367 @@ public final class FoundationBridge implements AiGateway {
                 currentParts.add(new run.halo.aifoundation.ui.TextPart("text", memoryReference));
             }
             currentParts.add(new run.halo.aifoundation.ui.TextPart("text", prompt));
-            messages.add(new run.halo.aifoundation.ui.UIMessage<>("current-user",
-                run.halo.aifoundation.ui.UIMessageRole.USER,
-                new java.util.ArrayList<>(currentParts), null));
+            messages.add(new run.halo.aifoundation.ui.UIMessage<>(
+                    "current-user",
+                    run.halo.aifoundation.ui.UIMessageRole.USER,
+                    new java.util.ArrayList<>(currentParts),
+                    null));
             var request = GenerateTextRequest.builder()
-                .system(SYSTEM_PROMPT)
-                .messages(run.halo.aifoundation.ui.UIMessageConverters.toModelMessages(messages))
-                .tools(withReferences(copy, prefix, java.util.List.of(
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("get_theme_context").description("Read the active theme's layout, its content-slot container, the article page template (reference only), base CSS, UI stack and component classes, light/dark rules, main landmark and structured extraction gaps; bounded static design reference only")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(),
-                            "additionalProperties", false))
-                        .executor(context -> copy.readTheme().cast(Object.class)).build(),
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("read_current_page").description("Read the current page's working copy for this turn")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(),
-                            "additionalProperties", false))
-                        .executor(context -> Mono.fromSupplier(copy::read)).build(),
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("set_page_slug").description("Set a semantic URL path for an unpublished page without a path (canSetSlug=true). Use 1–200 lowercase letters, digits, hyphens and optional / separators. Never overwrite an existing path or use system paths such as console, api, apis, login or themes.")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
-                            "slug", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 200,
-                                "pattern", run.halo.aipagebuilder.page.PagePaths.SLUG_PATTERN)),
-                            "required", java.util.List.of("slug"), "additionalProperties", false))
-                        .executor(context -> copy.setSlug(context.getInput()).cast(Object.class))
-                        .build(),
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("update_page_title").description("Set the page title (1–200 characters, trimmed). For a new page still titled 未命名页面, call this early with a concise accurate title. Do not change the title for minor edits unless the user asks.")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
-                            "title", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 200)),
-                            "required", java.util.List.of("title"), "additionalProperties", false))
-                        .executor(context -> copy.setTitle(context.getInput()).cast(Object.class))
-                        .build(),
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("update_page_description").description("Set the page's SEO meta description (1–1000 characters, trimmed). When read_current_page shows an empty description, call this once after the main content is staged with an accurate 60–160 character summary (40–80 Chinese characters) of the page's real content; never invent facts. If a description already exists, it is rejected unless replaceExisting=true; pass that only when the user explicitly asks to rewrite the description.")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
-                            "description", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 1000),
-                            "replaceExisting", java.util.Map.of("type", "boolean", "description",
-                                "Only true when the user explicitly asks to rewrite an existing description")),
-                            "required", java.util.List.of("description"), "additionalProperties", false))
-                        .executor(context -> copy.setDescription(context.getInput()).cast(Object.class))
-                        .build(),
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("rename_session").description("Set a concise 1–100 character conversation title on the first turn or a substantial topic change. Keep it on routine follow-up edits. This is independent of the page title.")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
-                            "title", java.util.Map.of("type", "string", "minLength", 1, "maxLength", 100)),
-                            "required", java.util.List.of("title"), "additionalProperties", false))
-                        .executor(context -> copy.renameSession(context.getInput()).cast(Object.class))
-                        .build(),
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("patch_current_page").description("Atomically replace uniquely matched HTML/CSS/JS fragments against the current baseHash. Re-read after hash/match errors; follow validation feedback and never bypass unsupported capabilities")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
-                            "baseHash", java.util.Map.of("type", "string"),
-                            "patches", java.util.Map.of("type", "array", "minItems", 1, "maxItems", 20,
-                                "items", java.util.Map.of("type", "object", "properties", java.util.Map.of(
-                                    "field", java.util.Map.of("type", "string", "enum", java.util.List.of("html", "css", "js")),
-                                    "oldText", java.util.Map.of("type", "string", "minLength", 1),
-                                    "newText", java.util.Map.of("type", "string")),
-                                    "required", java.util.List.of("field", "oldText", "newText"), "additionalProperties", false))),
-                            "required", java.util.List.of("baseHash", "patches"), "additionalProperties", false))
-                        .executor(context -> copy.patch(context.getInput()).cast(Object.class))
-                        .build(),
-                    run.halo.aifoundation.tool.ToolDefinition.builder()
-                        .name("update_current_page").description("Validate and stage any supplied HTML, CSS or JS fields; omitted fields stay unchanged. Related fields may be staged together; split long outputs into complete sections. Repair syntax errors; for unsupported capabilities explain the limitation and clarify alternatives instead of trying equivalent workarounds")
-                        .inputSchema(java.util.Map.of("type", "object", "properties", java.util.Map.of(
-                            "html", java.util.Map.of("type", "string"),
-                            "css", java.util.Map.of("type", "string"),
-                            "js", java.util.Map.of("type", "string", "description", "Standalone page script; omit to keep the existing script, empty string clears it")),
-                            "minProperties", 1, "additionalProperties", false))
-                        .executor(context -> copy.update(context.getInput()).cast(Object.class))
-                        .build())))
-                .toolChoice(run.halo.aifoundation.tool.ToolChoice.auto())
-                .parallelToolCalls(false)
-                // Foundation StopCondition returns shouldContinue, despite the builder name.
-                .stopWhen(context -> copy.budget.hasSteps()
-                    && (context.getStep() == null || context.getStep().getFinishReason() != FinishReason.LENGTH))
-                .prepareStep(context -> {
-                    var step = copy.budget.nextStep();
-                    stepStarted.set(System.nanoTime());
-                    var steers = copy.drainSteers();
-                    var stepped = new java.util.ArrayList<>(context.getMessages());
-                    if (!steers.isEmpty()) stepped.add(run.halo.aifoundation.message.ModelMessage.user(
-                        steerMessage(steers) + "\n" + copy.memoryReference()));
-                    if (step >= 18) stepped.add(run.halo.aifoundation.message.ModelMessage.user(
-                        "Only " + (RunBudget.MAX_STEPS - step + 1) + " model steps remain. "
-                        + "Do not read optional new references. Finish the requested edits and repair "
-                        + "validation errors, then summarize. Never claim unfinished work is complete."));
-                    copy.budget.requireContextFits(
-                        ModelContextBudget.bytes(SYSTEM_PROMPT, stepped, context.getTools()));
-                    return run.halo.aifoundation.chat.PreparedStep.builder().messages(stepped).build();
-                })
-                .lifecycle(new run.halo.aifoundation.lifecycle.GenerationLifecycle() {
-                    @Override
-                    public Mono<Void> onStepFinish(
-                        run.halo.aifoundation.lifecycle.GenerationStepFinishEvent event) {
-                        var step = event.getStep();
-                        var usage = step.getUsage();
-                        copy.budget.usage(usage == null ? null : usage.getInputTokens(),
-                            usage == null ? null : usage.getOutputTokens());
-                        var toolNames = step.getToolCalls() == null ? java.util.List.of()
-                            : step.getToolCalls().stream().map(run.halo.aifoundation.tool.ToolCall::getToolName).toList();
-                        org.slf4j.LoggerFactory.getLogger(FoundationBridge.class).info(
-                            "Page model step: {}, model={}, step={}, finish={}, inputTokens={}, outputTokens={}, "
-                                + "elapsedMs={}, tools={}, toolErrors={}, recoveries={}",
-                            copy.trace(), modelName, copy.budget.steps(), step.getFinishReason(),
-                            usage == null ? null : usage.getInputTokens(),
-                            usage == null ? null : usage.getOutputTokens(),
-                            (System.nanoTime() - stepStarted.get()) / 1_000_000, toolNames,
-                            step.getToolErrors() == null ? 0 : step.getToolErrors().size(), copy.budget.recoveries());
-                        return Mono.empty();
-                    }
-                })
-                .maxOutputTokens(16384).maxRetries(0)
-                .cancellationToken(cancellation.token()).build();
-            copy.budget.requireContextFits(
-                ModelContextBudget.bytes(SYSTEM_PROMPT, request.getMessages(), request.getTools()));
-            var stream = Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class))
-                .switchIfEmpty(Mono.error(new AiGenerationException(Reason.MODEL_UNAVAILABLE)))
-                .flatMap(service -> service.languageModel(modelName))
-                .switchIfEmpty(Mono.error(new AiGenerationException(Reason.MODEL_UNAVAILABLE)))
-                .flatMapMany(model -> model.streamText(request).fullStream())
-                .onErrorMap(run.halo.aifoundation.exception.AiGenerationTimeoutException.class,
-                    error -> new AiGenerationException(Reason.TIMEOUT))
-                .timeout(copy.timeBudget.deadline(RESPONSE_TIMEOUT, Reason.RESPONSE_TIMEOUT),
-                    part -> copy.timeBudget.deadline(RESPONSE_TIMEOUT, Reason.RESPONSE_TIMEOUT))
-                .<run.halo.aifoundation.part.TextStreamPart>handle((part, sink) -> {
-                    if (finished.get()) {
-                        sink.error(new AiGenerationException(Reason.CALL_FAILED));
-                        return;
-                    }
-                    if (part.getDelta() != null) {
-                        copy.consume(part.getDelta());
-                    }
-                    if (part.getType() == PartType.FINISH) {
-                        var budgetReason = copy.budget.exhaustionReason();
-                        if (copy.checkpointFailed()) {
-                            sink.error(new AiGenerationException(Reason.CHECKPOINT_FAILED));
-                        } else if (budgetReason != null) {
-                            sink.error(new AiGenerationException(budgetReason));
-                        } else if (part.getFinishReason() != FinishReason.STOP) {
-                            var reason = part.getFinishReason() == FinishReason.LENGTH
-                                ? (copy.budget.hasSteps() ? Reason.TRUNCATED : Reason.STEP_LIMIT)
-                                : part.getFinishReason() == FinishReason.TOOL_CALLS
-                                    ? (copy.budget.hasSteps() ? Reason.TOOL_LOOP_INCOMPLETE : Reason.STEP_LIMIT)
-                                    : Reason.CALL_FAILED;
-                            sink.error(new AiGenerationException(reason));
-                        } else {
-                            finished.set(true);
+                    .system(SYSTEM_PROMPT)
+                    .messages(run.halo.aifoundation.ui.UIMessageConverters.toModelMessages(messages))
+                    .tools(withReferences(
+                            copy,
+                            prefix,
+                            java.util.List.of(
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("get_theme_context")
+                                            .description(
+                                                    "Read the active theme's layout, its content-slot container, the article page template (reference only), base CSS, UI stack and component classes, light/dark rules, main landmark and structured extraction gaps; bounded static design reference only")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(),
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(
+                                                    context -> copy.readTheme().cast(Object.class))
+                                            .build(),
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("read_current_page")
+                                            .description("Read the current page's working copy for this turn")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(),
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(context -> Mono.fromSupplier(copy::read))
+                                            .build(),
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("set_page_slug")
+                                            .description(
+                                                    "Set a semantic URL path for an unpublished page without a path (canSetSlug=true). Use 1–200 lowercase letters, digits, hyphens and optional / separators. Never overwrite an existing path or use system paths such as console, api, apis, login or themes.")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(
+                                                            "slug",
+                                                            java.util.Map.of(
+                                                                    "type",
+                                                                    "string",
+                                                                    "minLength",
+                                                                    1,
+                                                                    "maxLength",
+                                                                    200,
+                                                                    "pattern",
+                                                                    run.halo.aipagebuilder.page.PagePaths
+                                                                            .SLUG_PATTERN)),
+                                                    "required",
+                                                    java.util.List.of("slug"),
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(context -> copy.setSlug(context.getInput())
+                                                    .cast(Object.class))
+                                            .build(),
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("update_page_title")
+                                            .description(
+                                                    "Set the page title (1–200 characters, trimmed). For a new page still titled 未命名页面, call this early with a concise accurate title. Do not change the title for minor edits unless the user asks.")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(
+                                                            "title",
+                                                            java.util.Map.of(
+                                                                    "type",
+                                                                    "string",
+                                                                    "minLength",
+                                                                    1,
+                                                                    "maxLength",
+                                                                    200)),
+                                                    "required",
+                                                    java.util.List.of("title"),
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(context -> copy.setTitle(context.getInput())
+                                                    .cast(Object.class))
+                                            .build(),
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("update_page_description")
+                                            .description(
+                                                    "Set the page's SEO meta description (1–1000 characters, trimmed). When read_current_page shows an empty description, call this once after the main content is staged with an accurate 60–160 character summary (40–80 Chinese characters) of the page's real content; never invent facts. If a description already exists, it is rejected unless replaceExisting=true; pass that only when the user explicitly asks to rewrite the description.")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(
+                                                            "description",
+                                                                    java.util.Map.of(
+                                                                            "type",
+                                                                            "string",
+                                                                            "minLength",
+                                                                            1,
+                                                                            "maxLength",
+                                                                            1000),
+                                                            "replaceExisting",
+                                                                    java.util.Map.of(
+                                                                            "type",
+                                                                            "boolean",
+                                                                            "description",
+                                                                            "Only true when the user explicitly asks to rewrite an existing description")),
+                                                    "required",
+                                                    java.util.List.of("description"),
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(context -> copy.setDescription(context.getInput())
+                                                    .cast(Object.class))
+                                            .build(),
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("rename_session")
+                                            .description(
+                                                    "Set a concise 1–100 character conversation title on the first turn or a substantial topic change. Keep it on routine follow-up edits. This is independent of the page title.")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(
+                                                            "title",
+                                                            java.util.Map.of(
+                                                                    "type",
+                                                                    "string",
+                                                                    "minLength",
+                                                                    1,
+                                                                    "maxLength",
+                                                                    100)),
+                                                    "required",
+                                                    java.util.List.of("title"),
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(context -> copy.renameSession(context.getInput())
+                                                    .cast(Object.class))
+                                            .build(),
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("patch_current_page")
+                                            .description(
+                                                    "Atomically replace uniquely matched HTML/CSS/JS fragments against the current baseHash. Re-read after hash/match errors; follow validation feedback and never bypass unsupported capabilities")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(
+                                                            "baseHash", java.util.Map.of("type", "string"),
+                                                            "patches",
+                                                                    java.util.Map.of(
+                                                                            "type",
+                                                                            "array",
+                                                                            "minItems",
+                                                                            1,
+                                                                            "maxItems",
+                                                                            20,
+                                                                            "items",
+                                                                            java.util.Map.of(
+                                                                                    "type",
+                                                                                    "object",
+                                                                                    "properties",
+                                                                                    java.util.Map.of(
+                                                                                            "field",
+                                                                                                    java.util.Map.of(
+                                                                                                            "type",
+                                                                                                            "string",
+                                                                                                            "enum",
+                                                                                                            java.util
+                                                                                                                    .List
+                                                                                                                    .of(
+                                                                                                                            "html",
+                                                                                                                            "css",
+                                                                                                                            "js")),
+                                                                                            "oldText",
+                                                                                                    java.util.Map.of(
+                                                                                                            "type",
+                                                                                                            "string",
+                                                                                                            "minLength",
+                                                                                                            1),
+                                                                                            "newText",
+                                                                                                    java.util.Map.of(
+                                                                                                            "type",
+                                                                                                            "string")),
+                                                                                    "required",
+                                                                                    java.util.List.of(
+                                                                                            "field", "oldText",
+                                                                                            "newText"),
+                                                                                    "additionalProperties",
+                                                                                    false))),
+                                                    "required",
+                                                    java.util.List.of("baseHash", "patches"),
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(context -> copy.patch(context.getInput())
+                                                    .cast(Object.class))
+                                            .build(),
+                                    run.halo.aifoundation.tool.ToolDefinition.builder()
+                                            .name("update_current_page")
+                                            .description(
+                                                    "Validate and stage any supplied HTML, CSS or JS fields; omitted fields stay unchanged. Related fields may be staged together; split long outputs into complete sections. Repair syntax errors; for unsupported capabilities explain the limitation and clarify alternatives instead of trying equivalent workarounds")
+                                            .inputSchema(java.util.Map.of(
+                                                    "type",
+                                                    "object",
+                                                    "properties",
+                                                    java.util.Map.of(
+                                                            "html", java.util.Map.of("type", "string"),
+                                                            "css", java.util.Map.of("type", "string"),
+                                                            "js",
+                                                                    java.util.Map.of(
+                                                                            "type",
+                                                                            "string",
+                                                                            "description",
+                                                                            "Standalone page script; omit to keep the existing script, empty string clears it")),
+                                                    "minProperties",
+                                                    1,
+                                                    "additionalProperties",
+                                                    false))
+                                            .executor(context -> copy.update(context.getInput())
+                                                    .cast(Object.class))
+                                            .build())))
+                    .toolChoice(run.halo.aifoundation.tool.ToolChoice.auto())
+                    .parallelToolCalls(false)
+                    // Foundation StopCondition returns shouldContinue, despite the builder name.
+                    .stopWhen(context -> copy.budget.hasSteps()
+                            && (context.getStep() == null
+                                    || context.getStep().getFinishReason() != FinishReason.LENGTH))
+                    .prepareStep(context -> {
+                        var step = copy.budget.nextStep();
+                        stepStarted.set(System.nanoTime());
+                        var steers = copy.drainSteers();
+                        var stepped = new java.util.ArrayList<>(context.getMessages());
+                        if (!steers.isEmpty())
+                            stepped.add(run.halo.aifoundation.message.ModelMessage.user(
+                                    steerMessage(steers) + "\n" + copy.memoryReference()));
+                        if (step >= 18)
+                            stepped.add(
+                                    run.halo.aifoundation.message.ModelMessage.user(
+                                            "Only " + (RunBudget.MAX_STEPS - step + 1) + " model steps remain. "
+                                                    + "Do not read optional new references. Finish the requested edits and repair "
+                                                    + "validation errors, then summarize. Never claim unfinished work is complete."));
+                        copy.budget.requireContextFits(
+                                ModelContextBudget.bytes(SYSTEM_PROMPT, stepped, context.getTools()));
+                        return run.halo.aifoundation.chat.PreparedStep.builder()
+                                .messages(stepped)
+                                .build();
+                    })
+                    .lifecycle(new run.halo.aifoundation.lifecycle.GenerationLifecycle() {
+                        @Override
+                        public Mono<Void> onStepFinish(
+                                run.halo.aifoundation.lifecycle.GenerationStepFinishEvent event) {
+                            var step = event.getStep();
+                            var usage = step.getUsage();
+                            copy.budget.usage(
+                                    usage == null ? null : usage.getInputTokens(),
+                                    usage == null ? null : usage.getOutputTokens());
+                            var toolNames = step.getToolCalls() == null
+                                    ? java.util.List.of()
+                                    : step.getToolCalls().stream()
+                                            .map(run.halo.aifoundation.tool.ToolCall::getToolName)
+                                            .toList();
+                            org.slf4j.LoggerFactory.getLogger(FoundationBridge.class)
+                                    .info(
+                                            "Page model step: {}, model={}, step={}, finish={}, inputTokens={}, outputTokens={}, "
+                                                    + "elapsedMs={}, tools={}, toolErrors={}, recoveries={}",
+                                            copy.trace(),
+                                            modelName,
+                                            copy.budget.steps(),
+                                            step.getFinishReason(),
+                                            usage == null ? null : usage.getInputTokens(),
+                                            usage == null ? null : usage.getOutputTokens(),
+                                            (System.nanoTime() - stepStarted.get()) / 1_000_000,
+                                            toolNames,
+                                            step.getToolErrors() == null
+                                                    ? 0
+                                                    : step.getToolErrors().size(),
+                                            copy.budget.recoveries());
+                            return Mono.empty();
                         }
-                    } else if (part.getType() == PartType.ERROR || part.getType() == PartType.ABORT) {
-                        sink.error(new AiGenerationException(Reason.CALL_FAILED));
-                    } else {
-                        sink.next(part);
-                    }
-                });
-            return run.halo.aifoundation.ui.UIMessageStreamMapper.toUIMessageStream(stream).chunks()
-                .map(run.halo.aifoundation.ui.UIMessageTransportCodec::chunkToMap)
-                .map(chunk -> {
-                    var namespaced = new java.util.LinkedHashMap<String, Object>(chunk);
-                    var type = chunk.get("type") instanceof String value ? value : "";
-                    if (chunk.get("id") instanceof String value) {
-                        namespaced.put("id", prefix + segments.id(type, value));
-                    }
-                    if (chunk.get("toolCallId") instanceof String value) {
-                        namespaced.put("toolCallId", prefix + value);
-                    }
-                    // Recovery and steer continuations belong to the same assistant reply.
-                    if (chunk.containsKey("messageId")) namespaced.put("messageId", copy.assistantMessageId);
-                    return (java.util.Map<String, Object>) namespaced;
-                })
-                .concatWith(Flux.defer(() -> finished.get() ? Flux.empty()
-                    : Flux.error(new AiGenerationException(Reason.STREAM_INCOMPLETE))))
-                .doFinally(signal -> cancellation.cancel());
+                    })
+                    .maxOutputTokens(16384)
+                    .maxRetries(0)
+                    .cancellationToken(cancellation.token())
+                    .build();
+            copy.budget.requireContextFits(
+                    ModelContextBudget.bytes(SYSTEM_PROMPT, request.getMessages(), request.getTools()));
+            var stream = Mono.defer(() -> extensions.getEnabledExtension(AiModelService.class))
+                    .switchIfEmpty(Mono.error(new AiGenerationException(Reason.MODEL_UNAVAILABLE)))
+                    .flatMap(service -> service.languageModel(modelName))
+                    .switchIfEmpty(Mono.error(new AiGenerationException(Reason.MODEL_UNAVAILABLE)))
+                    .flatMapMany(model -> model.streamText(request).fullStream())
+                    .onErrorMap(
+                            run.halo.aifoundation.exception.AiGenerationTimeoutException.class,
+                            error -> new AiGenerationException(Reason.TIMEOUT))
+                    .timeout(
+                            copy.timeBudget.deadline(RESPONSE_TIMEOUT, Reason.RESPONSE_TIMEOUT),
+                            part -> copy.timeBudget.deadline(RESPONSE_TIMEOUT, Reason.RESPONSE_TIMEOUT))
+                    .<run.halo.aifoundation.part.TextStreamPart>handle((part, sink) -> {
+                        if (finished.get()) {
+                            sink.error(new AiGenerationException(Reason.CALL_FAILED));
+                            return;
+                        }
+                        if (part.getDelta() != null) {
+                            copy.consume(part.getDelta());
+                        }
+                        if (part.getType() == PartType.FINISH) {
+                            var budgetReason = copy.budget.exhaustionReason();
+                            if (copy.checkpointFailed()) {
+                                sink.error(new AiGenerationException(Reason.CHECKPOINT_FAILED));
+                            } else if (budgetReason != null) {
+                                sink.error(new AiGenerationException(budgetReason));
+                            } else if (part.getFinishReason() != FinishReason.STOP) {
+                                var reason = part.getFinishReason() == FinishReason.LENGTH
+                                        ? (copy.budget.hasSteps() ? Reason.TRUNCATED : Reason.STEP_LIMIT)
+                                        : part.getFinishReason() == FinishReason.TOOL_CALLS
+                                                ? (copy.budget.hasSteps()
+                                                        ? Reason.TOOL_LOOP_INCOMPLETE
+                                                        : Reason.STEP_LIMIT)
+                                                : Reason.CALL_FAILED;
+                                sink.error(new AiGenerationException(reason));
+                            } else {
+                                finished.set(true);
+                            }
+                        } else if (part.getType() == PartType.ERROR || part.getType() == PartType.ABORT) {
+                            sink.error(new AiGenerationException(Reason.CALL_FAILED));
+                        } else {
+                            sink.next(part);
+                        }
+                    });
+            return run.halo.aifoundation.ui.UIMessageStreamMapper.toUIMessageStream(stream)
+                    .chunks()
+                    .map(run.halo.aifoundation.ui.UIMessageTransportCodec::chunkToMap)
+                    .map(chunk -> {
+                        var namespaced = new java.util.LinkedHashMap<String, Object>(chunk);
+                        var type = chunk.get("type") instanceof String value ? value : "";
+                        if (chunk.get("id") instanceof String value) {
+                            namespaced.put("id", prefix + segments.id(type, value));
+                        }
+                        if (chunk.get("toolCallId") instanceof String value) {
+                            namespaced.put("toolCallId", prefix + value);
+                        }
+                        // Recovery and steer continuations belong to the same assistant reply.
+                        if (chunk.containsKey("messageId")) namespaced.put("messageId", copy.assistantMessageId);
+                        return (java.util.Map<String, Object>) namespaced;
+                    })
+                    .concatWith(Flux.defer(() -> finished.get()
+                            ? Flux.empty()
+                            : Flux.error(new AiGenerationException(Reason.STREAM_INCOMPLETE))))
+                    .doFinally(signal -> cancellation.cancel());
         });
     }
 
     /**
-     * AI Foundation reuses one text/reasoning id per model step and re-emits "*-start" with
-     * that id when the segment resumes after reasoning or tool input. The UI reducer updates
-     * the matching part in place, so the resumed text would grow at its old position, above
-     * parts rendered in between. Rewrite each resumed segment to a fresh id so it appends
-     * where the model emitted it; deltas and ends follow the current segment.
+     * AI Foundation reuses one text/reasoning id per model step and re-emits "*-start" with that id when the segment
+     * resumes after reasoning or tool input. The UI reducer updates the matching part in place, so the resumed text
+     * would grow at its old position, above parts rendered in between. Rewrite each resumed segment to a fresh id so it
+     * appends where the model emitted it; deltas and ends follow the current segment.
      */
     static final class SegmentIds {
         private final java.util.Map<String, String> current = new java.util.HashMap<>();
@@ -398,32 +595,38 @@ public final class FoundationBridge implements AiGateway {
 
     static String steerMessage(java.util.List<String> steers) {
         return "While you were working, the user sent additional instructions. Follow them from "
-            + "now on; they refine the current task rather than replace it, unless they explicitly "
-            + "say otherwise:\n" + String.join("\n", steers);
+                + "now on; they refine the current task rather than replace it, unless they explicitly "
+                + "say otherwise:\n" + String.join("\n", steers);
     }
 
     private static java.util.List<run.halo.aifoundation.tool.ToolDefinition> withReferences(
-        PageWorkingCopy copy, String prefix, java.util.List<run.halo.aifoundation.tool.ToolDefinition> tools) {
+            PageWorkingCopy copy, String prefix, java.util.List<run.halo.aifoundation.tool.ToolDefinition> tools) {
         var result = new java.util.ArrayList<>(tools);
         if (copy.hasMemory()) {
             result.add(run.halo.aifoundation.tool.ToolDefinition.builder()
-                .name(PageMemoryTools.NAME)
-                .description("Persist 1–5 reusable site business facts, explicit permanent corrections, or explicit forget requests. Every operation needs a current-run sourceId and exact user quote. Add/update need subject, key, kind (fact or brand_preference), value; update/delete need entryId. Writes are immediate, independent of the page draft.")
-                .inputSchema(PageMemoryTools.schema())
-                .executor(context -> copy.updateMemory(prefix + context.getToolCallId(), context.getInput())
-                    .cast(Object.class)).build());
+                    .name(PageMemoryTools.NAME)
+                    .description(
+                            "Persist 1–5 reusable site business facts, explicit permanent corrections, or explicit forget requests. Every operation needs a current-run sourceId and exact user quote. Add/update need subject, key, kind (fact or brand_preference), value; update/delete need entryId. Writes are immediate, independent of the page draft.")
+                    .inputSchema(PageMemoryTools.schema())
+                    .executor(context -> copy.updateMemory(prefix + context.getToolCallId(), context.getInput())
+                            .cast(Object.class))
+                    .build());
         }
         result.add(run.halo.aifoundation.tool.ToolDefinition.builder()
-            .name("ask_user")
-            .description("Ask 1–3 clarification questions and wait for the user: resolve required missing facts or agree on alternatives for unsupported capabilities before generation. Omit optional unknown facts instead of inventing them. Each question has 2–4 choices, optionally a custom answer, or no choices with a required custom answer. Never ask for secrets.")
-            .inputSchema(UserQuestions.schema())
-            .executor(context -> copy.askUser(context.getInput())).build());
+                .name("ask_user")
+                .description(
+                        "Ask 1–3 clarification questions and wait for the user: resolve required missing facts or agree on alternatives for unsupported capabilities before generation. Omit optional unknown facts instead of inventing them. Each question has 2–4 choices, optionally a custom answer, or no choices with a required custom answer. Never ask for secrets.")
+                .inputSchema(UserQuestions.schema())
+                .executor(context -> copy.askUser(context.getInput()))
+                .build());
         for (var definition : PageReferenceTools.definitions()) {
             result.add(run.halo.aifoundation.tool.ToolDefinition.builder()
-                .name(definition.name()).description(definition.description())
-                .inputSchema(definition.inputSchema())
-                .executor(context -> copy.reference(definition.name(), context.getInput()).cast(Object.class))
-                .build());
+                    .name(definition.name())
+                    .description(definition.description())
+                    .inputSchema(definition.inputSchema())
+                    .executor(context -> copy.reference(definition.name(), context.getInput())
+                            .cast(Object.class))
+                    .build());
         }
         return result;
     }

@@ -17,30 +17,35 @@ import run.halo.app.security.AfterSecurityWebFilter;
 public class PagePreviewIdentityFilter implements AfterSecurityWebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        if (!PagePreviewRoutes.PATH.matches(exchange.getRequest().getPath()
-            .pathWithinApplication())) return chain.filter(exchange);
+        if (!PagePreviewRoutes.PATH.matches(exchange.getRequest().getPath().pathWithinApplication()))
+            return chain.filter(exchange);
         var headers = exchange.getResponse().getHeaders();
         headers.setCacheControl("no-store");
         headers.set("Referrer-Policy", "no-referrer");
         headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
-        var visitor = new AnonymousAuthenticationToken("ai-page-builder-preview", "anonymousUser",
-            AuthorityUtils.createAuthorityList("ROLE_anonymous"));
-        var request = exchange.getRequest().mutate().headers(values -> {
-            values.remove("Authorization");
-            values.remove("Cookie");
-        }).build();
+        var visitor = new AnonymousAuthenticationToken(
+                "ai-page-builder-preview", "anonymousUser", AuthorityUtils.createAuthorityList("ROLE_anonymous"));
+        var request = exchange.getRequest()
+                .mutate()
+                .headers(values -> {
+                    values.remove("Authorization");
+                    values.remove("Cookie");
+                })
+                .build();
         // Halo's Thymeleaf security dialect reads the session repository directly, rather
         // than the Reactor context. Give rendering a fresh session without clearing or
         // invalidating the administrator's real session. It is never attached to a cookie.
         var session = new InMemoryWebSessionStore().createWebSession().cache();
-        var anonymousExchange = new ServerWebExchangeDecorator(exchange.mutate()
-            .request(request).principal(Mono.just(visitor)).build()) {
-            @Override
-            public Mono<WebSession> getSession() {
-                return session;
-            }
-        };
-        return chain.filter(anonymousExchange)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(visitor));
+        var anonymousExchange =
+                new ServerWebExchangeDecorator(exchange.mutate()
+                        .request(request)
+                        .principal(Mono.just(visitor))
+                        .build()) {
+                    @Override
+                    public Mono<WebSession> getSession() {
+                        return session;
+                    }
+                };
+        return chain.filter(anonymousExchange).contextWrite(ReactiveSecurityContextHolder.withAuthentication(visitor));
     }
 }

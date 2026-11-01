@@ -2,14 +2,18 @@ package run.halo.aipagebuilder.model;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import run.halo.aipagebuilder.ai.ChatApi;
 import run.halo.app.extension.AbstractExtension;
 import run.halo.app.extension.GVK;
-import run.halo.aipagebuilder.ai.ChatApi;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@GVK(group = "aipagebuilder.halo.run", version = "v1alpha1", kind = "PageChatTurnRecord",
-    plural = "pagechatturnrecords", singular = "pagechatturnrecord")
+@GVK(
+        group = "aipagebuilder.halo.run",
+        version = "v1alpha1",
+        kind = "PageChatTurnRecord",
+        plural = "pagechatturnrecords",
+        singular = "pagechatturnrecord")
 public class PageChatTurnRecord extends AbstractExtension {
     private Spec spec;
 

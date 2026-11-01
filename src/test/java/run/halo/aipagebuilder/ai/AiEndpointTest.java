@@ -9,15 +9,20 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.test.web.reactive.server.WebTestClient;
-import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 import run.halo.aipagebuilder.content.ContentPolicy;
+import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
 class AiEndpointTest {
     @Test
     void deniesRequestsWithoutSuperRole() {
         var endpoint = new AiEndpoint(mock(AiGateway.class));
-        WebTestClient.bindToRouterFunction(endpoint.endpoint()).build()
-            .get().uri("/ai/status").exchange().expectStatus().isForbidden();
+        WebTestClient.bindToRouterFunction(endpoint.endpoint())
+                .build()
+                .get()
+                .uri("/ai/status")
+                .exchange()
+                .expectStatus()
+                .isForbidden();
     }
 
     @Test
@@ -40,7 +45,9 @@ class AiEndpointTest {
                                 throw new ClassNotFoundException(name, error);
                             }
                         }
-                        if (resolve) { resolveClass(loaded); }
+                        if (resolve) {
+                            resolveClass(loaded);
+                        }
                         return loaded;
                     }
                 }
@@ -56,32 +63,40 @@ class AiEndpointTest {
             plugin.setSpec(new run.halo.app.core.extension.Plugin.PluginSpec());
             plugin.getSpec().setVersion("1.1.1");
             org.mockito.Mockito.when(client.fetch(run.halo.app.core.extension.Plugin.class, "ai-foundation"))
-                .thenReturn(reactor.core.publisher.Mono.just(plugin));
+                    .thenReturn(reactor.core.publisher.Mono.just(plugin));
             context.registerBean(run.halo.app.extension.ReactiveExtensionClient.class, () -> client);
             context.registerBean(ContentPolicy.class);
             context.registerBean(run.halo.aipagebuilder.memory.SiteMemoryService.class);
             context.registerBean(run.halo.aipagebuilder.theme.ThemeContextService.class);
-            context.registerBean(run.halo.aipagebuilder.page.PageService.class,
-                () -> mock(run.halo.aipagebuilder.page.PageService.class));
-            for (var type : List.of("SiteReferenceTools", "ContentReferenceTools", "WebReferenceTools",
-                "ApiReferenceTools")) {
+            context.registerBean(
+                    run.halo.aipagebuilder.page.PageService.class,
+                    () -> mock(run.halo.aipagebuilder.page.PageService.class));
+            for (var type :
+                    List.of("SiteReferenceTools", "ContentReferenceTools", "WebReferenceTools", "ApiReferenceTools")) {
                 var referenceType = loader.loadClass("run.halo.aipagebuilder.ai." + type);
                 context.getBeanFactory().registerSingleton(type, mock(referenceType));
             }
-            for (var type : List.of("OptionalAiGateway", "AiEndpoint", "PageReferenceTools",
-                "PageChatService", "PageChatEndpoint")) {
+            for (var type : List.of(
+                    "OptionalAiGateway", "AiEndpoint", "PageReferenceTools", "PageChatService", "PageChatEndpoint")) {
                 context.register(loader.loadClass("run.halo.aipagebuilder.ai." + type));
             }
             context.refresh();
             var endpointType = loader.loadClass("run.halo.aipagebuilder.ai.AiEndpoint");
             var endpoint = (run.halo.app.core.extension.endpoint.CustomEndpoint) context.getBean(endpointType);
-            var authentication = new UsernamePasswordAuthenticationToken("admin", "unused",
-                List.of(new SimpleGrantedAuthority("ROLE_super-role")));
+            var authentication = new UsernamePasswordAuthenticationToken(
+                    "admin", "unused", List.of(new SimpleGrantedAuthority("ROLE_super-role")));
             var web = WebTestClient.bindToRouterFunction(endpoint.endpoint())
-                .webFilter((exchange, chain) -> chain.filter(exchange)
-                    .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication))).build();
-            web.get().uri("/ai/status").exchange().expectStatus().isOk()
-                .expectBody().jsonPath("$.available").isEqualTo(false);
+                    .webFilter((exchange, chain) -> chain.filter(exchange)
+                            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication)))
+                    .build();
+            web.get()
+                    .uri("/ai/status")
+                    .exchange()
+                    .expectStatus()
+                    .isOk()
+                    .expectBody()
+                    .jsonPath("$.available")
+                    .isEqualTo(false);
             web.post().uri("/ai/generate").exchange().expectStatus().isNotFound();
         }
     }

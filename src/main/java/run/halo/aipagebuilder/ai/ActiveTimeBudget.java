@@ -61,13 +61,16 @@ final class ActiveTimeBudget {
         void schedule() {
             started = scheduler.now(TimeUnit.NANOSECONDS);
             var expected = ++generation;
-            task = scheduler.schedule(() -> {
-                boolean expired;
-                synchronized (ActiveTimeBudget.this) {
-                    expired = !paused && expected == generation && deadlines.remove(this);
-                }
-                if (expired) sink.error(new AiGenerationException(reason));
-            }, Math.max(0, remaining), TimeUnit.NANOSECONDS);
+            task = scheduler.schedule(
+                    () -> {
+                        boolean expired;
+                        synchronized (ActiveTimeBudget.this) {
+                            expired = !paused && expected == generation && deadlines.remove(this);
+                        }
+                        if (expired) sink.error(new AiGenerationException(reason));
+                    },
+                    Math.max(0, remaining),
+                    TimeUnit.NANOSECONDS);
         }
 
         void pause() {

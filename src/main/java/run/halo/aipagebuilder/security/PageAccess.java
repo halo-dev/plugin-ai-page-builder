@@ -7,15 +7,15 @@ import reactor.core.publisher.Mono;
 
 /** Shared authorization for page management; callers retain their transport-specific errors. */
 public final class PageAccess {
-    private PageAccess() { }
+    private PageAccess() {}
 
     public static Mono<String> superAdministrator() {
         return ReactiveSecurityContextHolder.getContext()
-            .flatMap(context -> Mono.justOrEmpty(context.getAuthentication()))
-            .filter(authentication -> authentication.isAuthenticated()
-                && !(authentication instanceof AnonymousAuthenticationToken))
-            .filter(authentication -> authentication.getAuthorities().stream()
-                .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())))
-            .map(Authentication::getName);
+                .flatMap(context -> Mono.justOrEmpty(context.getAuthentication()))
+                .filter(authentication ->
+                        authentication.isAuthenticated() && !(authentication instanceof AnonymousAuthenticationToken))
+                .filter(authentication -> authentication.getAuthorities().stream()
+                        .anyMatch(authority -> "ROLE_super-role".equals(authority.getAuthority())))
+                .map(Authentication::getName);
     }
 }

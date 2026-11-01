@@ -23,8 +23,10 @@ class ImportReviewStoreTest {
     @Test
     void oldestEntryIsEvictedAtCapacity() {
         for (var index = 0; index < ImportReviewStore.MAX_ENTRIES; index++) {
-            store.put("admin", "hash-" + index,
-                review("review-" + index, Instant.now().plusSeconds(index)));
+            store.put(
+                    "admin",
+                    "hash-" + index,
+                    review("review-" + index, Instant.now().plusSeconds(index)));
         }
         store.put("admin", "hash-extra", review("review-extra", Instant.now().plusSeconds(10_000)));
 
@@ -46,8 +48,8 @@ class ImportReviewStoreTest {
 
     @Test
     void expiredMaliciousReviewIsRemoved() {
-        store.put("admin", "hash",
-            review("malicious", "malicious", Instant.now().minusSeconds(1)));
+        store.put(
+                "admin", "hash", review("malicious", "malicious", Instant.now().minusSeconds(1)));
 
         assertThat(store.getMalicious("hash")).isNull();
     }
@@ -56,15 +58,12 @@ class ImportReviewStoreTest {
     void maliciousReviewsAreKeptUntilExpiry() {
         var expiresAt = Instant.now().plusSeconds(600);
         for (var index = 0; index <= ImportReviewStore.MAX_ENTRIES; index++) {
-            store.put("admin", "hash-" + index,
-                review("malicious-" + index, "malicious", expiresAt));
+            store.put("admin", "hash-" + index, review("malicious-" + index, "malicious", expiresAt));
         }
 
         assertThat(store.getMalicious("hash-0")).isEqualTo(expiresAt);
-        assertThat(store.getMalicious("hash-" + ImportReviewStore.MAX_ENTRIES))
-            .isEqualTo(expiresAt);
-        assertThat(store.importBlock("hash-0"))
-            .isEqualTo(ImportReviewStore.ImportBlock.MALICIOUS);
+        assertThat(store.getMalicious("hash-" + ImportReviewStore.MAX_ENTRIES)).isEqualTo(expiresAt);
+        assertThat(store.importBlock("hash-0")).isEqualTo(ImportReviewStore.ImportBlock.MALICIOUS);
     }
 
     @Test
@@ -74,21 +73,21 @@ class ImportReviewStoreTest {
         store.endReview("hash");
 
         assertThat(store.isReviewing("hash")).isTrue();
-        assertThat(store.importBlock("hash"))
-            .isEqualTo(ImportReviewStore.ImportBlock.REVIEWING);
+        assertThat(store.importBlock("hash")).isEqualTo(ImportReviewStore.ImportBlock.REVIEWING);
 
         store.endReview("hash");
 
         assertThat(store.isReviewing("hash")).isFalse();
-        assertThat(store.importBlock("hash"))
-            .isEqualTo(ImportReviewStore.ImportBlock.NONE);
+        assertThat(store.importBlock("hash")).isEqualTo(ImportReviewStore.ImportBlock.NONE);
     }
 
     @Test
     void concurrentPutsKeepTheStoreAtCapacity() throws Exception {
         for (var index = 0; index < ImportReviewStore.MAX_ENTRIES; index++) {
-            store.put("admin", "hash-" + index,
-                review("review-" + index, Instant.now().plusSeconds(index + 1)));
+            store.put(
+                    "admin",
+                    "hash-" + index,
+                    review("review-" + index, Instant.now().plusSeconds(index + 1)));
         }
         var pool = Executors.newFixedThreadPool(32);
         var start = new CountDownLatch(1);
@@ -97,8 +96,10 @@ class ImportReviewStoreTest {
             var extra = index;
             tasks.add(pool.submit(() -> {
                 start.await();
-                store.put("admin", "extra-" + extra,
-                    review("extra-" + extra, Instant.now().plusSeconds(1_000 + extra)));
+                store.put(
+                        "admin",
+                        "extra-" + extra,
+                        review("extra-" + extra, Instant.now().plusSeconds(1_000 + extra)));
                 return null;
             }));
         }
@@ -111,10 +112,8 @@ class ImportReviewStoreTest {
         assertThat(store.size()).isLessThanOrEqualTo(ImportReviewStore.MAX_ENTRIES);
     }
 
-    private static PageApi.ImportReview review(String reviewId, String verdict,
-        Instant expiresAt) {
-        return new PageApi.ImportReview(reviewId, verdict, "summary", List.of(), "Test", "",
-            false, expiresAt);
+    private static PageApi.ImportReview review(String reviewId, String verdict, Instant expiresAt) {
+        return new PageApi.ImportReview(reviewId, verdict, "summary", List.of(), "Test", "", false, expiresAt);
     }
 
     private static PageApi.ImportReview review(String reviewId, Instant expiresAt) {

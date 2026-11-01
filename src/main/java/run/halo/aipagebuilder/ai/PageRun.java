@@ -23,15 +23,22 @@ import run.halo.aipagebuilder.page.PageApi.PageDetail;
 /**
  * One admitted run and the state machine that owns its transitions.
  *
- * <p>All state changes happen under the run's monitor. Persistence is supplied by
- * {@link RunPersistence}; admission and capacity stay in {@link PageRunCoordinator}.
+ * <p>All state changes happen under the run's monitor. Persistence is supplied by {@link RunPersistence}; admission and
+ * capacity stay in {@link PageRunCoordinator}.
  */
 final class PageRun {
     static final Duration WAIT_TIMEOUT = Duration.ofHours(24);
     static final int MAX_STEERS = 10;
 
     enum State {
-        RUNNING, WAITING_FOR_USER, COMMITTING, INTERRUPTED, CANCELLED, COMPLETED, FAILED, INCOMPLETE;
+        RUNNING,
+        WAITING_FOR_USER,
+        COMMITTING,
+        INTERRUPTED,
+        CANCELLED,
+        COMPLETED,
+        FAILED,
+        INCOMPLETE;
 
         String wireName() {
             return name().toLowerCase(Locale.ROOT);
@@ -39,16 +46,29 @@ final class PageRun {
     }
 
     private static final Map<State, Set<State>> TRANSITIONS = Map.of(
-        State.RUNNING, Set.of(State.WAITING_FOR_USER, State.COMMITTING, State.INTERRUPTED,
-            State.CANCELLED, State.COMPLETED, State.FAILED, State.INCOMPLETE),
-        State.WAITING_FOR_USER, Set.of(State.RUNNING, State.COMMITTING, State.INTERRUPTED,
-            State.CANCELLED, State.FAILED, State.INCOMPLETE),
-        State.COMMITTING, Set.of(State.COMPLETED, State.FAILED, State.INCOMPLETE),
-        State.INTERRUPTED, Set.of(),
-        State.CANCELLED, Set.of(),
-        State.COMPLETED, Set.of(),
-        State.FAILED, Set.of(),
-        State.INCOMPLETE, Set.of());
+            State.RUNNING,
+                    Set.of(
+                            State.WAITING_FOR_USER,
+                            State.COMMITTING,
+                            State.INTERRUPTED,
+                            State.CANCELLED,
+                            State.COMPLETED,
+                            State.FAILED,
+                            State.INCOMPLETE),
+            State.WAITING_FOR_USER,
+                    Set.of(
+                            State.RUNNING,
+                            State.COMMITTING,
+                            State.INTERRUPTED,
+                            State.CANCELLED,
+                            State.FAILED,
+                            State.INCOMPLETE),
+            State.COMMITTING, Set.of(State.COMPLETED, State.FAILED, State.INCOMPLETE),
+            State.INTERRUPTED, Set.of(),
+            State.CANCELLED, Set.of(),
+            State.COMPLETED, Set.of(),
+            State.FAILED, Set.of(),
+            State.INCOMPLETE, Set.of());
 
     final ChatApi.Request request;
     final String actor;
@@ -87,16 +107,27 @@ final class PageRun {
     private final Duration waitTimeout;
     private final Supplier<Scheduler> scheduler;
 
-    PageRun(ChatApi.Request request, String actor, PageDetail base, ContentPolicy policy,
-        Mono<run.halo.aipagebuilder.theme.ThemeStyleContext> themeContext, String sessionId,
-        RunPersistence persistence) {
-        this(request, actor, base, policy, themeContext, sessionId, persistence, WAIT_TIMEOUT,
-            Schedulers::parallel);
+    PageRun(
+            ChatApi.Request request,
+            String actor,
+            PageDetail base,
+            ContentPolicy policy,
+            Mono<run.halo.aipagebuilder.theme.ThemeStyleContext> themeContext,
+            String sessionId,
+            RunPersistence persistence) {
+        this(request, actor, base, policy, themeContext, sessionId, persistence, WAIT_TIMEOUT, Schedulers::parallel);
     }
 
-    PageRun(ChatApi.Request request, String actor, PageDetail base, ContentPolicy policy,
-        Mono<run.halo.aipagebuilder.theme.ThemeStyleContext> themeContext, String sessionId,
-        RunPersistence persistence, Duration waitTimeout, Supplier<Scheduler> scheduler) {
+    PageRun(
+            ChatApi.Request request,
+            String actor,
+            PageDetail base,
+            ContentPolicy policy,
+            Mono<run.halo.aipagebuilder.theme.ThemeStyleContext> themeContext,
+            String sessionId,
+            RunPersistence persistence,
+            Duration waitTimeout,
+            Supplier<Scheduler> scheduler) {
         this.sessionId = sessionId;
         this.request = request;
         this.actor = actor;
@@ -104,8 +135,12 @@ final class PageRun {
         this.persistence = persistence;
         this.waitTimeout = waitTimeout;
         this.scheduler = scheduler;
-        this.copy = new PageWorkingCopy(base.document(), policy, themeContext,
-            base.page().slug(), base.page().publishedRevision() != null);
+        this.copy = new PageWorkingCopy(
+                base.document(),
+                policy,
+                themeContext,
+                base.page().slug(),
+                base.page().publishedRevision() != null);
         this.copy.title(base.page().title());
         this.copy.description(base.page().description());
         this.copy.existingDescription(base.page().description());
@@ -160,9 +195,8 @@ final class PageRun {
     }
 
     /**
-     * Run a decision once no transition is pending. The empty check and the decision share one
-     * monitor acquisition, so a command cannot install a new barrier in between. The decision's
-     * Mono is subscribed after the lock is released.
+     * Run a decision once no transition is pending. The empty check and the decision share one monitor acquisition, so
+     * a command cannot install a new barrier in between. The decision's Mono is subscribed after the lock is released.
      */
     <T> Mono<T> settleThen(Supplier<Mono<T>> decision) {
         return Mono.defer(() -> {
@@ -171,8 +205,7 @@ final class PageRun {
                     return decision.get();
                 }
             }
-            return Mono.defer(this::settleTransitions)
-                .then(Mono.defer(() -> settleThen(decision)));
+            return Mono.defer(this::settleTransitions).then(Mono.defer(() -> settleThen(decision)));
         });
     }
 
@@ -206,26 +239,28 @@ final class PageRun {
     }
 
     /**
-     * Queue one checkpoint write. Callers must already hold the run lock so the snapshot and
-     * the queue position describe the same state.
+     * Queue one checkpoint write. Callers must already hold the run lock so the snapshot and the queue position
+     * describe the same state.
      */
     synchronized Mono<Void> persistCheckpoint() {
         var save = persistence.checkpoint(this);
-        checkpointWrites = checkpointWrites.then(save).doOnError(writeError -> {
-            copy.markCheckpointFailed();
-            failure.tryEmitValue(writeError);
-        }).cache();
+        checkpointWrites = checkpointWrites
+                .then(save)
+                .doOnError(writeError -> {
+                    copy.markCheckpointFailed();
+                    failure.tryEmitValue(writeError);
+                })
+                .cache();
         return checkpointWrites;
     }
 
     /** Track a write that must not interleave with run transitions. */
     synchronized <T> Mono<T> exclusive(Mono<T> write) {
         var ref = new AtomicReference<Mono<Void>>();
-        var update = write
-            .doOnSuccess(ignored -> clearTransition(ref.get()))
-            .doOnError(ignored -> clearTransition(ref.get()))
-            .doFinally(signal -> clearTransition(ref.get()))
-            .cache();
+        var update = write.doOnSuccess(ignored -> clearTransition(ref.get()))
+                .doOnError(ignored -> clearTransition(ref.get()))
+                .doFinally(signal -> clearTransition(ref.get()))
+                .cache();
         var barrier = update.then().onErrorComplete();
         ref.set(barrier);
         transition = barrier;
@@ -246,20 +281,27 @@ final class PageRun {
                 questions.add(question);
                 answer = Sinks.one();
                 copy.timeBudget.pause();
-                var barrier = install(persistence.active(this)
-                    .then(Mono.defer(this::persistCheckpoint)), () -> {
-                    armWaitTimer(question.id());
-                    emitEvent(Map.of("type", "data-user-question", "name", "user-question",
-                        "id", question.id(), "data",
-                        Map.of("runId", request.runId(), "question", question)));
-                }, ignored -> {
-                    state = State.RUNNING;
-                    questions.removeLast();
-                    answer = null;
-                    copy.timeBudget.resume();
-                });
-                return barrier.then(answer.asMono())
-                    .doOnError(error -> failure.tryEmitValue(error));
+                var barrier = install(
+                        persistence.active(this).then(Mono.defer(this::persistCheckpoint)),
+                        () -> {
+                            armWaitTimer(question.id());
+                            emitEvent(Map.of(
+                                    "type",
+                                    "data-user-question",
+                                    "name",
+                                    "user-question",
+                                    "id",
+                                    question.id(),
+                                    "data",
+                                    Map.of("runId", request.runId(), "question", question)));
+                        },
+                        ignored -> {
+                            state = State.RUNNING;
+                            questions.removeLast();
+                            answer = null;
+                            copy.timeBudget.resume();
+                        });
+                return barrier.then(answer.asMono()).doOnError(error -> failure.tryEmitValue(error));
             }
         });
     }
@@ -270,8 +312,7 @@ final class PageRun {
                 if (!this.actor.equals(actor)) {
                     return Mono.error(RunTransitionException.forbidden("只能回答自己的运行"));
                 }
-                if (transition != null || answering || state != State.WAITING_FOR_USER
-                    || questions.isEmpty()) {
+                if (transition != null || answering || state != State.WAITING_FOR_USER || questions.isEmpty()) {
                     return Mono.error(RunTransitionException.conflict("问题已回答或运行状态已变化"));
                 }
                 var pending = questions.getLast();
@@ -283,22 +324,30 @@ final class PageRun {
                 cancelWaitTimer();
                 transitionTo(State.RUNNING);
                 questions.set(questions.size() - 1, answered);
-                var barrier = install(persistence.active(this)
-                    .then(Mono.defer(this::persistCheckpoint)), () -> {
-                    answering = false;
-                    emitEvent(Map.of("type", "data-user-answer", "name", "user-answer",
-                        "id", answered.id(), "data",
-                        Map.of("runId", request.runId(), "question", answered)));
-                    copy.timeBudget.resume();
-                    if (memory != null) memory.answered(answered);
-                    answer.tryEmitValue(answered);
-                }, failure -> {
-                    answering = false;
-                    state = State.WAITING_FOR_USER;
-                    questions.set(questions.size() - 1, pending);
-                    armWaitTimer(pending.id());
-                    answer.tryEmitError(failure);
-                });
+                var barrier = install(
+                        persistence.active(this).then(Mono.defer(this::persistCheckpoint)),
+                        () -> {
+                            answering = false;
+                            emitEvent(Map.of(
+                                    "type",
+                                    "data-user-answer",
+                                    "name",
+                                    "user-answer",
+                                    "id",
+                                    answered.id(),
+                                    "data",
+                                    Map.of("runId", request.runId(), "question", answered)));
+                            copy.timeBudget.resume();
+                            if (memory != null) memory.answered(answered);
+                            answer.tryEmitValue(answered);
+                        },
+                        failure -> {
+                            answering = false;
+                            state = State.WAITING_FOR_USER;
+                            questions.set(questions.size() - 1, pending);
+                            armWaitTimer(pending.id());
+                            answer.tryEmitError(failure);
+                        });
                 return barrier.then(Mono.fromSupplier(this::turn));
             }
         });
@@ -312,26 +361,32 @@ final class PageRun {
                     return Mono.error(RunTransitionException.forbidden("只能补充自己的运行"));
                 }
                 if (transition != null) {
-                    return transition.onErrorComplete()
-                        .then(Mono.defer(() -> steer(text, actor)));
+                    return transition.onErrorComplete().then(Mono.defer(() -> steer(text, actor)));
                 }
                 if (state != State.RUNNING && state != State.WAITING_FOR_USER) {
                     return Mono.error(RunTransitionException.conflict("运行已结束，请作为新消息发送"));
                 }
                 if (steers.size() >= MAX_STEERS) {
-                    return Mono.error(RunTransitionException.conflict(
-                        "本轮补充指令已达上限，请等本轮结束后继续"));
+                    return Mono.error(RunTransitionException.conflict("本轮补充指令已达上限，请等本轮结束后继续"));
                 }
                 steers.add(text);
                 var index = steers.size() - 1;
-                var barrier = install(persistence.active(this)
-                    .then(Mono.defer(this::persistCheckpoint)), () -> {
-                    if (memory != null) memory.steer(index, text);
-                    copy.queueSteer(text);
-                    emitEvent(Map.of("type", "data-steer", "name", "steer",
-                        "id", request.runId() + "-steer-" + index, "data",
-                        Map.of("runId", request.runId(), "index", index, "text", text)));
-                }, ignored -> steers.remove(index));
+                var barrier = install(
+                        persistence.active(this).then(Mono.defer(this::persistCheckpoint)),
+                        () -> {
+                            if (memory != null) memory.steer(index, text);
+                            copy.queueSteer(text);
+                            emitEvent(Map.of(
+                                    "type",
+                                    "data-steer",
+                                    "name",
+                                    "steer",
+                                    "id",
+                                    request.runId() + "-steer-" + index,
+                                    "data",
+                                    Map.of("runId", request.runId(), "index", index, "text", text)));
+                        },
+                        ignored -> steers.remove(index));
                 return barrier.then(Mono.fromSupplier(this::turn));
             }
         });
@@ -341,12 +396,13 @@ final class PageRun {
         return Mono.defer(() -> {
             synchronized (this) {
                 if (transition != null) {
-                    return transition.onErrorComplete()
-                        .then(Mono.defer(() -> interrupt(message, questionId)));
+                    return transition.onErrorComplete().then(Mono.defer(() -> interrupt(message, questionId)));
                 }
                 // An expired timer may already be executing when an answer cancels it.
-                if (questionId != null && (state != State.WAITING_FOR_USER || questions.isEmpty()
-                    || !questionId.equals(questions.getLast().id()))) {
+                if (questionId != null
+                        && (state != State.WAITING_FOR_USER
+                                || questions.isEmpty()
+                                || !questionId.equals(questions.getLast().id()))) {
                     return Mono.empty();
                 }
                 if (state != State.RUNNING && state != State.WAITING_FOR_USER) {
@@ -355,17 +411,20 @@ final class PageRun {
                 var previous = state;
                 transitionTo(State.INTERRUPTED);
                 error = message;
-                return install(persistence.active(this), () -> {
-                    cancelWaitTimer();
-                    cancel.tryEmitEmpty();
-                }, ignored -> {
-                    state = previous;
-                    error = null;
-                    // The timer already fired, so restore it or the run waits forever.
-                    if (previous == State.WAITING_FOR_USER && !questions.isEmpty()) {
-                        armWaitTimer(questions.getLast().id());
-                    }
-                });
+                return install(
+                        persistence.active(this),
+                        () -> {
+                            cancelWaitTimer();
+                            cancel.tryEmitEmpty();
+                        },
+                        ignored -> {
+                            state = previous;
+                            error = null;
+                            // The timer already fired, so restore it or the run waits forever.
+                            if (previous == State.WAITING_FOR_USER && !questions.isEmpty()) {
+                                armWaitTimer(questions.getLast().id());
+                            }
+                        });
             }
         });
     }
@@ -381,36 +440,41 @@ final class PageRun {
                 }
                 var previous = state;
                 transitionTo(State.CANCELLED);
-                var barrier = install(persistence.active(this), () -> {
-                    cancelWaitTimer();
-                    cancel.tryEmitEmpty();
-                }, ignored -> state = previous);
+                var barrier = install(
+                        persistence.active(this),
+                        () -> {
+                            cancelWaitTimer();
+                            cancel.tryEmitEmpty();
+                        },
+                        ignored -> state = previous);
                 return barrier.then(Mono.defer(copy::closeMemory));
             }
         });
     }
 
     Mono<Void> finish(PageDetail page) {
-        return copy.closeMemory().then(copy.closeEdits())
-            .then(Mono.defer(this::settleTransitions))
-            .then(Mono.defer(this::settleCheckpoints))
-            .then(Mono.defer(() -> persistence.active(this)))
-            .doOnSuccess(ignored -> terminalPersisted = true)
-            .then(Mono.defer(() -> {
-                if (is(State.COMPLETED) || is(State.CANCELLED)) {
-                    return persistence.deleteCheckpoint(this);
-                }
-                var save = copy.checkpointFailed() ? Mono.<Void>empty()
-                    : persistCheckpoint().onErrorComplete();
-                return save.then(persistence.checkpointAvailable(this));
-            }))
-            .then(Mono.defer(() -> persistence.recordFinished(this, turn())))
-            .doOnSuccess(ignored -> {
-                org.slf4j.LoggerFactory.getLogger(PageRun.class).info(
-                    "Page chat finished: {}, status={}, usage={}", copy.trace(), status(),
-                    copy.usage());
-                completeEvents(terminalEvents(page));
-            }).then();
+        return copy.closeMemory()
+                .then(copy.closeEdits())
+                .then(Mono.defer(this::settleTransitions))
+                .then(Mono.defer(this::settleCheckpoints))
+                .then(Mono.defer(() -> persistence.active(this)))
+                .doOnSuccess(ignored -> terminalPersisted = true)
+                .then(Mono.defer(() -> {
+                    if (is(State.COMPLETED) || is(State.CANCELLED)) {
+                        return persistence.deleteCheckpoint(this);
+                    }
+                    var save = copy.checkpointFailed()
+                            ? Mono.<Void>empty()
+                            : persistCheckpoint().onErrorComplete();
+                    return save.then(persistence.checkpointAvailable(this));
+                }))
+                .then(Mono.defer(() -> persistence.recordFinished(this, turn())))
+                .doOnSuccess(ignored -> {
+                    org.slf4j.LoggerFactory.getLogger(PageRun.class)
+                            .info("Page chat finished: {}, status={}, usage={}", copy.trace(), status(), copy.usage());
+                    completeEvents(terminalEvents(page));
+                })
+                .then();
     }
 
     /** A run can only be stopped after its durable reservation exists. */
@@ -424,17 +488,41 @@ final class PageRun {
 
     /** Snapshot for the cross-page run list; the caller must not retain run internals. */
     synchronized ChatApi.ActiveRun summary(String pageName) {
-        return new ChatApi.ActiveRun(pageName, sessionId, request.runId(), status(), createdAt,
-            state == State.WAITING_FOR_USER && !questions.isEmpty() ? questions.getLast() : null);
+        return new ChatApi.ActiveRun(
+                pageName,
+                sessionId,
+                request.runId(),
+                status(),
+                createdAt,
+                state == State.WAITING_FOR_USER && !questions.isEmpty() ? questions.getLast() : null);
     }
 
     synchronized ChatApi.Turn turn() {
-        return new ChatApi.Turn(request.runId(), actor, createdAt, request.prompt(), text.toString(),
-            copy.summaries(), status(), revision, error, display.snapshot(status(), copy.memoryOutcomes()),
-            request.annotations() == null ? List.of() : request.annotations().stream()
-                .map(annotation -> new ChatApi.Annotation(annotation.id(), List.of(), annotation.tag(),
-                    annotation.summary(), "", annotation.comment())).toList(), List.copyOf(questions),
-            List.copyOf(steers)).withUsage(copy.usage());
+        return new ChatApi.Turn(
+                        request.runId(),
+                        actor,
+                        createdAt,
+                        request.prompt(),
+                        text.toString(),
+                        copy.summaries(),
+                        status(),
+                        revision,
+                        error,
+                        display.snapshot(status(), copy.memoryOutcomes()),
+                        request.annotations() == null
+                                ? List.of()
+                                : request.annotations().stream()
+                                        .map(annotation -> new ChatApi.Annotation(
+                                                annotation.id(),
+                                                List.of(),
+                                                annotation.tag(),
+                                                annotation.summary(),
+                                                "",
+                                                annotation.comment()))
+                                        .toList(),
+                        List.copyOf(questions),
+                        List.copyOf(steers))
+                .withUsage(copy.usage());
     }
 
     private synchronized String status() {
@@ -454,27 +542,29 @@ final class PageRun {
     }
 
     /**
-     * Install a write as the run's serialization barrier. Must be called while holding the
-     * run lock; the identity check keeps a superseded write from clearing a newer barrier.
+     * Install a write as the run's serialization barrier. Must be called while holding the run lock; the identity check
+     * keeps a superseded write from clearing a newer barrier.
      *
-     * <p>The barrier is cleared before its completion is propagated to waiters. Clearing it in
-     * {@code doFinally} would be too late: a waiting command subscribes to the cached barrier
-     * synchronously from its completion signal and would re-enter the same barrier forever.
+     * <p>The barrier is cleared before its completion is propagated to waiters. Clearing it in {@code doFinally} would
+     * be too late: a waiting command subscribes to the cached barrier synchronously from its completion signal and
+     * would re-enter the same barrier forever.
      */
-    private Mono<Void> install(Mono<Void> write, Runnable onSuccess,
-        Consumer<Throwable> onError) {
+    private Mono<Void> install(Mono<Void> write, Runnable onSuccess, Consumer<Throwable> onError) {
         var ref = new AtomicReference<Mono<Void>>();
         var barrier = write.doOnSuccess(ignored -> {
-            synchronized (this) {
-                clearTransition(ref.get());
-                onSuccess.run();
-            }
-        }).doOnError(writeError -> {
-            synchronized (this) {
-                clearTransition(ref.get());
-                onError.accept(writeError);
-            }
-        }).doFinally(signal -> clearTransition(ref.get())).cache();
+                    synchronized (this) {
+                        clearTransition(ref.get());
+                        onSuccess.run();
+                    }
+                })
+                .doOnError(writeError -> {
+                    synchronized (this) {
+                        clearTransition(ref.get());
+                        onError.accept(writeError);
+                    }
+                })
+                .doFinally(signal -> clearTransition(ref.get()))
+                .cache();
         ref.set(barrier);
         transition = barrier;
         return barrier;
@@ -488,9 +578,8 @@ final class PageRun {
 
     private void armWaitTimer(String questionId) {
         waiting.update(Mono.delay(waitTimeout, scheduler.get())
-            .then(Mono.defer(() -> interrupt(
-                "等待回答已超过 24 小时，进度已保留，可继续生成。", questionId)))
-            .subscribe(ignored -> { }, error -> failure.tryEmitValue(error)));
+                .then(Mono.defer(() -> interrupt("等待回答已超过 24 小时，进度已保留，可继续生成。", questionId)))
+                .subscribe(ignored -> {}, error -> failure.tryEmitValue(error)));
     }
 
     private void cancelWaitTimer() {
@@ -505,10 +594,19 @@ final class PageRun {
         synchronized (this) {
             var terminalEvents = new ArrayList<Map<String, Object>>();
             if (state == State.COMPLETED) {
-                if (page != null && (revision != null
-                    || !Objects.equals(page.page().version(), base.page().version()))) {
-                    terminalEvents.add(Map.of("type", "data-page-committed",
-                        "name", "page-committed", "id", request.runId(), "data", page));
+                if (page != null
+                        && (revision != null
+                                || !Objects.equals(
+                                        page.page().version(), base.page().version()))) {
+                    terminalEvents.add(Map.of(
+                            "type",
+                            "data-page-committed",
+                            "name",
+                            "page-committed",
+                            "id",
+                            request.runId(),
+                            "data",
+                            page));
                 }
                 terminalEvents.add(Map.of("type", "finish", "finishReason", "stop"));
             } else if (state == State.CANCELLED) {

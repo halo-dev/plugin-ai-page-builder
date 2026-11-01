@@ -26,13 +26,13 @@ public class WebReferenceTools {
     @Autowired
     public WebReferenceTools() {
         this(WebClient.builder()
-            .clientConnector(new ReactorClientHttpConnector(
-                HttpSecurityUtils.secureHttpClient().compress(true)))
-            .filter(HttpSecurityUtils.maxResponseSizeFilter(MAX_BODY_BYTES))
-            .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(MAX_BODY_BYTES))
-            .defaultHeader("User-Agent", "Halo-AI-Page-Builder/1.0")
-            .defaultHeader("Accept", "text/html, application/xhtml+xml, text/plain")
-            .build());
+                .clientConnector(new ReactorClientHttpConnector(
+                        HttpSecurityUtils.secureHttpClient().compress(true)))
+                .filter(HttpSecurityUtils.maxResponseSizeFilter(MAX_BODY_BYTES))
+                .codecs(codecs -> codecs.defaultCodecs().maxInMemorySize(MAX_BODY_BYTES))
+                .defaultHeader("User-Agent", "Halo-AI-Page-Builder/1.0")
+                .defaultHeader("Accept", "text/html, application/xhtml+xml, text/plain")
+                .build());
     }
 
     WebReferenceTools(WebClient client) {
@@ -41,13 +41,16 @@ public class WebReferenceTools {
 
     public Mono<Map<String, Object>> execute(Map<String, Object> arguments) {
         return Mono.defer(() -> {
-            if (!(arguments.get("url") instanceof String url)) {
-                return Mono.error(new IllegalArgumentException("url is required"));
-            }
-            return fetch(validateUrl(url), 0);
-        }).timeout(Duration.ofSeconds(15))
-            .onErrorMap(error -> !(error instanceof IllegalArgumentException),
-                error -> new IllegalArgumentException("Unable to read web page: request failed, timed out, or exceeded the size limit"));
+                    if (!(arguments.get("url") instanceof String url)) {
+                        return Mono.error(new IllegalArgumentException("url is required"));
+                    }
+                    return fetch(validateUrl(url), 0);
+                })
+                .timeout(Duration.ofSeconds(15))
+                .onErrorMap(
+                        error -> !(error instanceof IllegalArgumentException),
+                        error -> new IllegalArgumentException(
+                                "Unable to read web page: request failed, timed out, or exceeded the size limit"));
     }
 
     private Mono<Map<String, Object>> fetch(URI uri, int redirects) {
@@ -63,22 +66,24 @@ public class WebReferenceTools {
                 }));
             }
             if (!response.statusCode().is2xxSuccessful()) {
-                return response.releaseBody().then(Mono.error(
-                    new IllegalArgumentException("Web page returned HTTP " + status)));
+                return response.releaseBody()
+                        .then(Mono.error(new IllegalArgumentException("Web page returned HTTP " + status)));
             }
             var type = response.headers().contentType().orElse(MediaType.APPLICATION_OCTET_STREAM);
             boolean html = MediaType.TEXT_HTML.isCompatibleWith(type)
-                || MediaType.APPLICATION_XHTML_XML.isCompatibleWith(type);
+                    || MediaType.APPLICATION_XHTML_XML.isCompatibleWith(type);
             if (!html && !MediaType.TEXT_PLAIN.isCompatibleWith(type)) {
-                return response.releaseBody().then(Mono.error(
-                    new IllegalArgumentException("Only HTML and plain-text web pages are supported")));
+                return response.releaseBody()
+                        .then(Mono.error(
+                                new IllegalArgumentException("Only HTML and plain-text web pages are supported")));
             }
             if (response.headers().contentLength().orElse(0) > MAX_BODY_BYTES) {
-                return response.releaseBody().then(Mono.error(
-                    new IllegalArgumentException("Web page exceeds the 2 MiB limit")));
+                return response.releaseBody()
+                        .then(Mono.error(new IllegalArgumentException("Web page exceeds the 2 MiB limit")));
             }
-            return response.bodyToMono(byte[].class).defaultIfEmpty(new byte[0])
-                .map(body -> extract(uri, type, body, html));
+            return response.bodyToMono(byte[].class)
+                    .defaultIfEmpty(new byte[0])
+                    .map(body -> extract(uri, type, body, html));
         });
     }
 
@@ -88,14 +93,14 @@ public class WebReferenceTools {
         }
         var uri = URI.create(url.trim());
         if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-            || uri.getHost() == null || uri.getRawUserInfo() != null
-            || uri.getHost().contains("%")
-            || (uri.getPort() != -1 && uri.getPort() != 80 && uri.getPort() != 443)) {
+                || uri.getHost() == null
+                || uri.getRawUserInfo() != null
+                || uri.getHost().contains("%")
+                || (uri.getPort() != -1 && uri.getPort() != 80 && uri.getPort() != 443)) {
             throw new IllegalArgumentException("Only public HTTP(S) URLs on ports 80 and 443 are supported");
         }
         var host = uri.getHost().toLowerCase(Locale.ROOT).replaceFirst("\\.$", "");
-        if (host.equals("localhost") || host.endsWith(".localhost")
-            || host.endsWith(".local")) {
+        if (host.equals("localhost") || host.endsWith(".localhost") || host.endsWith(".local")) {
             throw new IllegalArgumentException("Local and private network addresses are not allowed");
         }
         // Fragments are local browser navigation, not part of the fetched resource.
@@ -108,12 +113,15 @@ public class WebReferenceTools {
         String text;
         try {
             if (html) {
-                var document = Jsoup.parse(new ByteArrayInputStream(body),
-                    type.getCharset() == null ? null : type.getCharset().name(), uri.toString());
+                var document = Jsoup.parse(
+                        new ByteArrayInputStream(body),
+                        type.getCharset() == null ? null : type.getCharset().name(),
+                        uri.toString());
                 title = document.title();
                 var meta = document.selectFirst("meta[name=description]");
                 description = meta == null ? "" : meta.attr("content");
-                document.select("script, style, noscript, template, iframe, svg, [hidden], [aria-hidden=true]").remove();
+                document.select("script, style, noscript, template, iframe, svg, [hidden], [aria-hidden=true]")
+                        .remove();
                 var main = document.selectFirst("main, article, [role=main]");
                 text = (main == null ? document.body() : main).text();
             } else {

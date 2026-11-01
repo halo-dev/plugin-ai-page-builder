@@ -1,16 +1,16 @@
 package run.halo.aipagebuilder.page;
 
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
 import org.junit.jupiter.api.Test;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 class PageRenderCacheTest {
     private final ContentPolicy policy = spy(new ContentPolicy());
     private final PageRenderCache cache = new PageRenderCache(policy);
-    private final PageDocument document = new PageDocument(1, "code", null, null,
-        "<p>Hello</p>", "p {color:red}");
+    private final PageDocument document = new PageDocument(1, "code", null, null, "<p>Hello</p>", "p {color:red}");
 
     @Test
     void reusesDerivedContentAndSeparatesScopeAndChangedSource() {
@@ -26,8 +26,7 @@ class PageRenderCacheTest {
     @Test
     void cacheDoesNotBypassValidationForDifferentMetadata() {
         cache.compile("a", document);
-        var invalid = new PageDocument(999, "code", null, null,
-            document.html(), document.css());
+        var invalid = new PageDocument(999, "code", null, null, document.html(), document.css());
         assertThatThrownBy(() -> cache.compile("a", invalid)).isInstanceOf(RuntimeException.class);
     }
 

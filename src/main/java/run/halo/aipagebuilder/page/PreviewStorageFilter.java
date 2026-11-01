@@ -17,15 +17,14 @@ import reactor.core.publisher.Mono;
 import run.halo.app.security.AdditionalWebFilter;
 
 /**
- * Injects the preview storage shim into rendered preview documents. The document body is
- * produced by the theme view, so it is rewritten here rather than in the renderer. Only HTML
- * responses for the two preview routes are touched; errors and other routes pass through.
+ * Injects the preview storage shim into rendered preview documents. The document body is produced by the theme view, so
+ * it is rewritten here rather than in the renderer. Only HTML responses for the two preview routes are touched; errors
+ * and other routes pass through.
  */
 @Component
 public class PreviewStorageFilter implements AdditionalWebFilter {
     private static final Pattern PATH = Pattern.compile(
-        "/apis/console\\.api\\.aipagebuilder\\.halo\\.run/v1alpha1/pages/[^/]+/"
-            + "(?:revisions/[^/]+/)?preview");
+            "/apis/console\\.api\\.aipagebuilder\\.halo\\.run/v1alpha1/pages/[^/]+/" + "(?:revisions/[^/]+/)?preview");
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
@@ -35,7 +34,8 @@ public class PreviewStorageFilter implements AdditionalWebFilter {
             return chain.filter(exchange);
         }
         return chain.filter(exchange.mutate()
-            .response(new InjectingResponse(exchange.getResponse())).build());
+                .response(new InjectingResponse(exchange.getResponse()))
+                .build());
     }
 
     private static final class InjectingResponse extends ServerHttpResponseDecorator {
@@ -47,8 +47,7 @@ public class PreviewStorageFilter implements AdditionalWebFilter {
         public Mono<Void> writeWith(Publisher<? extends DataBuffer> body) {
             return DataBufferUtils.join(body).flatMap(buffer -> {
                 var type = getHeaders().getContentType();
-                if (buffer.readableByteCount() == 0 || type == null
-                    || !MediaType.TEXT_HTML.isCompatibleWith(type)) {
+                if (buffer.readableByteCount() == 0 || type == null || !MediaType.TEXT_HTML.isCompatibleWith(type)) {
                     return super.writeWith(Mono.just(buffer));
                 }
                 final String html;
@@ -64,8 +63,7 @@ public class PreviewStorageFilter implements AdditionalWebFilter {
         }
 
         @Override
-        public Mono<Void> writeAndFlushWith(
-            Publisher<? extends Publisher<? extends DataBuffer>> body) {
+        public Mono<Void> writeAndFlushWith(Publisher<? extends Publisher<? extends DataBuffer>> body) {
             return writeWith(Flux.from(body).concatMap(Flux::from));
         }
     }

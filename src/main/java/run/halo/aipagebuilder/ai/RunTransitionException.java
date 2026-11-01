@@ -2,7 +2,10 @@ package run.halo.aipagebuilder.ai;
 
 /** A rejected run command that the HTTP boundary maps to a client status. */
 final class RunTransitionException extends RuntimeException {
-    enum Kind { CONFLICT, FORBIDDEN }
+    enum Kind {
+        CONFLICT,
+        FORBIDDEN
+    }
 
     private final Kind kind;
 

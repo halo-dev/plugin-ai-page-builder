@@ -38,9 +38,8 @@ class ConversationTurnsTest {
         failSessionUpdate("session", fail);
 
         assertThatThrownBy(() -> conversations.finish(coordinator, turn("run")).block())
-            .hasMessage("storage unavailable");
-        assertThat(conversations.history("session", null, 20).block().turns())
-            .containsExactly(turn("run"));
+                .hasMessage("storage unavailable");
+        assertThat(conversations.history("session", null, 20).block().turns()).containsExactly(turn("run"));
         assertThat(current().getSpec().getActive().runId()).isEqualTo("run");
 
         fail.set(false);
@@ -57,7 +56,7 @@ class ConversationTurnsTest {
         failSessionUpdate("page", fail);
 
         assertThatThrownBy(() -> conversations.finish(coordinator, turn("run")).block())
-            .hasMessage("storage unavailable");
+                .hasMessage("storage unavailable");
         assertThat(conversations.find("page", "run").block().turn()).isEqualTo(turn("run"));
         assertThat(current().getSpec().getActive().runId()).isEqualTo("run");
 
@@ -76,8 +75,7 @@ class ConversationTurnsTest {
 
         assertThat(finished.getMetadata().getVersion()).isEqualTo(version + 1);
         assertThat(finished.getSpec().getActive()).isNull();
-        assertThat(conversations.history("page", null, 20).block().turns())
-            .containsExactly(turn("run"));
+        assertThat(conversations.history("page", null, 20).block().turns()).containsExactly(turn("run"));
     }
 
     @Test
@@ -105,7 +103,7 @@ class ConversationTurnsTest {
         var coordinator = reserve("page", turn("current"));
 
         assertThatThrownBy(() -> conversations.finish(coordinator, turn("old")).block())
-            .hasMessageContaining("会话运行已变化");
+                .hasMessageContaining("会话运行已变化");
 
         assertThat(conversations.history("page", null, 20).block().turns()).isEmpty();
         assertThat(current().getSpec().getActive().runId()).isEqualTo("current");
@@ -117,9 +115,18 @@ class ConversationTurnsTest {
         var legacy = storage.stored.get("page");
         legacy.getSpec().setPageName(null);
         for (int i = 0; i < 45; i++) {
-            legacy.getSpec().getTurns().add(new ChatApi.Turn("r" + i, "admin",
-                Instant.parse("2026-01-01T00:00:00Z").plusSeconds(i), "prompt", "text",
-                List.of(), "completed", null, null));
+            legacy.getSpec()
+                    .getTurns()
+                    .add(new ChatApi.Turn(
+                            "r" + i,
+                            "admin",
+                            Instant.parse("2026-01-01T00:00:00Z").plusSeconds(i),
+                            "prompt",
+                            "text",
+                            List.of(),
+                            "completed",
+                            null,
+                            null));
         }
         conversations.initialize("page").block();
         var latest = conversations.history("page", null, 20).block();
@@ -145,8 +152,9 @@ class ConversationTurnsTest {
     void migrationFailureRetainsLegacyTurnsForRetry() {
         conversations.initialize("page").block();
         storage.stored.get("page").getSpec().getTurns().add(turn("old"));
-        doReturn(Mono.error(new IllegalStateException("storage"))).when(storage.client)
-            .create(any(PageChatTurnRecord.class));
+        doReturn(Mono.error(new IllegalStateException("storage")))
+                .when(storage.client)
+                .create(any(PageChatTurnRecord.class));
 
         assertThatThrownBy(() -> conversations.initialize("page").block()).hasMessage("storage");
         assertThat(current().getSpec().getTurns()).containsExactly(turn("old"));
@@ -154,8 +162,7 @@ class ConversationTurnsTest {
         storage.install();
         conversations.initialize("page").block();
         assertThat(current().getSpec().getTurns()).isEmpty();
-        assertThat(conversations.history("page", null, 20).block().turns())
-            .containsExactly(turn("old"));
+        assertThat(conversations.history("page", null, 20).block().turns()).containsExactly(turn("old"));
     }
 
     @Test
@@ -163,12 +170,16 @@ class ConversationTurnsTest {
         var coordinator = reserve("session", turn("run"));
         conversations.finish(coordinator, turn("run")).block();
         saveCheckpoint("session");
-        doReturn(Mono.error(new IllegalStateException("delete unavailable"))).when(storage.client)
-            .delete(any(PageChatTurnRecord.class));
+        doReturn(Mono.error(new IllegalStateException("delete unavailable")))
+                .when(storage.client)
+                .delete(any(PageChatTurnRecord.class));
         var session = conversations.selected("page", "session", current()).block();
 
-        assertThatThrownBy(() -> conversations.deleteSession(current(), "session",
-            session.getMetadata().getVersion()).block()).hasMessage("delete unavailable");
+        assertThatThrownBy(() -> conversations
+                        .deleteSession(
+                                current(), "session", session.getMetadata().getVersion())
+                        .block())
+                .hasMessage("delete unavailable");
         assertThat(current().getSpec().getDeletingSessionId()).isEqualTo("session");
         assertThat(checkpoints.load("session").block()).isNotNull();
 
@@ -186,7 +197,9 @@ class ConversationTurnsTest {
         conversations.finish(reserve("page", turn("default")), turn("default")).block();
         conversations.finish(reserve("other", turn("other")), turn("other")).block();
 
-        conversations.deleteSession(current(), "page", current().getMetadata().getVersion()).block();
+        conversations
+                .deleteSession(current(), "page", current().getMetadata().getVersion())
+                .block();
 
         assertThat(conversations.history("page", null, 20).block().turns()).isEmpty();
         assertThat(conversations.history("other", null, 20).block().turns()).containsExactly(turn("other"));
@@ -227,18 +240,22 @@ class ConversationTurnsTest {
 
     private void failSessionUpdate(String id, AtomicBoolean fail) {
         doAnswer(invocation -> Mono.fromSupplier(() -> {
-            PageChatSession session = invocation.getArgument(0);
-            if (id.equals(session.getMetadata().getName()) && fail.get()) {
-                throw new IllegalStateException("storage unavailable");
-            }
-            var previous = storage.stored.get(session.getMetadata().getName());
-            if (!previous.getMetadata().getVersion().equals(session.getMetadata().getVersion())) {
-                throw new OptimisticLockingFailureException("CAS");
-            }
-            session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
-            storage.stored.put(session.getMetadata().getName(), Json.deepCopy(session));
-            return session;
-        })).when(storage.client).update(any(PageChatSession.class));
+                    PageChatSession session = invocation.getArgument(0);
+                    if (id.equals(session.getMetadata().getName()) && fail.get()) {
+                        throw new IllegalStateException("storage unavailable");
+                    }
+                    var previous = storage.stored.get(session.getMetadata().getName());
+                    if (!previous.getMetadata()
+                            .getVersion()
+                            .equals(session.getMetadata().getVersion())) {
+                        throw new OptimisticLockingFailureException("CAS");
+                    }
+                    session.getMetadata().setVersion(session.getMetadata().getVersion() + 1);
+                    storage.stored.put(session.getMetadata().getName(), Json.deepCopy(session));
+                    return session;
+                }))
+                .when(storage.client)
+                .update(any(PageChatSession.class));
     }
 
     private void saveCheckpoint(String sessionId) {
@@ -250,7 +267,15 @@ class ConversationTurnsTest {
     }
 
     private static ChatApi.Turn turn(String runId) {
-        return new ChatApi.Turn(runId, "admin", Instant.parse("2026-10-20T00:00:00Z"),
-            "prompt", "text", List.of(), "completed", null, null);
+        return new ChatApi.Turn(
+                runId,
+                "admin",
+                Instant.parse("2026-10-20T00:00:00Z"),
+                "prompt",
+                "text",
+                List.of(),
+                "completed",
+                null,
+                null);
     }
 }

@@ -3,21 +3,18 @@ package run.halo.aipagebuilder.page;
 import java.util.regex.Pattern;
 
 /**
- * Replaces storage APIs that a sandboxed preview cannot reach. A sandboxed document has an
- * opaque origin, so reading {@code localStorage}, {@code sessionStorage} or
- * {@code document.cookie} throws a SecurityError. Themes read them while starting, and an
- * unguarded access aborts the rest of their scripts. The shim keeps the synchronous API
- * backed by memory, so values live only for the current preview document.
+ * Replaces storage APIs that a sandboxed preview cannot reach. A sandboxed document has an opaque origin, so reading
+ * {@code localStorage}, {@code sessionStorage} or {@code document.cookie} throws a SecurityError. Themes read them
+ * while starting, and an unguarded access aborts the rest of their scripts. The shim keeps the synchronous API backed
+ * by memory, so values live only for the current preview document.
  */
 final class PreviewStorageShim {
     // Comments are matched so a literal "<head>" inside one cannot capture the shim, and
     // quoted attribute values may contain ">" without ending the tag early. Possessive
     // quantifiers keep long attributes from recursing the matcher into a StackOverflowError.
     private static final Pattern HEAD = Pattern.compile(
-        "<!--.*?-->|<head(?:\\s(?:[^>\"']++|\"[^\"]*+\"|'[^']*+')*+)?>",
-        Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-    private static final Pattern DOCTYPE =
-        Pattern.compile("<!doctype[^>]*>", Pattern.CASE_INSENSITIVE);
+            "<!--.*?-->|<head(?:\\s(?:[^>\"']++|\"[^\"]*+\"|'[^']*+')*+)?>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern DOCTYPE = Pattern.compile("<!doctype[^>]*>", Pattern.CASE_INSENSITIVE);
 
     static final String BODY = """
         (function () {
@@ -135,8 +132,7 @@ final class PreviewStorageShim {
         })();
         """;
 
-    private PreviewStorageShim() {
-    }
+    private PreviewStorageShim() {}
 
     static String script() {
         return "<script data-ai-page-builder=\"preview-storage\">" + BODY + "</script>";

@@ -1,11 +1,11 @@
 package run.halo.aipagebuilder.ai;
 
-import org.springframework.stereotype.Component;
 import org.pf4j.DefaultVersionManager;
-import run.halo.app.core.extension.Plugin;
-import run.halo.app.extension.ReactiveExtensionClient;
+import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import run.halo.app.core.extension.Plugin;
+import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
 @Component
@@ -24,10 +24,12 @@ public class OptionalAiGateway implements AiGateway {
 
     private Mono<Boolean> compatible() {
         return Mono.defer(() -> client.fetch(Plugin.class, "ai-foundation"))
-            .map(plugin -> plugin.getSpec() != null && plugin.getSpec().getVersion() != null
-                && new DefaultVersionManager().checkVersionConstraint(
-                    plugin.getSpec().getVersion(), REQUIRED_VERSION))
-            .defaultIfEmpty(false).onErrorReturn(false);
+                .map(plugin -> plugin.getSpec() != null
+                        && plugin.getSpec().getVersion() != null
+                        && new DefaultVersionManager()
+                                .checkVersionConstraint(plugin.getSpec().getVersion(), REQUIRED_VERSION))
+                .defaultIfEmpty(false)
+                .onErrorReturn(false);
     }
 
     private AiGateway bridge() {
@@ -48,25 +50,27 @@ public class OptionalAiGateway implements AiGateway {
 
     @Override
     public Mono<AiEndpoint.AiStatus> status() {
-        return compatible().flatMap(compatible -> {
-            if (!compatible) {
-                return Mono.just(new AiEndpoint.AiStatus(false,
-                    "请安装或升级 AI Foundation 至 1.1.1 或以上的 1.x 版本。"));
-            }
-            var bridge = bridge();
-            return bridge == null ? Mono.just(new AiEndpoint.AiStatus(false,
-                "AI Foundation API 不可用，请重新启用 AI Page Builder。")) : bridge.status();
-        }).onErrorReturn(new AiEndpoint.AiStatus(false, "AI Foundation 暂不可用。"));
+        return compatible()
+                .flatMap(compatible -> {
+                    if (!compatible) {
+                        return Mono.just(new AiEndpoint.AiStatus(false, "请安装或升级 AI Foundation 至 1.1.1 或以上的 1.x 版本。"));
+                    }
+                    var bridge = bridge();
+                    return bridge == null
+                            ? Mono.just(new AiEndpoint.AiStatus(false, "AI Foundation API 不可用，请重新启用 AI Page Builder。"))
+                            : bridge.status();
+                })
+                .onErrorReturn(new AiEndpoint.AiStatus(false, "AI Foundation 暂不可用。"));
     }
 
     @Override
-    public Flux<java.util.Map<String, Object>> chat(String modelName,
-        java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
+    public Flux<java.util.Map<String, Object>> chat(
+            String modelName, java.util.List<ChatApi.Turn> history, String prompt, PageWorkingCopy copy) {
         return compatible().flatMapMany(compatible -> {
             var gateway = compatible ? bridge() : null;
-            return gateway == null ? Flux.error(new AiGenerationException(
-                AiGenerationException.Reason.MODEL_UNAVAILABLE))
-                : gateway.chat(modelName, history, prompt, copy);
+            return gateway == null
+                    ? Flux.error(new AiGenerationException(AiGenerationException.Reason.MODEL_UNAVAILABLE))
+                    : gateway.chat(modelName, history, prompt, copy);
         });
     }
 
@@ -75,8 +79,8 @@ public class OptionalAiGateway implements AiGateway {
         return compatible().flatMap(compatible -> {
             var gateway = compatible ? bridge() : null;
             return gateway == null
-                ? Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE))
-                : gateway.review(system, prompt);
+                    ? Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE))
+                    : gateway.review(system, prompt);
         });
     }
 
@@ -85,9 +89,8 @@ public class OptionalAiGateway implements AiGateway {
         return compatible().flatMap(compatible -> {
             var gateway = compatible ? bridge() : null;
             return gateway == null
-                ? Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE))
-                : gateway.review(modelName, system, prompt);
+                    ? Mono.error(new AiReviewException(AiReviewException.Reason.UNAVAILABLE))
+                    : gateway.review(modelName, system, prompt);
         });
     }
-
 }

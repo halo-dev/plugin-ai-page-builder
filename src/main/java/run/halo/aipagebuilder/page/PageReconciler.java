@@ -8,6 +8,9 @@ import java.util.Set;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
+import run.halo.aipagebuilder.ai.ConversationTurns;
+import run.halo.aipagebuilder.model.ThemePage;
+import run.halo.aipagebuilder.model.ThemePageRevision;
 import run.halo.app.extension.ExtensionUtil;
 import run.halo.app.extension.ListOptions;
 import run.halo.app.extension.ReactiveExtensionClient;
@@ -15,9 +18,6 @@ import run.halo.app.extension.controller.Controller;
 import run.halo.app.extension.controller.ControllerBuilder;
 import run.halo.app.extension.controller.Reconciler;
 import run.halo.app.extension.router.selector.FieldSelector;
-import run.halo.aipagebuilder.ai.ConversationTurns;
-import run.halo.aipagebuilder.model.ThemePage;
-import run.halo.aipagebuilder.model.ThemePageRevision;
 
 /** Keeps cleanup responsibility durable until every child has a deletion marker. */
 @Component
@@ -46,19 +46,22 @@ public class PageReconciler implements Reconciler<Reconciler.Request> {
 
     static Mono<Void> cleanup(ReactiveExtensionClient client, ThemePage page) {
         var name = page.getMetadata().getName();
-        var options = new ListOptions().setFieldSelector(FieldSelector.of(equal("spec.pageName", name))
-            .andQuery(isNull("metadata.deletionTimestamp")));
+        var options = new ListOptions()
+                .setFieldSelector(
+                        FieldSelector.of(equal("spec.pageName", name)).andQuery(isNull("metadata.deletionTimestamp")));
         return client.listAll(ThemePageRevision.class, options, Sort.unsorted())
-            .concatMap(client::delete)
-            .then(ConversationTurns.deletePageHistory(client, name))
-            .then(client.fetch(ThemePage.class, name)).flatMap(latest -> {
-                if (latest.getMetadata().getDeletionTimestamp() != null
-                    && ExtensionUtil.removeFinalizers(latest.getMetadata(), Set.of(FINALIZER))) {
-                    return client.update(latest).then();
-                }
-                return Mono.empty();
-            }).retryWhen(reactor.util.retry.Retry.max(3)
-                .filter(org.springframework.dao.OptimisticLockingFailureException.class::isInstance));
+                .concatMap(client::delete)
+                .then(ConversationTurns.deletePageHistory(client, name))
+                .then(client.fetch(ThemePage.class, name))
+                .flatMap(latest -> {
+                    if (latest.getMetadata().getDeletionTimestamp() != null
+                            && ExtensionUtil.removeFinalizers(latest.getMetadata(), Set.of(FINALIZER))) {
+                        return client.update(latest).then();
+                    }
+                    return Mono.empty();
+                })
+                .retryWhen(reactor.util.retry.Retry.max(3)
+                        .filter(org.springframework.dao.OptimisticLockingFailureException.class::isInstance));
     }
 
     @Override

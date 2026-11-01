@@ -31,16 +31,15 @@ class PageCacheResponseTest {
         assertThat(headers.getETag()).matches("\"[0-9a-f]{64}\"");
         assertThat(headers.getCacheControl()).isEqualTo("no-cache");
         assertThat(headers.getLastModified()).isEqualTo(-1);
-        assertThat(headers.getContentLength())
-            .isEqualTo(body.getBytes(StandardCharsets.UTF_8).length);
+        assertThat(headers.getContentLength()).isEqualTo(body.getBytes(StandardCharsets.UTF_8).length);
         assertThat(exchange.getResponse().getBodyAsString().block()).isEqualTo(body);
     }
 
     @Test
     void matchingIfNoneMatchReturns304WithoutBody() {
         var etag = etagOf("<p>About</p>");
-        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-            .header(HttpHeaders.IF_NONE_MATCH, etag));
+        var exchange =
+                MockServerWebExchange.from(MockServerHttpRequest.get("/about").header(HttpHeaders.IF_NONE_MATCH, etag));
         write(exchange, "<p>About</p>");
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
         assertThat(exchange.getResponse().getHeaders().getETag()).isEqualTo(etag);
@@ -52,29 +51,27 @@ class PageCacheResponseTest {
     void weakAndListedIfNoneMatchValuesMatch() {
         var etag = etagOf("<p>About</p>");
         for (var value : List.of("W/" + etag, "\"other\", " + etag, "*")) {
-            var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-                .header(HttpHeaders.IF_NONE_MATCH, value));
+            var exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/about").header(HttpHeaders.IF_NONE_MATCH, value));
             write(exchange, "<p>About</p>");
-            assertThat(exchange.getResponse().getStatusCode()).as(value)
-                .isEqualTo(HttpStatus.NOT_MODIFIED);
+            assertThat(exchange.getResponse().getStatusCode()).as(value).isEqualTo(HttpStatus.NOT_MODIFIED);
         }
     }
 
     @Test
     void malformedIfNoneMatchIsIgnored() {
         for (var value : List.of("abc", "\"\"")) {
-            var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-                .header(HttpHeaders.IF_NONE_MATCH, value));
+            var exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.get("/about").header(HttpHeaders.IF_NONE_MATCH, value));
             write(exchange, "<p>About</p>");
-            assertThat(exchange.getResponse().getStatusCode()).as(value)
-                .isEqualTo(HttpStatus.OK);
+            assertThat(exchange.getResponse().getStatusCode()).as(value).isEqualTo(HttpStatus.OK);
         }
     }
 
     @Test
     void commasInsideAnOpaqueTagDoNotBecomeWildcards() {
-        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-            .header(HttpHeaders.IF_NONE_MATCH, "\"x,*,y\""));
+        var exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/about").header(HttpHeaders.IF_NONE_MATCH, "\"x,*,y\""));
         write(exchange, "<p>About</p>");
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
     }
@@ -83,8 +80,8 @@ class PageCacheResponseTest {
     void changingTheBodyChangesTheEtag() {
         var stale = etagOf("<p>Old</p>");
         assertThat(etagOf("<p>New</p>")).isNotEqualTo(stale);
-        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/about")
-            .header(HttpHeaders.IF_NONE_MATCH, stale));
+        var exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/about").header(HttpHeaders.IF_NONE_MATCH, stale));
         write(exchange, "<p>New</p>");
         assertThat(exchange.getResponse().getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(exchange.getResponse().getBodyAsString().block()).isEqualTo("<p>New</p>");
@@ -97,7 +94,7 @@ class PageCacheResponseTest {
         write(exchange, body, true);
         assertThat(exchange.getResponse().getHeaders().getETag()).matches("\"[0-9a-f]{64}\"");
         assertThat(exchange.getResponse().getHeaders().getContentLength())
-            .isEqualTo(body.getBytes(StandardCharsets.UTF_8).length);
+                .isEqualTo(body.getBytes(StandardCharsets.UTF_8).length);
         assertThat(exchange.getResponse().getBodyAsString().block()).isEqualTo(body);
     }
 
@@ -164,9 +161,10 @@ class PageCacheResponseTest {
                     return exchange.getResponse().writeWith(Mono.just(factory.wrap(bytes)));
                 }
                 var half = bytes.length / 2;
-                return exchange.getResponse().writeAndFlushWith(Flux.just(
-                    Mono.just(factory.wrap(Arrays.copyOfRange(bytes, 0, half))),
-                    Mono.just(factory.wrap(Arrays.copyOfRange(bytes, half, bytes.length)))));
+                return exchange.getResponse()
+                        .writeAndFlushWith(Flux.just(
+                                Mono.just(factory.wrap(Arrays.copyOfRange(bytes, 0, half))),
+                                Mono.just(factory.wrap(Arrays.copyOfRange(bytes, half, bytes.length)))));
             }
         };
     }

@@ -51,89 +51,110 @@ class PublicApiCatalogTest {
     }
 
     @AfterEach
-    void close() { catalog.close(); }
+    void close() {
+        catalog.close();
+    }
 
     @Test
     void discoversNestedPublicRoutesAndKeepsPostSearch() {
-        var routes = RouterFunctions.nest(RequestPredicates.path("/apis/api.content.halo.run/v1alpha1"),
-            route("/posts", "queryPosts"));
-        var search = SpringdocRouteBuilder.route().POST("/apis/api.halo.run/v1alpha1/indices/-/search",
-            request -> ServerResponse.ok().build(), operation -> operation.operationId("searchIndices"))
-            .build();
-        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("posts", routes, "search", search,
-            "console", route("/apis/api.console.halo.run/v1alpha1/posts", "privatePosts"),
-            "plugin", route("/apis/api.example.halo.run/v1alpha1/items", "pluginItems"),
-            "notification", route("/apis/api.notification.halo.run/v1alpha1/userspaces/me", "privateNotification")));
+        var routes = RouterFunctions.nest(
+                RequestPredicates.path("/apis/api.content.halo.run/v1alpha1"), route("/posts", "queryPosts"));
+        var search = SpringdocRouteBuilder.route()
+                .POST(
+                        "/apis/api.halo.run/v1alpha1/indices/-/search",
+                        request -> ServerResponse.ok().build(),
+                        operation -> operation.operationId("searchIndices"))
+                .build();
+        when(root.getBeansOfType(RouterFunction.class))
+                .thenReturn(Map.of(
+                        "posts",
+                        routes,
+                        "search",
+                        search,
+                        "console",
+                        route("/apis/api.console.halo.run/v1alpha1/posts", "privatePosts"),
+                        "plugin",
+                        route("/apis/api.example.halo.run/v1alpha1/items", "pluginItems"),
+                        "notification",
+                        route("/apis/api.notification.halo.run/v1alpha1/userspaces/me", "privateNotification")));
         var result = catalog.search("", 20);
         assertThat(items(result)).hasSize(3);
-        assertThat(items(result)).extracting(item -> item.get("id"))
-            .contains("GET /apis/api.content.halo.run/v1alpha1/posts",
-                "POST /apis/api.halo.run/v1alpha1/indices/-/search");
+        assertThat(items(result))
+                .extracting(item -> item.get("id"))
+                .contains(
+                        "GET /apis/api.content.halo.run/v1alpha1/posts",
+                        "POST /apis/api.halo.run/v1alpha1/indices/-/search");
         assertThat(result).containsEntry("anonymousAccess", "unverified").containsEntry("partial", false);
-        assertThat(items(catalog.search("queryPosts", 8)).getFirst())
-            .containsEntry("operationId", "queryPosts");
+        assertThat(items(catalog.search("queryPosts", 8)).getFirst()).containsEntry("operationId", "queryPosts");
         assertThat(items(catalog.search("doesNotExist", 8))).isEmpty();
-        assertThat(catalog.publicPathPrefixes()).containsExactly(
-            "/apis/api.content.halo.run/v1alpha1/posts",
-            "/apis/api.example.halo.run/v1alpha1/items",
-            "/apis/api.halo.run/v1alpha1/indices/-/search");
+        assertThat(catalog.publicPathPrefixes())
+                .containsExactly(
+                        "/apis/api.content.halo.run/v1alpha1/posts",
+                        "/apis/api.example.halo.run/v1alpha1/items",
+                        "/apis/api.halo.run/v1alpha1/indices/-/search");
     }
 
     @Test
     void excludesHiddenOperationsFromSearchAndDetails() {
         var path = "/apis/api.example.halo.run/v1alpha1/internal";
-        var hidden = SpringdocRouteBuilder.route().GET(path,
-            request -> ServerResponse.ok().build(),
-            operation -> operation.operationId("internalOperation").hidden(true)).build();
+        var hidden = SpringdocRouteBuilder.route()
+                .GET(
+                        path,
+                        request -> ServerResponse.ok().build(),
+                        operation -> operation.operationId("internalOperation").hidden(true))
+                .build();
         when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("hidden", hidden));
         assertThat(items(catalog.search("", 8))).isEmpty();
-        assertThat(items(catalog.details(List.of("GET " + path))).getFirst())
-            .containsEntry("status", "not_found");
+        assertThat(items(catalog.details(List.of("GET " + path))).getFirst()).containsEntry("status", "not_found");
         // Hidden operations stay callable from previews even though documentation hides them.
-        assertThat(catalog.publicPathPrefixes())
-            .containsExactly("/apis/api.example.halo.run/v1alpha1/internal");
+        assertThat(catalog.publicPathPrefixes()).containsExactly("/apis/api.example.halo.run/v1alpha1/internal");
     }
 
     @Test
     void publicRouteSourcesDoNotExposePrivateSiblingsOrTheWholeGroup() {
-        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
-            "posts", route("/apis/api.content.halo.run/v1alpha1/posts/{name}", "getPost"),
-            "subscription", route(
-                "/apis/api.notification.halo.run/v1alpha1/subscriptions/{name}/unsubscribe",
-                "unsubscribe"),
-            "privateNotification", route(
-                "/apis/api.notification.halo.run/v1alpha1/userspaces/me", "privateNotification")));
-        assertThat(catalog.publicPathPrefixes()).containsExactly(
-            "/apis/api.content.halo.run/v1alpha1/posts/",
-            "/apis/api.notification.halo.run/v1alpha1/subscriptions/");
+        when(root.getBeansOfType(RouterFunction.class))
+                .thenReturn(Map.of(
+                        "posts", route("/apis/api.content.halo.run/v1alpha1/posts/{name}", "getPost"),
+                        "subscription",
+                                route(
+                                        "/apis/api.notification.halo.run/v1alpha1/subscriptions/{name}/unsubscribe",
+                                        "unsubscribe"),
+                        "privateNotification",
+                                route(
+                                        "/apis/api.notification.halo.run/v1alpha1/userspaces/me",
+                                        "privateNotification")));
+        assertThat(catalog.publicPathPrefixes())
+                .containsExactly(
+                        "/apis/api.content.halo.run/v1alpha1/posts/",
+                        "/apis/api.notification.halo.run/v1alpha1/subscriptions/");
     }
 
     @Test
     void wildcardRoutesAllowOnlyTheirOwnPathPrefix() {
-        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
-            "files", route("/apis/api.example.halo.run/v1alpha1/files/**", "listFiles")));
-        assertThat(catalog.publicPathPrefixes()).containsExactly(
-            "/apis/api.example.halo.run/v1alpha1/files",
-            "/apis/api.example.halo.run/v1alpha1/files/");
+        when(root.getBeansOfType(RouterFunction.class))
+                .thenReturn(Map.of("files", route("/apis/api.example.halo.run/v1alpha1/files/**", "listFiles")));
+        assertThat(catalog.publicPathPrefixes())
+                .containsExactly(
+                        "/apis/api.example.halo.run/v1alpha1/files", "/apis/api.example.halo.run/v1alpha1/files/");
     }
 
     @Test
     void excludesConsoleAndPrivateNotificationRoutesInAnyVersion() {
-        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
-            "console", route("/apis/api.console.halo.run/v1alpha2/posts", "privatePosts"),
-            "userspace", route("/apis/api.notification.halo.run/v1alpha2/userspaces/me",
-                "privateNotification"),
-            "public", route("/apis/api.example.halo.run/v1alpha1/items", "items")));
+        when(root.getBeansOfType(RouterFunction.class))
+                .thenReturn(Map.of(
+                        "console", route("/apis/api.console.halo.run/v1alpha2/posts", "privatePosts"),
+                        "userspace",
+                                route("/apis/api.notification.halo.run/v1alpha2/userspaces/me", "privateNotification"),
+                        "public", route("/apis/api.example.halo.run/v1alpha1/items", "items")));
         assertThat(items(catalog.search("", 8))).hasSize(1);
-        assertThat(catalog.publicPathPrefixes())
-            .containsExactly("/apis/api.example.halo.run/v1alpha1/items");
+        assertThat(catalog.publicPathPrefixes()).containsExactly("/apis/api.example.halo.run/v1alpha1/items");
     }
 
     @Test
     void redirectingRoutesStaySearchableButAreNotAllowedFromPreviews() {
-        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
-            "thumbnail", route(
-                "/apis/api.storage.halo.run/v1alpha1/thumbnails/-/via-uri", "thumbnail")));
+        when(root.getBeansOfType(RouterFunction.class))
+                .thenReturn(Map.of(
+                        "thumbnail", route("/apis/api.storage.halo.run/v1alpha1/thumbnails/-/via-uri", "thumbnail")));
         assertThat(items(catalog.search("", 8))).hasSize(1);
         // CSP does not re-check path sources after a redirect, so this route could reach
         // Console APIs even though only its own path is allowlisted.
@@ -143,26 +164,37 @@ class PublicApiCatalogTest {
     @Test
     void preservesQueryAndMediaPredicatesAndMarksContractPartial() {
         var path = "/apis/api.example.halo.run/v1alpha1/export";
-        var route = SpringdocRouteBuilder.route().GET(path,
-            RequestPredicates.queryParam("format", "json")
-                .and(RequestPredicates.accept(MediaType.APPLICATION_JSON)),
-            request -> ServerResponse.ok().build(), operation -> operation.operationId("exportItems")
-                .response(responseBuilder().implementation(Item.class))).build();
+        var route = SpringdocRouteBuilder.route()
+                .GET(
+                        path,
+                        RequestPredicates.queryParam("format", "json")
+                                .and(RequestPredicates.accept(MediaType.APPLICATION_JSON)),
+                        request -> ServerResponse.ok().build(),
+                        operation -> operation
+                                .operationId("exportItems")
+                                .response(responseBuilder().implementation(Item.class)))
+                .build();
         when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("conditional", route));
         var result = catalog.details(List.of("GET " + path));
         var detail = items(result).getFirst();
         assertThat(detail).containsEntry("status", "ok").containsEntry("partial", true);
         assertThat(result).containsEntry("partial", true);
-        assertThat(detail.get("routeConditions")).isEqualTo(Map.of(
-            "queryParams", Map.of("format", "json"),
-            "produces", List.of("application/json")));
+        assertThat(detail.get("routeConditions"))
+                .isEqualTo(Map.of(
+                        "queryParams", Map.of("format", "json"),
+                        "produces", List.of("application/json")));
         assertThat((List<?>) detail.get("warnings")).isNotEmpty();
         var readers = HandlerStrategies.withDefaults().messageReaders();
-        var withoutQuery = ServerRequest.create(MockServerWebExchange.from(
-            MockServerHttpRequest.get(path).accept(MediaType.APPLICATION_JSON).build()), readers);
-        var withQuery = ServerRequest.create(MockServerWebExchange.from(
-            MockServerHttpRequest.get(path + "?format=json")
-                .accept(MediaType.APPLICATION_JSON).build()), readers);
+        var withoutQuery = ServerRequest.create(
+                MockServerWebExchange.from(MockServerHttpRequest.get(path)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .build()),
+                readers);
+        var withQuery = ServerRequest.create(
+                MockServerWebExchange.from(MockServerHttpRequest.get(path + "?format=json")
+                        .accept(MediaType.APPLICATION_JSON)
+                        .build()),
+                readers);
         assertThat(route.route(withoutQuery).hasElement().block()).isFalse();
         assertThat(route.route(withQuery).hasElement().block()).isTrue();
     }
@@ -170,19 +202,23 @@ class PublicApiCatalogTest {
     @Test
     void preservesRequestContentTypeAlongsideSchemaWarnings() {
         var path = "/apis/api.example.halo.run/v1alpha1/search";
-        var route = SpringdocRouteBuilder.route().POST(path,
-            RequestPredicates.contentType(MediaType.APPLICATION_JSON),
-            request -> ServerResponse.ok().build(), operation -> operation.operationId("searchItems")
-                .parameter(org.springdoc.core.fn.builders.parameter.Builder.parameterBuilder()
-                    .name("scope"))).build();
+        var route = SpringdocRouteBuilder.route()
+                .POST(
+                        path,
+                        RequestPredicates.contentType(MediaType.APPLICATION_JSON),
+                        request -> ServerResponse.ok().build(),
+                        operation -> operation
+                                .operationId("searchItems")
+                                .parameter(org.springdoc.core.fn.builders.parameter.Builder.parameterBuilder()
+                                        .name("scope")))
+                .build();
         when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("search", route));
         var detail = items(catalog.details(List.of("POST " + path))).getFirst();
-        assertThat(detail.get("routeConditions"))
-            .isEqualTo(Map.of("consumes", List.of("application/json")));
+        assertThat(detail.get("routeConditions")).isEqualTo(Map.of("consumes", List.of("application/json")));
         assertThat(detail).containsEntry("partial", true);
         assertThat((List<?>) detail.get("warnings"))
-            .anySatisfy(warning -> assertThat(warning.toString()).contains("location is unspecified"))
-            .anySatisfy(warning -> assertThat(warning.toString()).contains("routeConditions"));
+                .anySatisfy(warning -> assertThat(warning.toString()).contains("location is unspecified"))
+                .anySatisfy(warning -> assertThat(warning.toString()).contains("routeConditions"));
     }
 
     @Test
@@ -222,10 +258,12 @@ class PublicApiCatalogTest {
             listener.pluginStateChanged(null);
             return Map.of();
         });
-        assertThatThrownBy(() -> catalog.search("", 8)).isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("正在变化");
+        assertThatThrownBy(() -> catalog.search("", 8))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("正在变化");
         assertThatThrownBy(() -> catalog.details(List.of("GET /apis/api.example/v1/items")))
-            .isInstanceOf(IllegalStateException.class).hasMessageContaining("正在变化");
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("正在变化");
     }
 
     @Test
@@ -248,16 +286,17 @@ class PublicApiCatalogTest {
     @Test
     void marksMissingMetadataAndAmbiguousRoutesWithoutGuessing() {
         var path = "/apis/api.example.halo.run/v1alpha1/items";
-        var bare = RouterFunctions.route(RequestPredicates.GET(path + "/bare"),
-            request -> ServerResponse.ok().build());
-        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of(
-            "first", route(path, "first"), "second", route(path, "second"), "bare", bare));
+        var bare = RouterFunctions.route(
+                RequestPredicates.GET(path + "/bare"),
+                request -> ServerResponse.ok().build());
+        when(root.getBeansOfType(RouterFunction.class))
+                .thenReturn(Map.of("first", route(path, "first"), "second", route(path, "second"), "bare", bare));
         var result = catalog.search("", 8);
         assertThat(result).containsEntry("partial", true);
-        assertThat(items(result)).extracting(item -> item.get("contract"))
-            .containsExactly("ambiguous", "missing");
+        assertThat(items(result)).extracting(item -> item.get("contract")).containsExactly("ambiguous", "missing");
         assertThat(items(catalog.details(List.of("GET " + path, "GET " + path + "/bare"))))
-            .extracting(item -> item.get("status")).containsExactly("ambiguous", "unavailable");
+                .extracting(item -> item.get("status"))
+                .containsExactly("ambiguous", "unavailable");
     }
 
     @Test
@@ -265,7 +304,8 @@ class PublicApiCatalogTest {
         var route = route("/apis/api.example.halo.run/v1alpha1/items", "items");
         when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("first", route, "alias", route));
         assertThat(items(catalog.search("", 8))).hasSize(1);
-        var item = items(catalog.details(List.of("GET /apis/api.example.halo.run/v1alpha1/items"))).getFirst();
+        var item = items(catalog.details(List.of("GET /apis/api.example.halo.run/v1alpha1/items")))
+                .getFirst();
         assertThat(item).containsEntry("status", "ok").containsKeys("responses", "components");
     }
 
@@ -273,9 +313,11 @@ class PublicApiCatalogTest {
     void continuesWhenOneRouterCannotBeVisited() {
         var broken = mock(RouterFunction.class);
         org.mockito.Mockito.doThrow(new IllegalStateException("broken route"))
-            .when(broken).accept(org.mockito.ArgumentMatchers.any());
-        when(root.getBeansOfType(RouterFunction.class)).thenReturn(Map.of("broken", broken,
-            "healthy", route("/apis/api.example.halo.run/v1alpha1/items", "items")));
+                .when(broken)
+                .accept(org.mockito.ArgumentMatchers.any());
+        when(root.getBeansOfType(RouterFunction.class))
+                .thenReturn(Map.of(
+                        "broken", broken, "healthy", route("/apis/api.example.halo.run/v1alpha1/items", "items")));
         var result = catalog.search("", 8);
         assertThat(result).containsEntry("partial", true);
         assertThat(items(result)).hasSize(1);
@@ -290,12 +332,18 @@ class PublicApiCatalogTest {
     }
 
     private static RouterFunction<ServerResponse> route(String path, String id) {
-        return SpringdocRouteBuilder.route().GET(path, request -> ServerResponse.ok().build(),
-            operation -> operation.operationId(id).description("List public items")
-                .response(responseBuilder().implementation(Item.class))).build();
+        return SpringdocRouteBuilder.route()
+                .GET(
+                        path,
+                        request -> ServerResponse.ok().build(),
+                        operation -> operation
+                                .operationId(id)
+                                .description("List public items")
+                                .response(responseBuilder().implementation(Item.class)))
+                .build();
     }
 
-    private record Item(String title) { }
+    private record Item(String title) {}
 
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> items(Map<String, Object> result) {

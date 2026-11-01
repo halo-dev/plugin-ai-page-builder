@@ -15,12 +15,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
-import run.halo.app.extension.Metadata;
-import run.halo.app.extension.ReactiveExtensionClient;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.model.SiteMemory;
 import run.halo.aipagebuilder.model.SiteMemory.Entry;
 import run.halo.aipagebuilder.model.SiteMemory.Source;
+import run.halo.app.extension.Metadata;
+import run.halo.app.extension.ReactiveExtensionClient;
 
 @Service
 public class SiteMemoryService {
@@ -37,58 +37,77 @@ public class SiteMemoryService {
 
     public Mono<SiteMemory> load() {
         return Mono.defer(() -> client.fetch(SiteMemory.class, SiteMemory.NAME)
-            .switchIfEmpty(Mono.defer(() -> client.create(emptyMemory()).flux().single()
-                .onErrorResume(error -> isCreateConflict(error), error ->
-                    client.fetch(SiteMemory.class, SiteMemory.NAME)
-                        .switchIfEmpty(Mono.error(error))))));
+                .switchIfEmpty(Mono.defer(() -> client.create(emptyMemory())
+                        .flux()
+                        .single()
+                        .onErrorResume(
+                                error -> isCreateConflict(error),
+                                error -> client.fetch(SiteMemory.class, SiteMemory.NAME)
+                                        .switchIfEmpty(Mono.error(error))))));
     }
 
-    public Mono<SiteMemory> apply(Long expectedVersion, List<Change> changes,
-        SourceContext context) {
+    public Mono<SiteMemory> apply(Long expectedVersion, List<Change> changes, SourceContext context) {
         return Mono.defer(() -> {
-            if (expectedVersion == null || expectedVersion < 0) {
-                throw invalid("expectedVersion is required and must not be negative");
-            }
-            if (changes == null || changes.isEmpty() || changes.size() > 5) {
-                throw invalid("A batch must contain between 1 and 5 changes");
-            }
-            validateContext(context);
-            return load().flatMap(current -> {
-                if (!expectedVersion.equals(current.getMetadata().getVersion())) {
-                    throw conflict("Site memory changed; reload before applying changes");
-                }
-                var updated = Json.deepCopy(current);
-                var entries = new ArrayList<>(updated.getSpec().getEntries());
-                var touchedKeys = new HashSet<MemoryKey>();
-                var touchedIds = new HashSet<String>();
-                boolean changed = false;
-                for (var change : changes) {
-                    changed |= applyChange(entries, change, context, touchedKeys, touchedIds);
-                }
-                if (changes.stream().anyMatch(change -> "delete".equals(change.action()))) {
-                    // Shared quotes can retain forgotten facts in any spelling. Keep references only.
-                    entries.replaceAll(entry -> {
-                        var source = entry.source();
-                        return new Entry(entry.id(), entry.subject(), entry.key(), entry.kind(),
-                            entry.value(), new Source(source.pageName(), source.sessionId(),
-                                source.runId(), source.sourceId(), "", source.actor()), entry.updatedAt());
+                    if (expectedVersion == null || expectedVersion < 0) {
+                        throw invalid("expectedVersion is required and must not be negative");
+                    }
+                    if (changes == null || changes.isEmpty() || changes.size() > 5) {
+                        throw invalid("A batch must contain between 1 and 5 changes");
+                    }
+                    validateContext(context);
+                    return load().flatMap(current -> {
+                        if (!expectedVersion.equals(current.getMetadata().getVersion())) {
+                            throw conflict("Site memory changed; reload before applying changes");
+                        }
+                        var updated = Json.deepCopy(current);
+                        var entries = new ArrayList<>(updated.getSpec().getEntries());
+                        var touchedKeys = new HashSet<MemoryKey>();
+                        var touchedIds = new HashSet<String>();
+                        boolean changed = false;
+                        for (var change : changes) {
+                            changed |= applyChange(entries, change, context, touchedKeys, touchedIds);
+                        }
+                        if (changes.stream().anyMatch(change -> "delete".equals(change.action()))) {
+                            // Shared quotes can retain forgotten facts in any spelling. Keep references only.
+                            entries.replaceAll(entry -> {
+                                var source = entry.source();
+                                return new Entry(
+                                        entry.id(),
+                                        entry.subject(),
+                                        entry.key(),
+                                        entry.kind(),
+                                        entry.value(),
+                                        new Source(
+                                                source.pageName(),
+                                                source.sessionId(),
+                                                source.runId(),
+                                                source.sourceId(),
+                                                "",
+                                                source.actor()),
+                                        entry.updatedAt());
+                            });
+                        }
+                        updated.getSpec().setEntries(entries);
+                        validateCapacity(updated);
+                        if (!changed) {
+                            return Mono.just(current);
+                        }
+                        // The fetched version is the storage CAS. Never rebase or retry a rejected write.
+                        return client.update(updated).flux().single();
                     });
-                }
-                updated.getSpec().setEntries(entries);
-                validateCapacity(updated);
-                if (!changed) {
-                    return Mono.just(current);
-                }
-                // The fetched version is the storage CAS. Never rebase or retry a rejected write.
-                return client.update(updated).flux().single();
-            });
-        }).onErrorMap(OptimisticLockingFailureException.class,
-            error -> new ResponseStatusException(HttpStatus.CONFLICT,
-                "Site memory changed; reload before applying changes", error));
+                })
+                .onErrorMap(
+                        OptimisticLockingFailureException.class,
+                        error -> new ResponseStatusException(
+                                HttpStatus.CONFLICT, "Site memory changed; reload before applying changes", error));
     }
 
-    private static boolean applyChange(List<Entry> entries, Change change, SourceContext context,
-        Set<MemoryKey> touchedKeys, Set<String> touchedIds) {
+    private static boolean applyChange(
+            List<Entry> entries,
+            Change change,
+            SourceContext context,
+            Set<MemoryKey> touchedKeys,
+            Set<String> touchedIds) {
         if (change == null || change.action() == null) {
             throw invalid("Each change must have an action");
         }
@@ -102,18 +121,23 @@ public class SiteMemoryService {
             if (touchedIds.contains(change.entryId())) {
                 throw invalid("A batch must not change the same entry ID twice");
             }
-            existing = entries.stream().filter(entry -> entry.id().equals(change.entryId()))
-                .findFirst().orElseThrow(() -> conflict("Entry no longer exists"));
+            existing = entries.stream()
+                    .filter(entry -> entry.id().equals(change.entryId()))
+                    .findFirst()
+                    .orElseThrow(() -> conflict("Entry no longer exists"));
             operationKeys.add(key(existing));
         } else if (change.entryId() != null) {
             throw invalid("add must not supply an entryId");
         }
-        var source = new Source(context.pageName(), context.sessionId(), context.runId(),
-            identifier(change.sourceId(), "sourceId", 512),
-            text(change.quote(), "quote", 500), context.actor());
+        var source = new Source(
+                context.pageName(),
+                context.sessionId(),
+                context.runId(),
+                identifier(change.sourceId(), "sourceId", 512),
+                text(change.quote(), "quote", 500),
+                context.actor());
         if ("delete".equals(change.action())) {
-            if (change.subject() != null || change.key() != null || change.kind() != null
-                || change.value() != null) {
+            if (change.subject() != null || change.key() != null || change.kind() != null || change.value() != null) {
                 throw invalid("delete identifies the entry only by entryId");
             }
             touch(operationKeys, existing.id(), touchedKeys, touchedIds);
@@ -122,16 +146,16 @@ public class SiteMemoryService {
         }
         var subject = text(change.subject(), "subject", 100).strip();
         var key = text(change.key(), "key", 100).strip();
-        if (!Set.of("fact", "brand_preference").contains(
-            Objects.requireNonNullElse(change.kind(), ""))) {
+        if (!Set.of("fact", "brand_preference").contains(Objects.requireNonNullElse(change.kind(), ""))) {
             throw invalid("kind must be fact or brand_preference");
         }
         var value = text(change.value(), "value", 500).strip();
-        var targetKey = new MemoryKey(normalizedKey(subject, "subject"),
-            normalizedKey(key, "key"));
+        var targetKey = new MemoryKey(normalizedKey(subject, "subject"), normalizedKey(key, "key"));
         operationKeys.add(targetKey);
-        var occupied = entries.stream().filter(entry -> key(entry).equals(targetKey))
-            .findFirst().orElse(null);
+        var occupied = entries.stream()
+                .filter(entry -> key(entry).equals(targetKey))
+                .findFirst()
+                .orElse(null);
         if ("add".equals(change.action())) {
             touch(operationKeys, occupied == null ? null : occupied.id(), touchedKeys, touchedIds);
             if (occupied != null) {
@@ -140,27 +164,27 @@ public class SiteMemoryService {
                 }
                 throw conflict("An entry with this subject and key already exists");
             }
-            entries.add(new Entry(UUID.randomUUID().toString(), subject, key, change.kind(),
-                value, source, Instant.now()));
+            entries.add(
+                    new Entry(UUID.randomUUID().toString(), subject, key, change.kind(), value, source, Instant.now()));
             return true;
         }
         touch(operationKeys, existing.id(), touchedKeys, touchedIds);
         if (occupied != null && !occupied.id().equals(existing.id())) {
             throw conflict("An entry with this subject and key already exists");
         }
-        if (key(existing).equals(targetKey) && existing.kind().equals(change.kind())
-            && existing.value().equals(value)) {
+        if (key(existing).equals(targetKey)
+                && existing.kind().equals(change.kind())
+                && existing.value().equals(value)) {
             return false;
         }
-        entries.set(entries.indexOf(existing), new Entry(existing.id(), subject, key,
-            change.kind(), value, source, Instant.now()));
+        entries.set(
+                entries.indexOf(existing),
+                new Entry(existing.id(), subject, key, change.kind(), value, source, Instant.now()));
         return true;
     }
 
-    private static void touch(Set<MemoryKey> keys, String id, Set<MemoryKey> touchedKeys,
-        Set<String> touchedIds) {
-        if (keys.stream().anyMatch(touchedKeys::contains)
-            || id != null && touchedIds.contains(id)) {
+    private static void touch(Set<MemoryKey> keys, String id, Set<MemoryKey> touchedKeys, Set<String> touchedIds) {
+        if (keys.stream().anyMatch(touchedKeys::contains) || id != null && touchedIds.contains(id)) {
             throw invalid("A batch must not change the same subject/key or entry ID twice");
         }
         touchedKeys.addAll(keys);
@@ -170,29 +194,32 @@ public class SiteMemoryService {
     }
 
     private static MemoryKey key(Entry entry) {
-        return new MemoryKey(normalizedKey(entry.subject(), "subject"),
-            normalizedKey(entry.key(), "key"));
+        return new MemoryKey(normalizedKey(entry.subject(), "subject"), normalizedKey(entry.key(), "key"));
     }
 
     private static String normalizedKey(String value, String field) {
-        var normalized = text(value, field, 100).strip()
-            .replaceAll("(?U)\\s+", " ").toLowerCase(Locale.ROOT);
+        var normalized =
+                text(value, field, 100).strip().replaceAll("(?U)\\s+", " ").toLowerCase(Locale.ROOT);
         return text(normalized, field, 100);
     }
 
     private static String identifier(String value, String field, int limit) {
         text(value, field, limit);
-        if (value.codePoints().anyMatch(code -> Character.isWhitespace(code)
-            || Character.isSpaceChar(code) || Character.isISOControl(code))) {
+        if (value.codePoints()
+                .anyMatch(code ->
+                        Character.isWhitespace(code) || Character.isSpaceChar(code) || Character.isISOControl(code))) {
             throw invalid(field + " must not contain whitespace or control characters");
         }
         return value;
     }
 
     private static String text(String value, String field, int limit) {
-        if (value == null || value.isBlank() || value.length() > limit
-            || value.codePoints().anyMatch(code -> Character.isISOControl(code)
-                && code != '\n' && code != '\r' && code != '\t')) {
+        if (value == null
+                || value.isBlank()
+                || value.length() > limit
+                || value.codePoints()
+                        .anyMatch(
+                                code -> Character.isISOControl(code) && code != '\n' && code != '\r' && code != '\t')) {
             throw invalid(field + " must contain 1 to " + limit + " characters without controls");
         }
         return value;
@@ -216,12 +243,16 @@ public class SiteMemoryService {
         int contentCharacters = 0;
         int sourceCharacters = 0;
         for (var entry : entries) {
-            contentCharacters += entry.subject().length() + entry.key().length()
-                + entry.value().length();
+            contentCharacters += entry.subject().length()
+                    + entry.key().length()
+                    + entry.value().length();
             var source = entry.source();
-            sourceCharacters += source.pageName().length() + source.sessionId().length()
-                + source.runId().length() + source.sourceId().length() + source.quote().length()
-                + source.actor().length();
+            sourceCharacters += source.pageName().length()
+                    + source.sessionId().length()
+                    + source.runId().length()
+                    + source.sourceId().length()
+                    + source.quote().length()
+                    + source.actor().length();
         }
         if (contentCharacters > MAX_CONTENT_CHARACTERS) {
             throw capacity("Site memory subject/key/value total must not exceed 8000 characters");
@@ -229,18 +260,17 @@ public class SiteMemoryService {
         if (sourceCharacters > MAX_SOURCE_CHARACTERS) {
             throw capacity("Site memory source metadata must not exceed 24000 characters");
         }
-        if (Json.toJson(memory).getBytes(StandardCharsets.UTF_8).length
-            > MAX_SERIALIZED_BYTES) {
+        if (Json.toJson(memory).getBytes(StandardCharsets.UTF_8).length > MAX_SERIALIZED_BYTES) {
             throw capacity("Serialized site memory must not exceed 64 KiB");
         }
     }
 
     private static boolean isCreateConflict(Throwable error) {
         return error instanceof DuplicateKeyException
-            || error instanceof OptimisticLockingFailureException
-            || error instanceof ResponseStatusException status
-                && status.getStatusCode().value() == 400
-                && status.getCause() instanceof DuplicateKeyException;
+                || error instanceof OptimisticLockingFailureException
+                || error instanceof ResponseStatusException status
+                        && status.getStatusCode().value() == 400
+                        && status.getCause() instanceof DuplicateKeyException;
     }
 
     private static SiteMemory emptyMemory() {
@@ -264,13 +294,17 @@ public class SiteMemoryService {
         return new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, reason);
     }
 
-    private record MemoryKey(String subject, String key) {
-    }
+    private record MemoryKey(String subject, String key) {}
 
-    public record Change(String action, String entryId, String subject, String key, String kind,
-                         String value, String sourceId, String quote) {
-    }
+    public record Change(
+            String action,
+            String entryId,
+            String subject,
+            String key,
+            String kind,
+            String value,
+            String sourceId,
+            String quote) {}
 
-    public record SourceContext(String pageName, String sessionId, String runId, String actor) {
-    }
+    public record SourceContext(String pageName, String sessionId, String runId, String actor) {}
 }

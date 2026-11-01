@@ -50,19 +50,29 @@ class ContentReferenceToolsTest {
     void readsOnlyReleaseThroughContentServiceAndBoundsSource() {
         var post = post();
         when(client.fetch(Post.class, "post")).thenReturn(Mono.just(post));
-        when(content.getReleaseContent("post")).thenReturn(Mono.just(ContentWrapper.builder()
-            .snapshotName("release").content("x".repeat(17000)).raw("unpublished raw must not leak").build()));
+        when(content.getReleaseContent("post"))
+                .thenReturn(Mono.just(ContentWrapper.builder()
+                        .snapshotName("release")
+                        .content("x".repeat(17000))
+                        .raw("unpublished raw must not leak")
+                        .build()));
         var result = read("Post", 10, 16384);
         assertThat((String) result.get("source")).hasSize(16384);
-        assertThat(result).containsEntry("revision", "release").containsEntry("offset", 10)
-            .containsEntry("nextOffset", 16394).containsEntry("truncated", true)
-            .containsEntry("permalink", "http://localhost:8090/posts/post")
-            .doesNotContainKeys("raw", "rawPatch", "headSnapshot");
+        assertThat(result)
+                .containsEntry("revision", "release")
+                .containsEntry("offset", 10)
+                .containsEntry("nextOffset", 16394)
+                .containsEntry("truncated", true)
+                .containsEntry("permalink", "http://localhost:8090/posts/post")
+                .doesNotContainKeys("raw", "rawPatch", "headSnapshot");
         verify(content, never()).getHeadContent(any());
         verify(client, never()).fetch(eq(Snapshot.class), any());
         var end = read("Post", Integer.MAX_VALUE, 100);
-        assertThat(end).containsEntry("source", "").containsEntry("offset", 17000)
-            .containsEntry("hasNext", false).containsEntry("nextOffset", null);
+        assertThat(end)
+                .containsEntry("source", "")
+                .containsEntry("offset", 17000)
+                .containsEntry("hasNext", false)
+                .containsEntry("nextOffset", null);
     }
 
     @ParameterizedTest
@@ -86,11 +96,17 @@ class ContentReferenceToolsTest {
     void rejectsReleaseOrVisibilityChangesDuringRead() {
         var post = post();
         when(client.fetch(Post.class, "post")).thenReturn(Mono.just(post));
-        when(content.getReleaseContent("post")).thenReturn(Mono.just(ContentWrapper.builder()
-            .snapshotName("head").content("secret").build()));
+        when(content.getReleaseContent("post"))
+                .thenReturn(Mono.just(ContentWrapper.builder()
+                        .snapshotName("head")
+                        .content("secret")
+                        .build()));
         assertThatThrownBy(() -> read("Post", 0, 10)).isInstanceOf(IllegalArgumentException.class);
-        when(content.getReleaseContent("post")).thenReturn(Mono.just(ContentWrapper.builder()
-            .snapshotName("release").content("published").build()));
+        when(content.getReleaseContent("post"))
+                .thenReturn(Mono.just(ContentWrapper.builder()
+                        .snapshotName("release")
+                        .content("published")
+                        .build()));
         var nowPrivate = post();
         nowPrivate.getSpec().setVisible(Post.VisibleEnum.PRIVATE);
         when(client.fetch(Post.class, "post")).thenReturn(Mono.just(post), Mono.just(nowPrivate));
@@ -102,13 +118,14 @@ class ContentReferenceToolsTest {
         var page = page();
         when(client.fetch(SinglePage.class, "post")).thenReturn(Mono.just(page));
         var base = snapshot("base", page, true, "<p>base</p>");
-        var release = snapshot("release", page, false,
-            PatchUtils.diffToJsonPatch("<p>base</p>", "<p>published</p>"));
+        var release = snapshot("release", page, false, PatchUtils.diffToJsonPatch("<p>base</p>", "<p>published</p>"));
         when(client.fetch(Snapshot.class, "base")).thenReturn(Mono.just(base));
         when(client.fetch(Snapshot.class, "release")).thenReturn(Mono.just(release));
-        assertThat(read("SinglePage", 0, 100)).containsEntry("source", "<p>published</p>")
-            .containsEntry("revision", "release").containsEntry("truncated", false)
-            .containsEntry("nextOffset", null);
+        assertThat(read("SinglePage", 0, 100))
+                .containsEntry("source", "<p>published</p>")
+                .containsEntry("revision", "release")
+                .containsEntry("truncated", false)
+                .containsEntry("nextOffset", null);
         verify(client, never()).fetch(Snapshot.class, "head");
         release.getSpec().setSubjectRef(Ref.of(post()));
         assertThatThrownBy(() -> read("SinglePage", 0, 100)).isInstanceOf(IllegalArgumentException.class);
@@ -158,10 +175,15 @@ class ContentReferenceToolsTest {
         attachments(List.of(attachment));
         var result = tools.execute("search_attachments", Map.of()).block();
         assertThat(items(result)).hasSize(1);
-        assertThat(items(result).getFirst()).containsEntry("width", null).containsEntry("height", null)
-            .containsEntry("aspectRatio", null).containsEntry("mediaType", null).containsEntry("size", null)
-            .containsEntry("dimensionsKnown", false).containsEntry("visibility", "unknown")
-            .doesNotContainKeys("annotations", "spec", "metadata", "policyName", "ownerName", "thumbnails");
+        assertThat(items(result).getFirst())
+                .containsEntry("width", null)
+                .containsEntry("height", null)
+                .containsEntry("aspectRatio", null)
+                .containsEntry("mediaType", null)
+                .containsEntry("size", null)
+                .containsEntry("dimensionsKnown", false)
+                .containsEntry("visibility", "unknown")
+                .doesNotContainKeys("annotations", "spec", "metadata", "policyName", "ownerName", "thumbnails");
         assertThat(result.toString()).doesNotContain("SECRET").doesNotContain("999");
         assertThat(result).containsEntry("total", 1).containsEntry("scanTruncated", false);
     }
@@ -170,18 +192,22 @@ class ContentReferenceToolsTest {
     void filtersUnsafeAndDeletedAttachmentsBeforePaginatingKnownMatches() {
         var deleted = attachment("deleted", "/upload/deleted.png");
         deleted.getMetadata().setDeletionTimestamp(Instant.now());
-        attachments(List.of(attachment("a", "/upload/a.png"),
-            attachment("signed", "https://cdn.example.org/private.png?X-Amz-Signature=secret"),
-            deleted, attachment("b", "/upload/b.png"), attachment("c", "/upload/c.png")));
-        var result = tools.execute("search_attachments", Map.of("page", 2, "size", 1,
-            "keyword", "photo", "mediaType", "image/*")).block();
+        attachments(List.of(
+                attachment("a", "/upload/a.png"),
+                attachment("signed", "https://cdn.example.org/private.png?X-Amz-Signature=secret"),
+                deleted,
+                attachment("b", "/upload/b.png"),
+                attachment("c", "/upload/c.png")));
+        var result = tools.execute(
+                        "search_attachments", Map.of("page", 2, "size", 1, "keyword", "photo", "mediaType", "image/*"))
+                .block();
         assertThat(items(result)).extracting(item -> item.get("name")).containsExactly("b");
         assertThat(result).containsEntry("hasNext", true).containsEntry("total", 3);
         var options = ArgumentCaptor.forClass(ListOptions.class);
         var pagination = ArgumentCaptor.forClass(PageRequest.class);
         verify(client).listBy(eq(Attachment.class), options.capture(), pagination.capture());
-        assertThat(options.getValue().toString()).contains("spec.mediaType", "image/", "spec.displayName",
-            "photo", "metadata.deletionTimestamp");
+        assertThat(options.getValue().toString())
+                .contains("spec.mediaType", "image/", "spec.displayName", "photo", "metadata.deletionTimestamp");
         assertThat(pagination.getValue().getPageSize()).isEqualTo(100);
     }
 
@@ -190,63 +216,94 @@ class ContentReferenceToolsTest {
         when(client.listBy(eq(Attachment.class), any(), any())).thenAnswer(invocation -> {
             PageRequest request = invocation.getArgument(2);
             var candidates = IntStream.range(0, 100)
-                .mapToObj(i -> attachment(request.getPageNumber() + "-" + i, "/upload/a.png")).toList();
+                    .mapToObj(i -> attachment(request.getPageNumber() + "-" + i, "/upload/a.png"))
+                    .toList();
             return Mono.just(new ListResult<>(request.getPageNumber(), 100, 1500, candidates));
         });
-        var result = tools.execute("search_attachments", Map.of("page", 21, "size", 50)).block();
+        var result = tools.execute("search_attachments", Map.of("page", 21, "size", 50))
+                .block();
         assertThat(items(result)).isEmpty();
-        assertThat(result).containsEntry("scanTruncated", true).containsEntry("truncated", true)
-            .containsEntry("scanned", 1000).containsEntry("matchedInScan", 1000)
-            .containsEntry("total", null).containsEntry("hasNext", false);
+        assertThat(result)
+                .containsEntry("scanTruncated", true)
+                .containsEntry("truncated", true)
+                .containsEntry("scanned", 1000)
+                .containsEntry("matchedInScan", 1000)
+                .containsEntry("total", null)
+                .containsEntry("hasNext", false);
         verify(client, times(10)).listBy(eq(Attachment.class), any(), any());
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"javascript:alert(1)", "data:image/png;base64,xx", "file:///tmp/a.png",
-        "//evil.example/a.png", "/\\evil.example/a.png", "https://user:pass@example.org/a.png",
-        "https://example.org/a.png?token=secret", "https://example.org/a.png?width=100",
-        "/upload/a.png#secret", "/upload/../private/a.png", "/upload/%2e%2e/private.png",
-        "/upload/%252e%252e/private.png", "/%2fexample.org/a.png", "/upload/%0asecret.png",
-        "https:///missing-host.png", "https://example.org"})
+    @ValueSource(
+            strings = {
+                "javascript:alert(1)",
+                "data:image/png;base64,xx",
+                "file:///tmp/a.png",
+                "//evil.example/a.png",
+                "/\\evil.example/a.png",
+                "https://user:pass@example.org/a.png",
+                "https://example.org/a.png?token=secret",
+                "https://example.org/a.png?width=100",
+                "/upload/a.png#secret",
+                "/upload/../private/a.png",
+                "/upload/%2e%2e/private.png",
+                "/upload/%252e%252e/private.png",
+                "/%2fexample.org/a.png",
+                "/upload/%0asecret.png",
+                "https:///missing-host.png",
+                "https://example.org"
+            })
     void rejectsUnsafeOrNonPersistentUrls(String url) {
         assertThat(ContentReferenceTools.safeUrl(url)).isFalse();
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/upload/photo.png", "https://cdn.example.org/a%20b.png",
-        "http://localhost:8090/upload/test.png", "http://[::1]:8090/upload/test.png"})
+    @ValueSource(
+            strings = {
+                "/upload/photo.png",
+                "https://cdn.example.org/a%20b.png",
+                "http://localhost:8090/upload/test.png",
+                "http://[::1]:8090/upload/test.png"
+            })
     void acceptsStoredPermanentResourceCandidatesWithoutMakingNetworkRequests(String url) {
         assertThat(ContentReferenceTools.safeUrl(url)).isTrue();
     }
 
     @Test
     void rejectsInvalidPaginationAndUnavailableDimensionFiltersBeforeQuerying() {
-        for (var args : List.<Map<String, Object>>of(Map.of("page", 0), Map.of("size", 51),
-            Map.of("page", "1"), Map.of("size", 1.5), Map.of("mediaType", "image"), Map.of("minWidth", 100))) {
+        for (var args : List.<Map<String, Object>>of(
+                Map.of("page", 0),
+                Map.of("size", 51),
+                Map.of("page", "1"),
+                Map.of("size", 1.5),
+                Map.of("mediaType", "image"),
+                Map.of("minWidth", 100))) {
             assertThatThrownBy(() -> tools.execute("search_attachments", args).block())
-                .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(IllegalArgumentException.class);
         }
-        for (var args : List.<Map<String, Object>>of(Map.of("offset", -1), Map.of("limit", 16385),
-            Map.of("limit", 2.5))) {
+        for (var args :
+                List.<Map<String, Object>>of(Map.of("offset", -1), Map.of("limit", 16385), Map.of("limit", 2.5))) {
             var arguments = new java.util.HashMap<>(args);
             arguments.put("type", "Post");
             arguments.put("name", "post");
             assertThatThrownBy(() -> tools.execute("read_content", arguments).block())
-                .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(IllegalArgumentException.class);
         }
         verify(client, never()).listBy(eq(Attachment.class), any(), any());
         verify(client, never()).fetch(eq(Post.class), any());
-        assertThat(ContentReferenceTools.definitions()).extracting(PageReferenceTools.Definition::name)
-            .containsExactly("read_content", "search_attachments");
+        assertThat(ContentReferenceTools.definitions())
+                .extracting(PageReferenceTools.Definition::name)
+                .containsExactly("read_content", "search_attachments");
     }
 
     private Map<String, Object> read(String type, int offset, int limit) {
-        return tools.execute("read_content", Map.of("type", type, "name", "post", "offset", offset, "limit", limit)).block();
+        return tools.execute("read_content", Map.of("type", type, "name", "post", "offset", offset, "limit", limit))
+                .block();
     }
 
     private void attachments(List<Attachment> attachments) {
         when(client.listBy(eq(Attachment.class), any(), any()))
-            .thenReturn(Mono.just(new ListResult<>(1, 100, attachments.size(), attachments)));
+                .thenReturn(Mono.just(new ListResult<>(1, 100, attachments.size(), attachments)));
     }
 
     @SuppressWarnings("unchecked")

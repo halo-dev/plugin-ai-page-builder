@@ -34,18 +34,17 @@ class PageRunTest {
         assertThat(run.state()).isEqualTo(PageRun.State.WAITING_FOR_USER);
         assertThat(run.turn().status()).isEqualTo("waiting_for_user");
         assertThat(persistence.calls).containsExactly("active", "checkpoint");
-        assertThat(run.events.asFlux().next().block())
-            .containsEntry("type", "data-user-question");
+        assertThat(run.events.asFlux().next().block()).containsEntry("type", "data-user-question");
 
         var turn = run.answer(QUESTION_ID, answerRequest(), "admin").block();
 
         assertThat(turn).isNotNull();
         assertThat(turn.status()).isEqualTo("running");
-        assertThat(turn.questions()).singleElement()
-            .satisfies(question -> assertThat(question.answeredAt()).isNotNull());
+        assertThat(turn.questions())
+                .singleElement()
+                .satisfies(question -> assertThat(question.answeredAt()).isNotNull());
         assertThat(run.state()).isEqualTo(PageRun.State.RUNNING);
-        assertThat(run.events.asFlux().skip(1).next().block())
-            .containsEntry("type", "data-user-answer");
+        assertThat(run.events.asFlux().skip(1).next().block()).containsEntry("type", "data-user-answer");
         assertThat(persistence.calls).containsExactly("active", "checkpoint", "active", "checkpoint");
         asking.dispose();
     }
@@ -55,9 +54,11 @@ class PageRunTest {
         var run = run();
         var asking = run.ask(question()).subscribe();
 
-        assertThatThrownBy(() -> run.answer(QUESTION_ID, answerRequest(), "other").block())
-            .isInstanceOfSatisfying(RunTransitionException.class, error ->
-                assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.FORBIDDEN));
+        assertThatThrownBy(
+                        () -> run.answer(QUESTION_ID, answerRequest(), "other").block())
+                .isInstanceOfSatisfying(
+                        RunTransitionException.class,
+                        error -> assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.FORBIDDEN));
         assertThat(run.state()).isEqualTo(PageRun.State.WAITING_FOR_USER);
 
         run.answer(QUESTION_ID, answerRequest(), "admin").block();
@@ -66,8 +67,9 @@ class PageRunTest {
             run.steer("补充 " + i, "admin").block();
         }
         assertThatThrownBy(() -> run.steer("overflow", "admin").block())
-            .isInstanceOfSatisfying(RunTransitionException.class, error ->
-                assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
+                .isInstanceOfSatisfying(
+                        RunTransitionException.class,
+                        error -> assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
         assertThat(run.turn().steers()).hasSize(PageRun.MAX_STEERS);
         asking.dispose();
     }
@@ -78,11 +80,13 @@ class PageRunTest {
         run.markCommitting();
 
         assertThatThrownBy(() -> run.ask(question()).block())
-            .isInstanceOfSatisfying(RunTransitionException.class, error ->
-                assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
+                .isInstanceOfSatisfying(
+                        RunTransitionException.class,
+                        error -> assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
         assertThatThrownBy(() -> run.steer("too late", "admin").block())
-            .isInstanceOfSatisfying(RunTransitionException.class, error ->
-                assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
+                .isInstanceOfSatisfying(
+                        RunTransitionException.class,
+                        error -> assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
 
         run.complete("revision-2");
 
@@ -92,8 +96,8 @@ class PageRunTest {
         assertThat(run.state()).isEqualTo(PageRun.State.COMPLETED);
         assertThat(run.error()).isNull();
         assertThatThrownBy(run::markCommitting)
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("COMPLETED -> COMMITTING");
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("COMPLETED -> COMMITTING");
     }
 
     @Test
@@ -104,9 +108,11 @@ class PageRunTest {
 
         assertThat(run.interrupt("stop", null).block()).isNull();
         assertThat(run.cancel().block()).isNull();
-        assertThatThrownBy(() -> run.answer(QUESTION_ID, answerRequest(), "admin").block())
-            .isInstanceOfSatisfying(RunTransitionException.class, error ->
-                assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
+        assertThatThrownBy(
+                        () -> run.answer(QUESTION_ID, answerRequest(), "admin").block())
+                .isInstanceOfSatisfying(
+                        RunTransitionException.class,
+                        error -> assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.CONFLICT));
         assertThat(run.state()).isEqualTo(PageRun.State.COMPLETED);
     }
 
@@ -157,23 +163,25 @@ class PageRunTest {
     void failedAnswerPersistenceRestoresWaitingAndRearmsTimer() {
         var run = run();
         var askingError = new AtomicReference<Throwable>();
-        var asking = run.ask(question())
-            .subscribe(ignored -> { }, askingError::set);
+        var asking = run.ask(question()).subscribe(ignored -> {}, askingError::set);
 
         persistence.activeFailure = new IllegalStateException("persist failed");
 
-        assertThatThrownBy(() -> run.answer(QUESTION_ID, answerRequest(), "admin").block())
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("persist failed");
+        assertThatThrownBy(
+                        () -> run.answer(QUESTION_ID, answerRequest(), "admin").block())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("persist failed");
         assertThat(run.state()).isEqualTo(PageRun.State.WAITING_FOR_USER);
         assertThat(askingError.get()).hasMessageContaining("persist failed");
-        assertThat(run.turn().questions()).singleElement()
-            .satisfies(question -> assertThat(question.answeredAt()).isNull());
+        assertThat(run.turn().questions())
+                .singleElement()
+                .satisfies(question -> assertThat(question.answeredAt()).isNull());
 
         // answering was reset, so a retry reaches persistence instead of returning a conflict.
-        assertThatThrownBy(() -> run.answer(QUESTION_ID, answerRequest(), "admin").block())
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("persist failed");
+        assertThatThrownBy(
+                        () -> run.answer(QUESTION_ID, answerRequest(), "admin").block())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("persist failed");
 
         persistence.activeFailure = null;
         scheduler.advanceTimeBy(PageRun.WAIT_TIMEOUT.plusSeconds(1));
@@ -240,9 +248,9 @@ class PageRunTest {
         persistence.activeGates.add(gate);
 
         var steerError = new AtomicReference<Throwable>();
-        run.steer("first", "admin").subscribe(ignored -> { }, steerError::set);
+        run.steer("first", "admin").subscribe(ignored -> {}, steerError::set);
         var cancelError = new AtomicReference<Throwable>();
-        run.cancel().subscribe(ignored -> { }, cancelError::set);
+        run.cancel().subscribe(ignored -> {}, cancelError::set);
 
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
         gate.tryEmitEmpty();
@@ -261,10 +269,10 @@ class PageRunTest {
         persistence.activeGates.add(second);
 
         var cancelled = new AtomicReference<Throwable>();
-        run.steer("first", "admin").subscribe(ignored -> { }, ignored -> { });
-        run.cancel().subscribe(ignored -> { }, cancelled::set);
+        run.steer("first", "admin").subscribe(ignored -> {}, ignored -> {});
+        run.cancel().subscribe(ignored -> {}, cancelled::set);
         var settled = new AtomicReference<Boolean>();
-        run.settleTransitions().subscribe(null, ignored -> { }, () -> settled.set(true));
+        run.settleTransitions().subscribe(null, ignored -> {}, () -> settled.set(true));
 
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
         first.tryEmitEmpty();
@@ -283,7 +291,7 @@ class PageRunTest {
     @Test
     void failedInterruptRearmsTheWaitTimer() {
         var run = run();
-        var asking = run.ask(question()).subscribe(ignored -> { }, ignored -> { });
+        var asking = run.ask(question()).subscribe(ignored -> {}, ignored -> {});
 
         persistence.activeFailure = new IllegalStateException("persist failed");
         scheduler.advanceTimeBy(PageRun.WAIT_TIMEOUT.plusSeconds(1));
@@ -307,8 +315,9 @@ class PageRunTest {
         run.steer("first", "admin").subscribe();
 
         assertThatThrownBy(() -> run.steer("second", "other").block(Duration.ofSeconds(1)))
-            .isInstanceOfSatisfying(RunTransitionException.class, error ->
-                assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.FORBIDDEN));
+                .isInstanceOfSatisfying(
+                        RunTransitionException.class,
+                        error -> assertThat(error.kind()).isEqualTo(RunTransitionException.Kind.FORBIDDEN));
 
         gate.tryEmitEmpty();
     }
@@ -322,12 +331,13 @@ class PageRunTest {
         persistence.activeGates.add(second);
 
         var decided = new AtomicReference<PageRun.State>();
-        run.steer("first", "admin").subscribe(ignored -> { }, ignored -> { });
-        run.cancel().subscribe(ignored -> { }, ignored -> { });
+        run.steer("first", "admin").subscribe(ignored -> {}, ignored -> {});
+        run.cancel().subscribe(ignored -> {}, ignored -> {});
         run.settleThen(() -> Mono.fromSupplier(() -> {
-            decided.set(run.state());
-            return true;
-        })).subscribe();
+                    decided.set(run.state());
+                    return true;
+                }))
+                .subscribe();
 
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
         first.tryEmitEmpty();
@@ -346,12 +356,13 @@ class PageRunTest {
         persistence.activeGates.add(first);
 
         var decided = new AtomicReference<PageRun.State>();
-        run.steer("first", "admin").subscribe(ignored -> { }, ignored -> { });
-        run.cancel().subscribe(ignored -> { }, ignored -> { });
+        run.steer("first", "admin").subscribe(ignored -> {}, ignored -> {});
+        run.cancel().subscribe(ignored -> {}, ignored -> {});
         run.settleThen(() -> Mono.fromSupplier(() -> {
-            decided.set(run.state());
-            return true;
-        })).subscribe();
+                    decided.set(run.state());
+                    return true;
+                }))
+                .subscribe();
 
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
         persistence.activeFailure = new IllegalStateException("cancel failed");
@@ -367,8 +378,8 @@ class PageRunTest {
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
 
         assertThatThrownBy(() -> run.ask(question()).block())
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("checkpoint failed");
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("checkpoint failed");
 
         assertThat(run.state()).isEqualTo(PageRun.State.RUNNING);
         assertThat(run.turn().questions()).isEmpty();
@@ -380,8 +391,8 @@ class PageRunTest {
         persistence.checkpointFailure = new IllegalStateException("checkpoint failed");
 
         assertThatThrownBy(() -> run.ask(question()).block())
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("checkpoint failed");
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("checkpoint failed");
 
         // The barrier must not be left installed; otherwise cancellation would keep failing.
         persistence.checkpointFailure = null;
@@ -399,19 +410,25 @@ class PageRunTest {
 
         run.finish(page("revision-2", 2L, "new")).block();
 
-        assertThat(persistence.calls)
-            .containsExactly("active", "deleteCheckpoint", "recordFinished");
+        assertThat(persistence.calls).containsExactly("active", "deleteCheckpoint", "recordFinished");
         assertThat(run.terminalPersisted()).isTrue();
         assertThat(run.state()).isEqualTo(PageRun.State.COMPLETED);
         assertThat(run.events.asFlux().collectList().block())
-            .extracting(event -> event.get("type"))
-            .containsExactly("data-page-committed", "finish");
+                .extracting(event -> event.get("type"))
+                .containsExactly("data-page-committed", "finish");
     }
 
     private PageRun run() {
-        return new PageRun(request(), "admin", page("old-revision", 1L, "old"),
-            new ContentPolicy(), Mono.just(ThemeStyleContext.standalone()), "session", persistence,
-            PageRun.WAIT_TIMEOUT, () -> scheduler);
+        return new PageRun(
+                request(),
+                "admin",
+                page("old-revision", 1L, "old"),
+                new ContentPolicy(),
+                Mono.just(ThemeStyleContext.standalone()),
+                "session",
+                persistence,
+                PageRun.WAIT_TIMEOUT,
+                () -> scheduler);
     }
 
     private static ChatApi.Request request() {
@@ -419,11 +436,16 @@ class PageRunTest {
     }
 
     private static ChatApi.Question question() {
-        return new ChatApi.Question(QUESTION_ID,
-            List.of(new ChatApi.QuestionItem(QUESTION_ID, "选择样式",
-                List.of(new ChatApi.QuestionOption("a", "简洁"),
-                    new ChatApi.QuestionOption("b", "丰富")), true)),
-            List.of(), Instant.now(), null);
+        return new ChatApi.Question(
+                QUESTION_ID,
+                List.of(new ChatApi.QuestionItem(
+                        QUESTION_ID,
+                        "选择样式",
+                        List.of(new ChatApi.QuestionOption("a", "简洁"), new ChatApi.QuestionOption("b", "丰富")),
+                        true)),
+                List.of(),
+                Instant.now(),
+                null);
     }
 
     private static ChatApi.AnswerRequest answerRequest() {
@@ -432,15 +454,14 @@ class PageRunTest {
 
     private static PageApi.PageDetail page(String revision, Long version, String text) {
         return new PageApi.PageDetail(
-            new PageApi.PageSummary("page", "page", "Title", "", version, true, false, null, revision, null,
-                Instant.now(), true),
-            new PageDocument(1, "code", "", Map.of(), "<p>" + text + "</p>", ""));
+                new PageApi.PageSummary(
+                        "page", "page", "Title", "", version, true, false, null, revision, null, Instant.now(), true),
+                new PageDocument(1, "code", "", Map.of(), "<p>" + text + "</p>", ""));
     }
 
     private static final class RecordingPersistence implements RunPersistence {
         final List<String> calls = new CopyOnWriteArrayList<>();
-        final java.util.Deque<Sinks.Empty<Void>> activeGates =
-            new java.util.concurrent.ConcurrentLinkedDeque<>();
+        final java.util.Deque<Sinks.Empty<Void>> activeGates = new java.util.concurrent.ConcurrentLinkedDeque<>();
         volatile RuntimeException activeFailure;
         volatile RuntimeException checkpointFailure;
 

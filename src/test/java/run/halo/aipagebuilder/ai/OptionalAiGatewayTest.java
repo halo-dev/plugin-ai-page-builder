@@ -26,24 +26,27 @@ class OptionalAiGatewayTest {
         when(client.fetch(Plugin.class, "ai-foundation")).thenReturn(Mono.just(plugin(version)));
         assertThat(gateway.status().block().available()).isFalse();
         assertThat(gateway.status().block().message()).contains("升级", "1.1.1");
-        assertThatThrownBy(() -> gateway.chat(null, java.util.List.of(), "prompt", null).blockLast())
-            .isInstanceOfSatisfying(AiGenerationException.class, error ->
-                assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.MODEL_UNAVAILABLE));
+        assertThatThrownBy(() ->
+                        gateway.chat(null, java.util.List.of(), "prompt", null).blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.MODEL_UNAVAILABLE));
         assertThatThrownBy(() -> gateway.review("system", "prompt").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.UNAVAILABLE));
         assertThatThrownBy(() -> gateway.review("model-a", "system", "prompt").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.UNAVAILABLE));
         verifyNoInteractions(extensions);
     }
 
     @Test
     void checksResourceVersionAgainAfterUpgradeOrDowngrade() {
-        when(client.fetch(Plugin.class, "ai-foundation")).thenReturn(
-            Mono.just(plugin("1.0.0")), Mono.just(plugin("1.1.1")), Mono.just(plugin("2.0.0")));
-        when(extensions.getEnabledExtension(AiModelService.class))
-            .thenReturn(Mono.just(mock(AiModelService.class)));
+        when(client.fetch(Plugin.class, "ai-foundation"))
+                .thenReturn(Mono.just(plugin("1.0.0")), Mono.just(plugin("1.1.1")), Mono.just(plugin("2.0.0")));
+        when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.just(mock(AiModelService.class)));
         assertThat(gateway.available().block()).isFalse();
         assertThat(gateway.available().block()).isTrue();
         assertThat(gateway.available().block()).isFalse();
@@ -51,8 +54,7 @@ class OptionalAiGatewayTest {
 
     @Test
     void missingPluginOrVersionFailsClosed() {
-        when(client.fetch(Plugin.class, "ai-foundation"))
-            .thenReturn(Mono.empty(), Mono.just(plugin(null)));
+        when(client.fetch(Plugin.class, "ai-foundation")).thenReturn(Mono.empty(), Mono.just(plugin(null)));
         assertThat(gateway.available().block()).isFalse();
         assertThat(gateway.available().block()).isFalse();
         verifyNoInteractions(extensions);

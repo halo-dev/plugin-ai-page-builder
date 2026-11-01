@@ -33,9 +33,9 @@ class PreviewAssetCorsFilterTest {
 
     @Test
     void allowsSandboxedOriginForAssetsUnderAnApplicationBasePath() {
-        var exchange = MockServerWebExchange.from(
-            MockServerHttpRequest.get("/site/themes/theme-earth/assets/layout.js")
-                .contextPath("/site").header(HttpHeaders.ORIGIN, "null"));
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/site/themes/theme-earth/assets/layout.js")
+                .contextPath("/site")
+                .header(HttpHeaders.ORIGIN, "null"));
         filter.filter(exchange, chain).block();
         assertThat(allowOrigin(exchange)).isEqualTo("*");
     }
@@ -44,8 +44,7 @@ class PreviewAssetCorsFilterTest {
     void allowsRequestsWithoutAnOriginHeader() {
         // A same-origin request is what a shared cache is likely to store, so it must also
         // carry the CORS header.
-        for (var path : List.of("/themes/theme-earth/assets/layout.js",
-            "/plugins/example/assets/icon.svg")) {
+        for (var path : List.of("/themes/theme-earth/assets/layout.js", "/plugins/example/assets/icon.svg")) {
             var exchange = MockServerWebExchange.from(MockServerHttpRequest.get(path));
             filter.filter(exchange, chain).block();
             assertThat(allowOrigin(exchange)).as(path).isEqualTo("*");
@@ -62,8 +61,8 @@ class PreviewAssetCorsFilterTest {
 
     @Test
     void allowsSandboxedOriginForPublicFeeds() {
-        for (var path : List.of("/rss.xml", "/feed.xml", "/sitemap.xml",
-            "/feed/categories/uncategorized", "/feed/authors/ryan")) {
+        for (var path : List.of(
+                "/rss.xml", "/feed.xml", "/sitemap.xml", "/feed/categories/uncategorized", "/feed/authors/ryan")) {
             var exchange = exchange(path, "null");
             filter.filter(exchange, chain).block();
             assertThat(allowOrigin(exchange)).as(path).isEqualTo("*");
@@ -87,12 +86,10 @@ class PreviewAssetCorsFilterTest {
     }
 
     private static String allowOrigin(MockServerWebExchange exchange) {
-        return exchange.getResponse().getHeaders()
-            .getFirst(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN);
+        return exchange.getResponse().getHeaders().getFirst(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN);
     }
 
     private static MockServerWebExchange exchange(String path, String origin) {
-        return MockServerWebExchange.from(
-            MockServerHttpRequest.get(path).header(HttpHeaders.ORIGIN, origin));
+        return MockServerWebExchange.from(MockServerHttpRequest.get(path).header(HttpHeaders.ORIGIN, origin));
     }
 }

@@ -32,12 +32,13 @@ import run.halo.app.plugin.SpringPluginManager;
 public class PublicApiCatalog {
     private static final long TTL = Duration.ofSeconds(60).toNanos();
     /**
-     * Public routes that redirect to a caller-supplied target. CSP path sources are not
-     * re-checked after a redirect, so such a route would let a preview reach Console APIs.
-     * Keep it cataloged for documentation, but do not allow it from previews.
+     * Public routes that redirect to a caller-supplied target. CSP path sources are not re-checked after a redirect, so
+     * such a route would let a preview reach Console APIs. Keep it cataloged for documentation, but do not allow it
+     * from previews.
      */
     private static final List<String> REDIRECTING_PATHS =
-        List.of("/apis/api.storage.halo.run/v1alpha1/thumbnails/-/via-uri");
+            List.of("/apis/api.storage.halo.run/v1alpha1/thumbnails/-/via-uri");
+
     private final SpringPluginManager manager;
     private final LongSupplier clock;
     private final AtomicLong generation = new AtomicLong();
@@ -48,8 +49,10 @@ public class PublicApiCatalog {
 
     @Autowired
     public PublicApiCatalog(ApplicationContext context) {
-        this((SpringPluginManager) context
-            .getBean("pluginWrapper", PluginWrapper.class).getPluginManager(), System::nanoTime);
+        this(
+                (SpringPluginManager)
+                        context.getBean("pluginWrapper", PluginWrapper.class).getPluginManager(),
+                System::nanoTime);
     }
 
     PublicApiCatalog(SpringPluginManager manager, LongSupplier clock) {
@@ -67,11 +70,12 @@ public class PublicApiCatalog {
         var current = snapshot();
         var terms = words(query);
         var matches = current.items().stream()
-            .map(item -> new Match(item, score(item, query, terms)))
-            .filter(match -> terms.isEmpty() || match.score() > 0)
-            .sorted(Comparator.comparingInt(Match::score).reversed()
-                .thenComparing(match -> String.valueOf(match.item().get("id"))))
-            .toList();
+                .map(item -> new Match(item, score(item, query, terms)))
+                .filter(match -> terms.isEmpty() || match.score() > 0)
+                .sorted(Comparator.comparingInt(Match::score)
+                        .reversed()
+                        .thenComparing(match -> String.valueOf(match.item().get("id"))))
+                .toList();
         var result = new LinkedHashMap<String, Object>();
         result.put("items", matches.stream().limit(limit).map(Match::item).toList());
         result.put("totalMatches", matches.size());
@@ -106,28 +110,34 @@ public class PublicApiCatalog {
                         if (!route.conditions().isEmpty()) {
                             detail.put("routeConditions", route.conditions());
                             detail.put("partial", true);
-                            var warnings = new ArrayList<Object>((List<?>)
-                                detail.getOrDefault("warnings", List.of()));
+                            var warnings = new ArrayList<Object>((List<?>) detail.getOrDefault("warnings", List.of()));
                             warnings.add("Route predicates impose additional request conditions; "
-                                + "routeConditions contains visitor metadata, "
-                                + "not a complete parameter schema");
+                                    + "routeConditions contains visitor metadata, "
+                                    + "not a complete parameter schema");
                             detail.put("warnings", warnings);
                         }
                         detail.put("status", "ok");
                         detail.put("anonymousAccess", "unverified");
                         items.add(detail);
                     } catch (RuntimeException | LinkageError error) {
-                        items.add(failure(id, "unavailable", "接口契约无法完整解析："
-                            + bounded(error.getMessage(), 200)));
+                        items.add(failure(id, "unavailable", "接口契约无法完整解析：" + bounded(error.getMessage(), 200)));
                     }
                 }
             }
             ensureOpen();
             if (version == generation.get()) {
-                return Map.of("items", items, "partial", scan.partial()
-                    || items.stream().anyMatch(item -> !"ok".equals(item.get("status"))
-                        || Boolean.TRUE.equals(item.get("partial"))),
-                    "warnings", scan.warnings(), "anonymousAccess", "unverified");
+                return Map.of(
+                        "items",
+                        items,
+                        "partial",
+                        scan.partial()
+                                || items.stream()
+                                        .anyMatch(item -> !"ok".equals(item.get("status"))
+                                                || Boolean.TRUE.equals(item.get("partial"))),
+                        "warnings",
+                        scan.warnings(),
+                        "anonymousAccess",
+                        "unverified");
             }
         }
         throw new IllegalStateException("接口目录正在变化，请重试");
@@ -145,14 +155,20 @@ public class PublicApiCatalog {
                 long version = generation.get();
                 var scan = scan();
                 var items = scan.routes().entrySet().stream()
-                    .map(entry -> summary(entry.getKey(), entry.getValue().getFirst(),
-                        entry.getValue().size() > 1)).toList();
+                        .map(entry -> summary(
+                                entry.getKey(),
+                                entry.getValue().getFirst(),
+                                entry.getValue().size() > 1))
+                        .toList();
                 ensureOpen();
                 if (version == generation.get()) {
-                    current = new Snapshot(version, clock.getAsLong(), items,
-                        scan.partial() || items.stream().anyMatch(item ->
-                            !"declared".equals(item.get("contract"))), List.copyOf(scan.warnings()),
-                        scan.publicPathPrefixes());
+                    current = new Snapshot(
+                            version,
+                            clock.getAsLong(),
+                            items,
+                            scan.partial() || items.stream().anyMatch(item -> !"declared".equals(item.get("contract"))),
+                            List.copyOf(scan.warnings()),
+                            scan.publicPathPrefixes());
                     snapshot = current;
                     return current;
                 }
@@ -162,8 +178,9 @@ public class PublicApiCatalog {
     }
 
     private boolean fresh(Snapshot current) {
-        return current != null && current.generation() == generation.get()
-            && clock.getAsLong() - current.createdAt() < TTL;
+        return current != null
+                && current.generation() == generation.get()
+                && clock.getAsLong() - current.createdAt() < TTL;
     }
 
     private Scan scan() {
@@ -188,7 +205,8 @@ public class PublicApiCatalog {
                 var attribute = data.getAttributes().get(OPERATION_ATTRIBUTE);
                 Operation operation = null;
                 try {
-                    if (attribute instanceof Builder builder) operation = builder.build().getOperation();
+                    if (attribute instanceof Builder builder)
+                        operation = builder.build().getOperation();
                 } catch (RuntimeException | LinkageError error) {
                     partial = true;
                     warn(warnings, "接口元数据无法读取：" + bounded(data.getPath(), 180));
@@ -202,10 +220,10 @@ public class PublicApiCatalog {
                     var id = method.name() + " " + data.getPath();
                     var candidates = routes.computeIfAbsent(id, ignored -> new ArrayList<>());
                     // The same router can be exposed by more than one aggregate bean.
-                    if (attribute != null && candidates.stream()
-                        .anyMatch(candidate -> candidate.attribute() == attribute)) continue;
-                    candidates.add(new Discovered(method.name(), data.getPath(), operation,
-                        attribute, conditions(data)));
+                    if (attribute != null
+                            && candidates.stream().anyMatch(candidate -> candidate.attribute() == attribute)) continue;
+                    candidates.add(
+                            new Discovered(method.name(), data.getPath(), operation, attribute, conditions(data)));
                 }
             }
         }
@@ -213,9 +231,8 @@ public class PublicApiCatalog {
     }
 
     /**
-     * Turns a public route into CSP path sources. Only the static prefix before the first
-     * path variable or wildcard is used, so an allowlisted route cannot expose every sibling
-     * route under its group/version.
+     * Turns a public route into CSP path sources. Only the static prefix before the first path variable or wildcard is
+     * used, so an allowlisted route cannot expose every sibling route under its group/version.
      */
     private static List<String> pathSources(String path) {
         var variable = path.indexOf('{');
@@ -252,9 +269,9 @@ public class PublicApiCatalog {
         // Exclusions are version-agnostic so a future v1alpha2 cannot slip into the
         // preview allowlist.
         return matcher.match("/apis/api.*/**", path)
-            && !matcher.match("/apis/api.console.*/**", path)
-            && !matcher.match("/apis/api.notification.halo.run/*/userspaces/**", path)
-            && !matcher.match("/apis/api.notification.halo.run/*/notifiers/**", path);
+                && !matcher.match("/apis/api.console.*/**", path)
+                && !matcher.match("/apis/api.notification.halo.run/*/userspaces/**", path)
+                && !matcher.match("/apis/api.notification.halo.run/*/notifiers/**", path);
     }
 
     private static Map<String, Object> summary(String id, Discovered route, boolean ambiguous) {
@@ -268,8 +285,12 @@ public class PublicApiCatalog {
             result.put("operationId", bounded(operation.operationId(), 200));
             result.put("summary", bounded(operation.summary(), 400));
             result.put("description", bounded(operation.description(), 1200));
-            result.put("tags", Arrays.stream(operation.tags()).limit(12)
-                .map(tag -> bounded(tag, 120)).toList());
+            result.put(
+                    "tags",
+                    Arrays.stream(operation.tags())
+                            .limit(12)
+                            .map(tag -> bounded(tag, 120))
+                            .toList());
         }
         return Map.copyOf(result);
     }
@@ -291,8 +312,11 @@ public class PublicApiCatalog {
 
     private static List<String> words(String value) {
         return Arrays.stream(value.replaceAll("([a-z0-9])([A-Z])", "$1 $2")
-            .toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+"))
-            .filter(word -> !word.isBlank()).distinct().toList();
+                        .toLowerCase(Locale.ROOT)
+                        .split("[^\\p{L}\\p{N}]+"))
+                .filter(word -> !word.isBlank())
+                .distinct()
+                .toList();
     }
 
     static Map<String, Object> failure(String id, String status, String message) {
@@ -318,15 +342,27 @@ public class PublicApiCatalog {
         closed = true;
         generation.incrementAndGet();
         manager.removePluginStateListener(listener);
-        synchronized (rebuildLock) { snapshot = null; }
+        synchronized (rebuildLock) {
+            snapshot = null;
+        }
     }
 
-    private record Snapshot(long generation, long createdAt, List<Map<String, Object>> items,
-                            boolean partial, List<String> warnings,
-                            List<String> publicPathPrefixes) { }
-    private record Discovered(String method, String path, Operation operation, Object attribute,
-                              Map<String, Object> conditions) { }
-    private record Scan(Map<String, List<Discovered>> routes, boolean partial, List<String> warnings,
-                        List<String> publicPathPrefixes) { }
-    private record Match(Map<String, Object> item, int score) { }
+    private record Snapshot(
+            long generation,
+            long createdAt,
+            List<Map<String, Object>> items,
+            boolean partial,
+            List<String> warnings,
+            List<String> publicPathPrefixes) {}
+
+    private record Discovered(
+            String method, String path, Operation operation, Object attribute, Map<String, Object> conditions) {}
+
+    private record Scan(
+            Map<String, List<Discovered>> routes,
+            boolean partial,
+            List<String> warnings,
+            List<String> publicPathPrefixes) {}
+
+    private record Match(Map<String, Object> item, int score) {}
 }

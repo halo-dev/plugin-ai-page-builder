@@ -27,14 +27,15 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /** Keep the bearer URL in a script-free host, outside the untrusted preview document. */
-record PagePreviewResponse(ServerResponse delegate, URI documentUri, String childPolicy)
-    implements ServerResponse {
+record PagePreviewResponse(ServerResponse delegate, URI documentUri, String childPolicy) implements ServerResponse {
     static ServerRequest withoutCredential(ServerRequest request) {
         var uri = UriComponentsBuilder.fromUri(request.uri())
-            .replacePath(request.requestPath().contextPath().value() + "/")
-            .replaceQuery(null).fragment(null).build(true).toUri();
-        return ServerRequest.create(withoutCredential(request.exchange(), uri),
-            request.messageReaders());
+                .replacePath(request.requestPath().contextPath().value() + "/")
+                .replaceQuery(null)
+                .fragment(null)
+                .build(true)
+                .toUri();
+        return ServerRequest.create(withoutCredential(request.exchange(), uri), request.messageReaders());
     }
 
     private static ServerWebExchange withoutCredential(ServerWebExchange exchange, URI uri) {
@@ -44,8 +45,9 @@ record PagePreviewResponse(ServerResponse delegate, URI documentUri, String chil
         attributes.remove(RouterFunctions.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
         attributes.remove(RouterFunctions.MATCHING_PATTERN_ATTRIBUTE);
         attributes.remove(HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE);
-        var safe = exchange.mutate().request(request -> request.uri(uri)
-            .headers(headers -> headers.remove(HttpHeaders.REFERER))).build();
+        var safe = exchange.mutate()
+                .request(request -> request.uri(uri).headers(headers -> headers.remove(HttpHeaders.REFERER)))
+                .build();
         return new ServerWebExchangeDecorator(safe) {
             @Override
             public Map<String, Object> getAttributes() {
@@ -81,22 +83,24 @@ record PagePreviewResponse(ServerResponse delegate, URI documentUri, String chil
                     } finally {
                         DataBufferUtils.release(buffer);
                     }
-                    var bytes = host(html, documentUri, childPolicy)
-                        .getBytes(StandardCharsets.UTF_8);
+                    var bytes = host(html, documentUri, childPolicy).getBytes(StandardCharsets.UTF_8);
                     getHeaders().setContentLength(bytes.length);
                     return super.writeWith(Mono.just(bufferFactory().wrap(bytes)));
                 });
             }
 
             @Override
-            public Mono<Void> writeAndFlushWith(
-                Publisher<? extends Publisher<? extends DataBuffer>> body) {
+            public Mono<Void> writeAndFlushWith(Publisher<? extends Publisher<? extends DataBuffer>> body) {
                 return writeWith(Flux.from(body).concatMap(Flux::from));
             }
         };
         // View rendering happens in writeTo, so sanitizing only ServerRequest is insufficient.
-        return delegate.writeTo(withoutCredential(exchange, documentUri).mutate()
-            .response(response).build(), context);
+        return delegate.writeTo(
+                withoutCredential(exchange, documentUri)
+                        .mutate()
+                        .response(response)
+                        .build(),
+                context);
     }
 
     private static String host(String html, URI base, String policy) {
@@ -104,23 +108,27 @@ record PagePreviewResponse(ServerResponse delegate, URI documentUri, String chil
         child.select("base").remove();
         var baseElement = child.head().prependElement("base");
         baseElement.attr("href", base.toASCIIString());
-        child.head().prependElement("meta").attr("http-equiv", "Content-Security-Policy")
-            .attr("content", policy);
+        child.head()
+                .prependElement("meta")
+                .attr("http-equiv", "Content-Security-Policy")
+                .attr("content", policy);
         // Run before any theme script so startup storage access succeeds in the opaque origin.
         var shim = new Element("script").attr("data-ai-page-builder", "preview-storage");
         shim.appendChild(new DataNode(PreviewStorageShim.BODY));
         baseElement.after(shim);
-        var source = Base64.getEncoder().encodeToString(
-            child.outerHtml().getBytes(StandardCharsets.UTF_8));
+        var source = Base64.getEncoder().encodeToString(child.outerHtml().getBytes(StandardCharsets.UTF_8));
         var host = Jsoup.parse("<!doctype html><html><head><meta charset='utf-8'>"
-            + "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-            + "<title>页面预览</title></head><body style='margin:0'></body></html>");
+                + "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                + "<title>页面预览</title></head><body style='margin:0'></body></html>");
         // Unlike srcdoc, a data document cannot fall back to the parent's credential URL
         // when a script removes <base>. Its opaque origin also prevents reading parent DOM.
-        host.body().appendElement("iframe").attr("title", "页面预览")
-            .attr("sandbox", "allow-scripts").attr("referrerpolicy", "no-referrer")
-            .attr("style", "position:fixed;inset:0;width:100%;height:100%;border:0")
-            .attr("src", "data:text/html;base64," + source);
+        host.body()
+                .appendElement("iframe")
+                .attr("title", "页面预览")
+                .attr("sandbox", "allow-scripts")
+                .attr("referrerpolicy", "no-referrer")
+                .attr("style", "position:fixed;inset:0;width:100%;height:100%;border:0")
+                .attr("src", "data:text/html;base64," + source);
         return host.outerHtml();
     }
 }

@@ -27,7 +27,6 @@ import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.ai.DocumentHash;
 import run.halo.aipagebuilder.content.ContentPolicy;
@@ -35,31 +34,30 @@ import run.halo.aipagebuilder.model.PageDocument;
 import run.halo.aipagebuilder.page.PageApi;
 import run.halo.aipagebuilder.page.PagePreviewStore;
 import run.halo.aipagebuilder.page.PageService;
-import run.halo.aipagebuilder.theme.ThemeContextService;
 import run.halo.aipagebuilder.theme.ThemeContextExtractor;
+import run.halo.aipagebuilder.theme.ThemeContextService;
 import run.halo.aipagebuilder.theme.ThemeStyleContext;
+import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.mcpserver.api.*;
 
 class PageMcpToolProviderTest {
-    private static final SchemaRegistry SCHEMAS = SchemaRegistry.withDefaultDialect(
-        SpecificationVersion.DRAFT_2020_12);
+    private static final SchemaRegistry SCHEMAS = SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12);
     private final PageService pages = mock(PageService.class);
     private final ContentPolicy policy = new ContentPolicy();
     private final ThemeContextService themes = mock(ThemeContextService.class);
     private final PagePreviewStore previews = new PagePreviewStore();
     private final ExternalUrlSupplier urls = mock(ExternalUrlSupplier.class);
-    private final PageMcpToolProvider provider = new PageMcpToolProvider(pages, policy, themes,
-        previews, urls);
+    private final PageMcpToolProvider provider = new PageMcpToolProvider(pages, policy, themes, previews, urls);
     private PageApi.PageDetail current;
 
     @BeforeEach
     void setup() throws Exception {
-        current = detail(new PageDocument(1, "visual", "editor", Map.of("components", List.of()),
-            "<h1>Before</h1>", "h1 {color: red}"));
+        current = detail(new PageDocument(
+                1, "visual", "editor", Map.of("components", List.of()), "<h1>Before</h1>", "h1 {color: red}"));
         when(pages.get("page")).thenReturn(Mono.just(current));
         when(pages.save(eq("page"), any(), eq("key-owner")))
-            .thenAnswer(call -> Mono.just(detail(call.<PageApi.SavePageRequest>getArgument(1)
-                .document())));
+                .thenAnswer(call -> Mono.just(
+                        detail(call.<PageApi.SavePageRequest>getArgument(1).document())));
         when(themes.current()).thenReturn(Mono.just(ThemeStyleContext.unavailable()));
         when(urls.getRaw()).thenReturn(URI.create("https://example.test/site/").toURL());
     }
@@ -70,20 +68,26 @@ class PageMcpToolProviderTest {
         assertThat(tools).hasSize(13);
         assertThat(tools).extracting(McpToolDefinition::name).doesNotHaveDuplicates();
         for (var tool : tools) {
-            assertThat(tool.inputSchema()).containsEntry("additionalProperties", false)
-                .containsEntry("type", "object");
-            assertThat(tool.outputSchema()).containsEntry("additionalProperties", false)
-                .containsEntry("type", "object");
-            assertThat(SCHEMAS.getSchema(SchemaLocation.of(
-                "https://json-schema.org/draft/2020-12/schema"))
-                .validate(Json.MAPPER.valueToTree(tool.outputSchema())))
-                .as("Valid output schema for %s", tool.name()).isEmpty();
+            assertThat(tool.inputSchema())
+                    .containsEntry("additionalProperties", false)
+                    .containsEntry("type", "object");
+            assertThat(tool.outputSchema())
+                    .containsEntry("additionalProperties", false)
+                    .containsEntry("type", "object");
+            assertThat(SCHEMAS.getSchema(SchemaLocation.of("https://json-schema.org/draft/2020-12/schema"))
+                            .validate(Json.MAPPER.valueToTree(tool.outputSchema())))
+                    .as("Valid output schema for %s", tool.name())
+                    .isEmpty();
             assertThat(tool.displayDescription()).isNotBlank().isNotEqualTo(tool.displayTitle());
-            assertThat(tool.permission().check(new McpToolInvocation(tool.name(),
-                Map.of())).block())
-                .isFalse();
-            assertThat(tool.permission().check(new McpToolInvocation(tool.name(), Map.of()))
-                .contextWrite(identity("ROLE_super-role")).block()).isTrue();
+            assertThat(tool.permission()
+                            .check(new McpToolInvocation(tool.name(), Map.of()))
+                            .block())
+                    .isFalse();
+            assertThat(tool.permission()
+                            .check(new McpToolInvocation(tool.name(), Map.of()))
+                            .contextWrite(identity("ROLE_super-role"))
+                            .block())
+                    .isTrue();
         }
         assertThat(tool("get_page").annotations().readOnlyHint()).isTrue();
         assertThat(tool("publish_page").annotations().destructiveHint()).isTrue();
@@ -94,71 +98,102 @@ class PageMcpToolProviderTest {
     void capabilitiesAndThemeOutputsConformIncludingNestedSourcesAndRootAttributes() {
         assertThat(call("get_page_capabilities", Map.of()).error()).isFalse();
         assertThat(call("get_theme_context", Map.of()).structuredContent())
-            .doesNotContainKeys("themeName", "displayName");
-        when(themes.current()).thenReturn(Mono.just(new ThemeStyleContext("theme", "Theme",
-            "SUPPORTED", List.of(new ThemeContextExtractor.Source("style.css", "css", "html{}")),
-            List.of("Read as data"), "html{}", new ThemeStyleContext.ColorMode("explicit",
-                List.of(ThemeStyleContext.RootState.fromSelector("html[data-theme=dark]")),
-                List.of("style.css")))));
+                .doesNotContainKeys("themeName", "displayName");
+        when(themes.current())
+                .thenReturn(Mono.just(new ThemeStyleContext(
+                        "theme",
+                        "Theme",
+                        "SUPPORTED",
+                        List.of(new ThemeContextExtractor.Source("style.css", "css", "html{}")),
+                        List.of("Read as data"),
+                        "html{}",
+                        new ThemeStyleContext.ColorMode(
+                                "explicit",
+                                List.of(ThemeStyleContext.RootState.fromSelector("html[data-theme=dark]")),
+                                List.of("style.css")))));
         assertThat(call("get_theme_context", Map.of()).error()).isFalse();
         var p = current.page();
-        when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(new PageApi.PageSummary(
-            p.name(), p.slug(), p.title(), p.description(), p.version(), false, false, null, p.draftRevision(),
-            p.publishedRevision(), p.updatedAt(), p.hasUnpublishedChanges()), current.document())));
+        when(pages.get("page"))
+                .thenReturn(Mono.just(new PageApi.PageDetail(
+                        new PageApi.PageSummary(
+                                p.name(),
+                                p.slug(),
+                                p.title(),
+                                p.description(),
+                                p.version(),
+                                false,
+                                false,
+                                null,
+                                p.draftRevision(),
+                                p.publishedRevision(),
+                                p.updatedAt(),
+                                p.hasUnpublishedChanges()),
+                        current.document())));
         assertThat(call("get_theme_context", Map.of("name", "page")).structuredContent())
-            .containsEntry("layoutState", "STANDALONE");
+                .containsEntry("layoutState", "STANDALONE");
     }
 
     @Test
     void themeSchemaValidatesLandmarksAndStructuredExtractionGaps() {
-        when(themes.current()).thenReturn(Mono.just(new ThemeStyleContext("theme", "Theme",
-            "SUPPORTED", List.of(), List.of(), "", ThemeStyleContext.ColorMode.unknown(),
-            new ThemeStyleContext.ContentSlot("", List.of(), List.of(), List.of(), "present"),
-            ThemeStyleContext.UiStack.empty(), new ThemeStyleContext.Coverage(List.of(
-                new ThemeStyleContext.Gap("templates/main.css", "source_truncated", "budget")), true))));
+        when(themes.current())
+                .thenReturn(Mono.just(new ThemeStyleContext(
+                        "theme",
+                        "Theme",
+                        "SUPPORTED",
+                        List.of(),
+                        List.of(),
+                        "",
+                        ThemeStyleContext.ColorMode.unknown(),
+                        new ThemeStyleContext.ContentSlot("", List.of(), List.of(), List.of(), "present"),
+                        ThemeStyleContext.UiStack.empty(),
+                        new ThemeStyleContext.Coverage(
+                                List.of(new ThemeStyleContext.Gap("templates/main.css", "source_truncated", "budget")),
+                                true))));
         var output = call("get_theme_context", Map.of()).structuredContent();
-        var schema = SCHEMAS.getSchema(Json.MAPPER.valueToTree(tool("get_theme_context").outputSchema()));
+        var schema = SCHEMAS.getSchema(
+                Json.MAPPER.valueToTree(tool("get_theme_context").outputSchema()));
         var invalid = Json.MAPPER.valueToTree(output).deepCopy();
-        ((tools.jackson.databind.node.ObjectNode) invalid.get("contentSlot"))
-            .put("mainLandmark", "assumed");
+        ((tools.jackson.databind.node.ObjectNode) invalid.get("contentSlot")).put("mainLandmark", "assumed");
         assertThat(schema.validate(invalid)).isNotEmpty();
         invalid = Json.MAPPER.valueToTree(output).deepCopy();
-        ((tools.jackson.databind.node.ObjectNode) invalid.get("coverage").get("gaps").get(0))
-            .remove("reason");
+        ((tools.jackson.databind.node.ObjectNode)
+                        invalid.get("coverage").get("gaps").get(0))
+                .remove("reason");
         assertThat(schema.validate(invalid)).isNotEmpty();
     }
 
     @Test
     void outputsAllowOmittedNullsAndEmptyPagesWithoutLeakingEditorData() {
         var document = new PageDocument(1, "code", null, null, "", "");
-        var page = new PageApi.PageSummary("page", null, "Title", null, 4L, true, false, null, "draft", null,
-            Instant.now(), true);
+        var page = new PageApi.PageSummary(
+                "page", null, "Title", null, 4L, true, false, null, "draft", null, Instant.now(), true);
         when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(pages.create(any(), any())).thenReturn(Mono.just(new PageApi.PageDetail(page,
-            document)));
+        when(pages.create(any(), any())).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(urls.getRaw()).thenReturn(null);
         var read = call("get_page", Map.of("name", "page")).structuredContent();
-        assertThat(read).doesNotContainKeys("slug", "description", "publishedRevision",
-            "publicPath",
-            "publicUrl");
-        assertThat(((Map<?, ?>) read.get("document")).containsKey("description")).isFalse();
-        assertThat(call("create_page", Map.of("title", "Title", "slug", "new")).error()).isFalse();
-        when(pages.list(1, 20, null, null, null)).thenReturn(Mono.just(
-            new PageApi.PageList(List.of(page, current.page()), 2, 1, 20)));
+        assertThat(read).doesNotContainKeys("slug", "description", "publishedRevision", "publicPath", "publicUrl");
+        assertThat(((Map<?, ?>) read.get("document")).containsKey("description"))
+                .isFalse();
+        assertThat(call("create_page", Map.of("title", "Title", "slug", "new")).error())
+                .isFalse();
+        when(pages.list(1, 20, null, null, null))
+                .thenReturn(Mono.just(new PageApi.PageList(List.of(page, current.page()), 2, 1, 20)));
         assertThat(call("list_pages", Map.of()).error()).isFalse();
-        when(pages.list(2, 20, null, null, null)).thenReturn(Mono.just(
-            new PageApi.PageList(List.of(), 2, 2, 20)));
+        when(pages.list(2, 20, null, null, null)).thenReturn(Mono.just(new PageApi.PageList(List.of(), 2, 2, 20)));
         assertThat(call("list_pages", Map.of("page", 2)).error()).isFalse();
-        when(pages.revisions("page", 1, 20)).thenReturn(Mono.just(new PageService.RevisionList(
-            List.of(new PageApi.RevisionSummary("first", Instant.now(), "owner", "ai",
-                null),
-                new PageApi.RevisionSummary("second", Instant.now(), "owner", "manual", "first")),
-            2, 1, 20)));
+        when(pages.revisions("page", 1, 20))
+                .thenReturn(Mono.just(new PageService.RevisionList(
+                        List.of(
+                                new PageApi.RevisionSummary("first", Instant.now(), "owner", "ai", null),
+                                new PageApi.RevisionSummary("second", Instant.now(), "owner", "manual", "first")),
+                        2,
+                        1,
+                        20)));
         assertThat(call("list_page_revisions", Map.of("name", "page")).error()).isFalse();
-        when(pages.revisions("page", 2, 20)).thenReturn(Mono.just(
-            new PageService.RevisionList(List.of(), 2, 2, 20)));
-        assertThat(call("list_page_revisions", Map.of("name", "page", "page",
-            2)).error()).isFalse();
+        when(pages.revisions("page", 2, 20)).thenReturn(Mono.just(new PageService.RevisionList(List.of(), 2, 2, 20)));
+        assertThat(call("list_page_revisions", Map.of("name", "page", "page", 2))
+                        .error())
+                .isFalse();
     }
 
     @Test
@@ -174,14 +209,16 @@ class PageMcpToolProviderTest {
         invalid.put("version", "4");
         assertThat(schema.validate(Json.MAPPER.valueToTree(invalid))).isNotEmpty();
         invalid = new LinkedHashMap<>(valid);
-        invalid.put("document", Map.of("title", "Title", "description", "", "html", "", "css", "",
-            "js", "", "projectData", Map.of()));
+        invalid.put(
+                "document",
+                Map.of("title", "Title", "description", "", "html", "", "css", "", "js", "", "projectData", Map.of()));
         assertThat(schema.validate(Json.MAPPER.valueToTree(invalid))).isNotEmpty();
         invalid = new LinkedHashMap<>(valid);
         invalid.put("publishedRevision", null);
         // Json.MAPPER omits nulls; use a plain mapper to exercise an explicit null wire value.
-        assertThat(schema.validate(tools.jackson.databind.json.JsonMapper.builder().build()
-            .valueToTree(invalid))).isNotEmpty();
+        assertThat(schema.validate(
+                        tools.jackson.databind.json.JsonMapper.builder().build().valueToTree(invalid)))
+                .isNotEmpty();
         invalid = new LinkedHashMap<>(valid);
         invalid.put("unexpected", true);
         assertThat(schema.validate(Json.MAPPER.valueToTree(invalid))).isNotEmpty();
@@ -190,24 +227,26 @@ class PageMcpToolProviderTest {
     @Test
     void optionalConfigurationDoesNotLoadWithoutMcpOrRequireAiFoundation() {
         var context = new ApplicationContextRunner()
-            .withUserConfiguration(PageMcpConfiguration.class)
-            .withBean(PageService.class, () -> pages).withBean(ContentPolicy.class, () -> policy)
-            .withBean(ThemeContextService.class, () -> themes)
-            .withBean(PagePreviewStore.class,
-                () -> previews).withBean(ExternalUrlSupplier.class, () -> urls);
+                .withUserConfiguration(PageMcpConfiguration.class)
+                .withBean(PageService.class, () -> pages)
+                .withBean(ContentPolicy.class, () -> policy)
+                .withBean(ThemeContextService.class, () -> themes)
+                .withBean(PagePreviewStore.class, () -> previews)
+                .withBean(ExternalUrlSupplier.class, () -> urls);
         context.withClassLoader(new FilteredClassLoader("run.halo.mcpserver.api"))
-            .run(value -> assertThat(value).hasNotFailed().doesNotHaveBean("pageMcpToolProvider"));
+                .run(value -> assertThat(value).hasNotFailed().doesNotHaveBean("pageMcpToolProvider"));
         context.withClassLoader(new FilteredClassLoader("run.halo.aifoundation"))
-            .run(value -> assertThat(value).hasNotFailed()
-                .hasSingleBean(PageMcpToolProvider.class));
+                .run(value -> assertThat(value).hasNotFailed().hasSingleBean(PageMcpToolProvider.class));
     }
 
     @Test
     void handlerAlsoRejectsNonAdminIdentity() {
-        assertThatThrownBy(() -> tool("get_page").handler()
-            .execute(new McpToolInvocation("get_page", Map.of("name", "page")))
-            .contextWrite(identity("ROLE_authenticated")).block())
-            .isInstanceOf(McpToolException.class);
+        assertThatThrownBy(() -> tool("get_page")
+                        .handler()
+                        .execute(new McpToolInvocation("get_page", Map.of("name", "page")))
+                        .contextWrite(identity("ROLE_authenticated"))
+                        .block())
+                .isInstanceOf(McpToolException.class);
         verifyNoInteractions(pages);
     }
 
@@ -215,39 +254,38 @@ class PageMcpToolProviderTest {
     void readOmitsVisualProjectAndReturnsSelectedSourceHash() {
         var result = call("get_page", Map.of("name", "page"));
         assertThat(result.error()).isFalse();
-        assertThat(result.structuredContent()).containsEntry("mode", "visual")
-            .containsEntry("revision", "draft").containsEntry("publicUrl",
-                "https://example.test/site/about");
+        assertThat(result.structuredContent())
+                .containsEntry("mode", "visual")
+                .containsEntry("revision", "draft")
+                .containsEntry("publicUrl", "https://example.test/site/about");
         var source = (Map<?, ?>) result.structuredContent().get("document");
         assertThat(source.containsKey("projectData")).isFalse();
         assertThat(source.containsKey("editorVersion")).isFalse();
         assertThat(source.get("html")).isEqualTo("<h1>Before</h1>");
         assertThat(result.structuredContent().get("baseHash"))
-            .isEqualTo(DocumentHash.of(current.document().html(), current.document().css(), ""));
+                .isEqualTo(DocumentHash.of(
+                        current.document().html(), current.document().css(), ""));
     }
 
     @Test
     void publishedAndHistoricalReadsDoNotReturnDraftSource() {
         var old = new PageDocument(1, "code", null, null, "<p>Old</p>", "");
-        when(pages.revisionDetail("page", "live")).thenReturn(Mono.just(
-            new PageApi.RevisionDetail(null, old)));
-        when(pages.revisionDetail("page", "history")).thenReturn(Mono.just(
-            new PageApi.RevisionDetail(null, old)));
-        for (var args : List.of(Map.<String, Object>of("name", "page", "target", "published"),
-            Map.<String, Object>of("name", "page", "target", "revision", "revision", "history"))) {
+        when(pages.revisionDetail("page", "live")).thenReturn(Mono.just(new PageApi.RevisionDetail(null, old)));
+        when(pages.revisionDetail("page", "history")).thenReturn(Mono.just(new PageApi.RevisionDetail(null, old)));
+        for (var args : List.of(
+                Map.<String, Object>of("name", "page", "target", "published"),
+                Map.<String, Object>of("name", "page", "target", "revision", "revision", "history"))) {
             var result = call("get_page", args);
             assertThat(result.error()).isFalse();
             assertThat(((Map<?, ?>) result.structuredContent().get("document")).get("html"))
-                .isEqualTo("<p>Old</p>");
+                    .isEqualTo("<p>Old</p>");
         }
-        assertError(call("get_page", Map.of("name", "page", "revision", "history")),
-            "INVALID_ARGUMENT");
+        assertError(call("get_page", Map.of("name", "page", "revision", "history")), "INVALID_ARGUMENT");
     }
 
     @Test
     void sourceUpdateConvertsVisualPageAndPreservesOmittedFields() {
-        var result = call("update_page", Map.of("name", "page", "expectedVersion", 4, "html",
-            "<p>New</p>"));
+        var result = call("update_page", Map.of("name", "page", "expectedVersion", 4, "html", "<p>New</p>"));
         assertThat(result.error()).isFalse();
         var saved = savedDocument();
         assertThat(saved.mode()).isEqualTo("code");
@@ -260,10 +298,27 @@ class PageMcpToolProviderTest {
     @Test
     void propertiesUseTheirOwnOperationAndNoOpSourcePreservesVisualState() {
         when(pages.updateProperties(eq("page"), any())).thenReturn(Mono.just(current));
-        assertThat(call("update_page_properties", Map.of("name", "page", "expectedVersion", 4,
-            "title", "Renamed", "description", "", "slug", "new-path", "themeLayout", false)).error()).isFalse();
-        verify(pages).updateProperties("page", new PageApi.UpdatePagePropertiesRequest(
-            4L, "Renamed", "", "new-path", false, null, null));
+        assertThat(call(
+                                "update_page_properties",
+                                Map.of(
+                                        "name",
+                                        "page",
+                                        "expectedVersion",
+                                        4,
+                                        "title",
+                                        "Renamed",
+                                        "description",
+                                        "",
+                                        "slug",
+                                        "new-path",
+                                        "themeLayout",
+                                        false))
+                        .error())
+                .isFalse();
+        verify(pages)
+                .updateProperties(
+                        "page",
+                        new PageApi.UpdatePagePropertiesRequest(4L, "Renamed", "", "new-path", false, null, null));
         verify(pages, never()).save(any(), any(), any());
         call("update_page", Map.of("name", "page", "expectedVersion", 4, "html", "<h1>Before</h1>"));
         assertThat(savedDocument()).isEqualTo(current.document());
@@ -271,18 +326,24 @@ class PageMcpToolProviderTest {
 
     @Test
     void invalidContentNeverSaves() {
-        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4,
-            "html", "<script>alert(1)</script>")), "INVALID_ARGUMENT");
-        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4)),
-            "INVALID_ARGUMENT");
+        assertError(
+                call("update_page", Map.of("name", "page", "expectedVersion", 4, "html", "<script>alert(1)</script>")),
+                "INVALID_ARGUMENT");
+        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4)), "INVALID_ARGUMENT");
         verify(pages, never()).save(any(), any(), any());
     }
 
     @Test
     void patchRequiresDraftHashAndPreservesOtherFields() {
-        var args = Map.<String, Object>of("name", "page", "expectedVersion", 4,
-            "baseHash", DocumentHash.of(current.document().html(), current.document().css(), ""),
-            "patches", List.of(Map.of("field", "html", "oldText", "Before", "newText", "After")));
+        var args = Map.<String, Object>of(
+                "name",
+                "page",
+                "expectedVersion",
+                4,
+                "baseHash",
+                DocumentHash.of(current.document().html(), current.document().css(), ""),
+                "patches",
+                List.of(Map.of("field", "html", "oldText", "Before", "newText", "After")));
         assertThat(call("patch_page", args).error()).isFalse();
         assertThat(savedDocument().html()).isEqualTo("<h1>After</h1>");
         clearInvocations(pages);
@@ -297,18 +358,41 @@ class PageMcpToolProviderTest {
 
     @Test
     void changedCssUsesThemeContractButStandaloneDoesNot() {
-        when(themes.current()).thenReturn(Mono.just(new ThemeStyleContext("theme", "Theme",
-            "SUPPORTED",
-            List.of(), List.of(), "", new ThemeStyleContext.ColorMode("explicit", List.of(),
-                List.of()))));
-        var args = Map.<String, Object>of("name", "page", "expectedVersion", 4,
-            "css", "@media (prefers-color-scheme: dark) { h1 {color: white} }");
+        when(themes.current())
+                .thenReturn(Mono.just(new ThemeStyleContext(
+                        "theme",
+                        "Theme",
+                        "SUPPORTED",
+                        List.of(),
+                        List.of(),
+                        "",
+                        new ThemeStyleContext.ColorMode("explicit", List.of(), List.of()))));
+        var args = Map.<String, Object>of(
+                "name",
+                "page",
+                "expectedVersion",
+                4,
+                "css",
+                "@media (prefers-color-scheme: dark) { h1 {color: white} }");
         assertError(call("update_page", args), "INVALID_ARGUMENT");
         verify(pages, never()).save(any(), any(), any());
         var p = current.page();
-        when(pages.get("page")).thenReturn(Mono.just(new PageApi.PageDetail(new PageApi.PageSummary(
-            p.name(), p.slug(), p.title(), p.description(), p.version(), false, false, null, p.draftRevision(),
-            p.publishedRevision(), p.updatedAt(), p.hasUnpublishedChanges()), current.document())));
+        when(pages.get("page"))
+                .thenReturn(Mono.just(new PageApi.PageDetail(
+                        new PageApi.PageSummary(
+                                p.name(),
+                                p.slug(),
+                                p.title(),
+                                p.description(),
+                                p.version(),
+                                false,
+                                false,
+                                null,
+                                p.draftRevision(),
+                                p.publishedRevision(),
+                                p.updatedAt(),
+                                p.hasUnpublishedChanges()),
+                        current.document())));
         clearInvocations(themes);
         assertThat(call("update_page", args).error()).isFalse();
         verifyNoInteractions(themes);
@@ -317,8 +401,9 @@ class PageMcpToolProviderTest {
     @Test
     void emptyThemeStillSavesChangedCss() {
         when(themes.current()).thenReturn(Mono.empty());
-        assertThat(call("update_page", Map.of("name", "page", "expectedVersion", 4,
-            "css", "h1{color:blue}")).error()).isFalse();
+        assertThat(call("update_page", Map.of("name", "page", "expectedVersion", 4, "css", "h1{color:blue}"))
+                        .error())
+                .isFalse();
         assertThat(savedDocument().css()).isEqualTo("h1{color:blue}");
         verify(themes).current();
     }
@@ -327,44 +412,49 @@ class PageMcpToolProviderTest {
     void contentToolSchemaExcludesPropertiesAndPropertyToolDescribesLiveEffects() {
         var schema = tool("update_page").inputSchema();
         assertThat(((Map<?, ?>) schema.get("properties")).containsKey("title")).isFalse();
-        assertThat(((Map<?, ?>) schema.get("properties")).containsKey("description")).isFalse();
+        assertThat(((Map<?, ?>) schema.get("properties")).containsKey("description"))
+                .isFalse();
         assertThat(tool("update_page_properties").description()).contains("immediately", "published");
     }
 
     @Test
     void propertiesCannotBeSentAsContentOnlyUpdate() {
-        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4, "title", "Changed")),
-            "INVALID_ARGUMENT");
+        assertError(
+                call("update_page", Map.of("name", "page", "expectedVersion", 4, "title", "Changed")),
+                "INVALID_ARGUMENT");
         verifyNoInteractions(themes);
         verify(pages, never()).save(any(), any(), any());
     }
 
     @Test
     void themeFailureDoesNotSaveOrRetry() {
-        when(themes.current()).thenReturn(Mono.error(
-            new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "theme unavailable")));
-        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4,
-            "css", "h1{color:blue}")), "INTERNAL_ERROR");
+        when(themes.current())
+                .thenReturn(
+                        Mono.error(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "theme unavailable")));
+        assertError(
+                call("update_page", Map.of("name", "page", "expectedVersion", 4, "css", "h1{color:blue}")),
+                "INTERNAL_ERROR");
         verify(themes).current();
         verify(pages, never()).save(any(), any(), any());
     }
 
     @Test
     void staleVersionAndServiceConflictsAreNeverRetried() {
-        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 3,
-            "html", "<p>New</p>")), "CONFLICT");
+        assertError(
+                call("update_page", Map.of("name", "page", "expectedVersion", 3, "html", "<p>New</p>")), "CONFLICT");
         verify(pages, never()).save(any(), any(), any());
-        when(pages.save(any(), any(), any())).thenReturn(Mono.error(
-            new ResponseStatusException(HttpStatus.CONFLICT, "Changed")));
-        assertError(call("update_page", Map.of("name", "page", "expectedVersion", 4,
-            "html", "<p>New</p>")), "CONFLICT");
+        when(pages.save(any(), any(), any()))
+                .thenReturn(Mono.error(new ResponseStatusException(HttpStatus.CONFLICT, "Changed")));
+        assertError(
+                call("update_page", Map.of("name", "page", "expectedVersion", 4, "html", "<p>New</p>")), "CONFLICT");
         verify(pages, times(1)).save(any(), any(), any());
     }
 
     @Test
     void creationDerivesActorAndNeverPublishes() {
         when(pages.create(any(), eq("key-owner"))).thenReturn(Mono.just(current));
-        assertThat(call("create_page", Map.of("title", "New", "slug", "new")).error()).isFalse();
+        assertThat(call("create_page", Map.of("title", "New", "slug", "new")).error())
+                .isFalse();
         verify(pages).create(new PageApi.CreatePageRequest("new", "New", true), "key-owner");
         verify(pages, never()).publish(any(), any(), any());
     }
@@ -375,10 +465,12 @@ class PageMcpToolProviderTest {
         when(pages.unpublish("page", 4L)).thenReturn(Mono.just(current));
         when(pages.restore(eq("page"), any(), eq("key-owner"))).thenReturn(Mono.just(current));
         assertThat(call("publish_page", draftArgs()).error()).isFalse();
-        assertThat(call("unpublish_page", Map.of("name", "page", "expectedVersion",
-            4)).error()).isFalse();
-        assertThat(call("restore_page_revision", Map.of("name", "page", "expectedVersion", 4,
-            "revision", "history")).error()).isFalse();
+        assertThat(call("unpublish_page", Map.of("name", "page", "expectedVersion", 4))
+                        .error())
+                .isFalse();
+        assertThat(call("restore_page_revision", Map.of("name", "page", "expectedVersion", 4, "revision", "history"))
+                        .error())
+                .isFalse();
         verify(pages).publish("page", 4L, "draft");
         verify(pages).unpublish("page", 4L);
         verify(pages).restore("page", new PageApi.RestoreRequest(4L, "history"), "key-owner");
@@ -390,23 +482,36 @@ class PageMcpToolProviderTest {
         var result = call("preview_page", draftArgs());
         assertThat(result.error()).isFalse();
         assertThat(result.structuredContent().get("previewUrl").toString())
-            .startsWith("https://example.test/site/preview/ai-page-builder/");
-        assertError(call("preview_page", Map.of("name", "page", "expectedVersion", 4,
-            "expectedDraftRevision", "old")), "CONFLICT");
+                .startsWith("https://example.test/site/preview/ai-page-builder/");
+        assertError(
+                call("preview_page", Map.of("name", "page", "expectedVersion", 4, "expectedDraftRevision", "old")),
+                "CONFLICT");
         when(urls.getRaw()).thenReturn(null);
-        assertThatThrownBy(() -> call("preview_page",
-            draftArgs())).isInstanceOf(McpToolException.class)
-            .hasMessageContaining("external URL");
+        assertThatThrownBy(() -> call("preview_page", draftArgs()))
+                .isInstanceOf(McpToolException.class)
+                .hasMessageContaining("external URL");
     }
 
     @ParameterizedTest
     @ValueSource(ints = {400, 403, 404, 409, 500})
     void mapsHttpErrorsWithoutLeakingServerErrors(int status) {
-        when(pages.get("page")).thenReturn(Mono.error(new ResponseStatusException(
-            HttpStatus.valueOf(status), "internal details")));
+        when(pages.get("page"))
+                .thenReturn(Mono.error(new ResponseStatusException(HttpStatus.valueOf(status), "internal details")));
         var result = call("get_page", Map.of("name", "page"));
-        assertError(result, Map.of(400, "INVALID_ARGUMENT", 403, "FORBIDDEN", 404, "NOT_FOUND",
-            409, "CONFLICT", 500, "INTERNAL_ERROR").get(status));
+        assertError(
+                result,
+                Map.of(
+                                400,
+                                "INVALID_ARGUMENT",
+                                403,
+                                "FORBIDDEN",
+                                404,
+                                "NOT_FOUND",
+                                409,
+                                "CONFLICT",
+                                500,
+                                "INTERNAL_ERROR")
+                        .get(status));
         if (status == 500) assertThat(result.textContent()).doesNotContain("internal details");
     }
 
@@ -418,8 +523,21 @@ class PageMcpToolProviderTest {
     }
 
     private static PageApi.PageDetail detail(PageDocument document) {
-        return new PageApi.PageDetail(new PageApi.PageSummary("page", "about", "Title",
-            "Description", 4L, true, false, null, "draft", "live", Instant.now(), true), document);
+        return new PageApi.PageDetail(
+                new PageApi.PageSummary(
+                        "page",
+                        "about",
+                        "Title",
+                        "Description",
+                        4L,
+                        true,
+                        false,
+                        null,
+                        "draft",
+                        "live",
+                        Instant.now(),
+                        true),
+                document);
     }
 
     private static Map<String, Object> draftArgs() {
@@ -432,26 +550,29 @@ class PageMcpToolProviderTest {
 
     private McpToolResult call(String name, Map<String, Object> args) {
         var definition = tool(name);
-        var result = definition.handler().execute(new McpToolInvocation(name, args))
-            .contextWrite(identity("ROLE_super-role")).block();
+        var result = definition
+                .handler()
+                .execute(new McpToolInvocation(name, args))
+                .contextWrite(identity("ROLE_super-role"))
+                .block();
         assertThat(result).isNotNull();
         if (!result.error()) {
             assertThat(SCHEMAS.getSchema(Json.MAPPER.valueToTree(definition.outputSchema()))
-                .validate(Json.MAPPER.valueToTree(result.structuredContent())))
-                .as("Output of %s conforms to its schema", name).isEmpty();
+                            .validate(Json.MAPPER.valueToTree(result.structuredContent())))
+                    .as("Output of %s conforms to its schema", name)
+                    .isEmpty();
         }
         return result;
     }
 
     private static reactor.util.context.Context identity(String role) {
-        return ReactiveSecurityContextHolder.withAuthentication(new
-            UsernamePasswordAuthenticationToken(
-            "key-owner", "unused", AuthorityUtils.createAuthorityList(role)));
+        return ReactiveSecurityContextHolder.withAuthentication(new UsernamePasswordAuthenticationToken(
+                "key-owner", "unused", AuthorityUtils.createAuthorityList(role)));
     }
 
     private static void assertError(McpToolResult result, String code) {
         assertThat(result.error()).isTrue();
-        assertThat(((Map<?,
-            ?>) result.structuredContent().get("error")).get("code")).isEqualTo(code);
+        assertThat(((Map<?, ?>) result.structuredContent().get("error")).get("code"))
+                .isEqualTo(code);
     }
 }

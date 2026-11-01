@@ -5,14 +5,18 @@ import java.util.ArrayList;
 import java.util.List;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import run.halo.aipagebuilder.ai.ChatApi;
 import run.halo.app.extension.AbstractExtension;
 import run.halo.app.extension.GVK;
-import run.halo.aipagebuilder.ai.ChatApi;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@GVK(group = "aipagebuilder.halo.run", version = "v1alpha1", kind = "PageChatSession",
-    plural = "pagechatsessions", singular = "pagechatsession")
+@GVK(
+        group = "aipagebuilder.halo.run",
+        version = "v1alpha1",
+        kind = "PageChatSession",
+        plural = "pagechatsessions",
+        singular = "pagechatsession")
 public class PageChatSession extends AbstractExtension {
     private Spec spec;
 

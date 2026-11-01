@@ -53,19 +53,33 @@ class SiteReferenceToolsTest {
         config("system-default", Map.of("basic", """
             {"title":"Default","subtitle":"Default subtitle","language":"zh-CN","logo":"/logo.png"}
             """));
-        config("system", Map.of("basic", """
+        config(
+                "system",
+                Map.of(
+                        "basic",
+                        """
             {"title":"Public title","subtitle":null,"favicon":"javascript:alert(1)",
              "adminEmail":"private@example.org","apiKey":"PRIVATE_TOKEN","externalUrl":"https://user:password@host/"}
-            """, "seo", "not valid json PRIVATE_SEO", "smtp", "PRIVATE_SMTP",
-            "codeInjection", "PRIVATE_SCRIPT", "authProvider", "PRIVATE_AUTH"));
+            """,
+                        "seo",
+                        "not valid json PRIVATE_SEO",
+                        "smtp",
+                        "PRIVATE_SMTP",
+                        "codeInjection",
+                        "PRIVATE_SCRIPT",
+                        "authProvider",
+                        "PRIVATE_AUTH"));
         when(urls.getRaw()).thenReturn(URI.create("https://example.org/blog").toURL());
         var result = tools.execute("get_site_profile", Map.of()).block();
-        assertThat(result).containsOnlyKeys("title", "subtitle", "logo", "favicon", "language", "url",
-                "truncated", "summary")
-            .containsEntry("summary", "Public title · https://example.org/blog")
-            .containsEntry("title", "Public title").containsEntry("subtitle", "")
-            .containsEntry("logo", "/logo.png").containsEntry("language", "zh-CN")
-            .containsEntry("url", "https://example.org/blog").containsEntry("favicon", "");
+        assertThat(result)
+                .containsOnlyKeys("title", "subtitle", "logo", "favicon", "language", "url", "truncated", "summary")
+                .containsEntry("summary", "Public title · https://example.org/blog")
+                .containsEntry("title", "Public title")
+                .containsEntry("subtitle", "")
+                .containsEntry("logo", "/logo.png")
+                .containsEntry("language", "zh-CN")
+                .containsEntry("url", "https://example.org/blog")
+                .containsEntry("favicon", "");
         assertThat(result.toString()).doesNotContain("PRIVATE", "password", "adminEmail", "apiKey");
         verify(client, never()).fetch(eq(Secret.class), any());
     }
@@ -73,13 +87,13 @@ class SiteReferenceToolsTest {
     @Test
     void handlesMissingConfigurationAndBoundsTextWithoutTruncatingLinks() {
         when(client.fetch(ConfigMap.class, "system-default")).thenReturn(Mono.empty());
-        config("system", Map.of("basic", "{\"title\":\"" + "x".repeat(600)
-            + "\",\"logo\":\"/" + "y".repeat(2050) + "\"}"));
+        config(
+                "system",
+                Map.of("basic", "{\"title\":\"" + "x".repeat(600) + "\",\"logo\":\"/" + "y".repeat(2050) + "\"}"));
         when(urls.get()).thenReturn(URI.create("/"));
         var result = tools.execute("get_site_profile", Map.of()).block();
         assertThat((String) result.get("title")).hasSize(512);
-        assertThat(result).containsEntry("logo", "").containsEntry("url", "/")
-            .containsEntry("truncated", true);
+        assertThat(result).containsEntry("logo", "").containsEntry("url", "/").containsEntry("truncated", true);
     }
 
     @Test
@@ -87,8 +101,9 @@ class SiteReferenceToolsTest {
         config("system-default", Map.of());
         config("system", Map.of("basic", "{PRIVATE_PASSWORD"));
         assertThatThrownBy(() -> tools.execute("get_site_profile", Map.of()).block())
-            .isInstanceOf(IllegalArgumentException.class).hasMessage("Site profile unavailable")
-            .hasNoCause();
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Site profile unavailable")
+                .hasNoCause();
     }
 
     @Test
@@ -97,15 +112,20 @@ class SiteReferenceToolsTest {
         root.setStatus(new MenuItem.MenuItemStatus());
         root.getStatus().setDisplayName("Resolved home");
         root.getStatus().setHref("https://example.org/real");
-        navigation(List.of(root, item("mail", "home", "mailto:hello@example.org"),
-            item("phone", "home", "tel:+123456789"), item("anchor", "mail", "#contact")));
+        navigation(List.of(
+                root,
+                item("mail", "home", "mailto:hello@example.org"),
+                item("phone", "home", "tel:+123456789"),
+                item("anchor", "mail", "#contact")));
         var result = tools.execute("get_navigation", Map.of()).block();
         var items = menuItems(result);
         assertThat(items).hasSize(1);
-        assertThat(items.getFirst()).containsEntry("href", "https://example.org/real")
-            .containsEntry("displayName", "Resolved home");
-        assertThat(children(items.getFirst())).extracting(value -> value.get("href"))
-            .containsExactly("mailto:hello@example.org", "tel:+123456789");
+        assertThat(items.getFirst())
+                .containsEntry("href", "https://example.org/real")
+                .containsEntry("displayName", "Resolved home");
+        assertThat(children(items.getFirst()))
+                .extracting(value -> value.get("href"))
+                .containsExactly("mailto:hello@example.org", "tel:+123456789");
         assertThat(children(children(items.getFirst()).getFirst())).hasSize(1);
         var options = ArgumentCaptor.forClass(ListOptions.class);
         var page = ArgumentCaptor.forClass(PageRequest.class);
@@ -121,11 +141,13 @@ class SiteReferenceToolsTest {
         first.getSpec().setPriority(-1);
         navigation(List.of(item("a", null, "/last"), first));
         assertThat(menuItems(tools.execute("get_navigation", Map.of()).block()))
-            .extracting(item -> item.get("href")).containsExactly("/first", "/last");
+                .extracting(item -> item.get("href"))
+                .containsExactly("/first", "/last");
         var page = ArgumentCaptor.forClass(PageRequest.class);
         verify(client).listBy(eq(MenuItem.class), any(), page.capture());
-        assertThat(page.getValue().getSort().toString()).doesNotContain("spec.priority")
-            .contains("metadata.name");
+        assertThat(page.getValue().getSort().toString())
+                .doesNotContain("spec.priority")
+                .contains("metadata.name");
     }
 
     @Test
@@ -189,18 +211,27 @@ class SiteReferenceToolsTest {
         when(client.fetch(Post.class, "missing")).thenReturn(Mono.empty());
         navigation(items);
         var result = tools.execute("get_navigation", Map.of()).block();
-        assertThat(menuItems(result)).extracting(item -> item.get("href"))
-            .containsExactly("/actual-category", "/custom-about", "/actual-public", "/actual-tag");
+        assertThat(menuItems(result))
+                .extracting(item -> item.get("href"))
+                .containsExactly("/actual-category", "/custom-about", "/actual-public", "/actual-tag");
         assertThat(result.toString()).doesNotContain("PRIVATE", "draft", "private", "recycled", "deleted");
         verify(client, never()).fetch(eq(Secret.class), any());
     }
 
     @Test
     void rejectsUnsafeLinksAndDoesNotPromoteChildrenOfFilteredParents() {
-        var unsafe = List.of("javascript:alert(1)", "data:text/html,test", "//evil.example/a",
-            "/\\evil.example", "https://user:password@example.org", "/bad\nlink", "ftp://example.org/a",
-            "mailto:me@example.org?bcc=private@example.org", "mailto:me%0d%0abcc=other@example.org",
-            "tel:+123%0d%0a", "/" + "x".repeat(2048));
+        var unsafe = List.of(
+                "javascript:alert(1)",
+                "data:text/html,test",
+                "//evil.example/a",
+                "/\\evil.example",
+                "https://user:password@example.org",
+                "/bad\nlink",
+                "ftp://example.org/a",
+                "mailto:me@example.org?bcc=private@example.org",
+                "mailto:me%0d%0abcc=other@example.org",
+                "tel:+123%0d%0a",
+                "/" + "x".repeat(2048));
         var items = new ArrayList<MenuItem>();
         for (int i = 0; i < unsafe.size(); i++) items.add(item("unsafe-" + i, null, unsafe.get(i)));
         items.add(item("hidden-child", "unsafe-0", "/safe-child"));
@@ -213,10 +244,15 @@ class SiteReferenceToolsTest {
 
     @Test
     void boundsDepthCountCyclesAndOrphans() {
-        navigation(List.of(item("a", null, "/a"), item("b", "a", "/b"), item("c", "b", "/c"),
-            item("cycle-1", "cycle-2", "/1"), item("cycle-2", "cycle-1", "/2"),
-            item("orphan", "missing", "/orphan")));
-        var result = tools.execute("get_navigation", Map.of("maxDepth", 2, "maxItems", 2)).block();
+        navigation(List.of(
+                item("a", null, "/a"),
+                item("b", "a", "/b"),
+                item("c", "b", "/c"),
+                item("cycle-1", "cycle-2", "/1"),
+                item("cycle-2", "cycle-1", "/2"),
+                item("orphan", "missing", "/orphan")));
+        var result = tools.execute("get_navigation", Map.of("maxDepth", 2, "maxItems", 2))
+                .block();
         var root = menuItems(result).getFirst();
         assertThat(children(root)).hasSize(1);
         assertThat(children(children(root).getFirst())).isEmpty();
@@ -225,12 +261,15 @@ class SiteReferenceToolsTest {
 
     @Test
     void stopsScanningAfterTwoBoundedPagesAndReportsTruncation() {
-        when(client.listBy(eq(Menu.class), any(), any())).thenReturn(Mono.just(new ListResult<>(1, 5, 1, List.of(menu()))));
+        when(client.listBy(eq(Menu.class), any(), any()))
+                .thenReturn(Mono.just(new ListResult<>(1, 5, 1, List.of(menu()))));
         when(client.listBy(eq(MenuItem.class), any(), any())).thenAnswer(invocation -> {
             PageRequest request = invocation.getArgument(2);
             int page = request.getPageNumber();
             assertThat(page).isBetween(1, 2);
-            var items = IntStream.range(0, 100).mapToObj(i -> item(page + "-" + i, null, "/" + i)).toList();
+            var items = IntStream.range(0, 100)
+                    .mapToObj(i -> item(page + "-" + i, null, "/" + i))
+                    .toList();
             return Mono.just(new ListResult<>(page, 100, 10000, items));
         });
         var result = tools.execute("get_navigation", Map.of("maxItems", 3)).block();
@@ -242,31 +281,46 @@ class SiteReferenceToolsTest {
     @Test
     void paginatesMenusAndSupportsExplicitMenuLookup() {
         when(client.listBy(eq(Menu.class), any(), any())).thenReturn(Mono.just(new ListResult<>(2, 1, 4, List.of())));
-        var result = tools.execute("get_navigation", Map.of("page", 2, "size", 1)).block();
-        assertThat(result).containsEntry("page", 2).containsEntry("size", 1)
-            .containsEntry("hasNext", true).containsEntry("truncated", true);
+        var result =
+                tools.execute("get_navigation", Map.of("page", 2, "size", 1)).block();
+        assertThat(result)
+                .containsEntry("page", 2)
+                .containsEntry("size", 1)
+                .containsEntry("hasNext", true)
+                .containsEntry("truncated", true);
         var page = ArgumentCaptor.forClass(PageRequest.class);
         verify(client).listBy(eq(Menu.class), any(), page.capture());
         assertThat(page.getValue().getPageNumber()).isEqualTo(2);
         assertThat(page.getValue().getPageSize()).isEqualTo(1);
         when(client.fetch(Menu.class, "missing")).thenReturn(Mono.empty());
-        assertThat(tools.execute("get_navigation", Map.of("menuName", "missing")).block())
-            .containsEntry("menus", List.of()).containsEntry("hasNext", false);
+        assertThat(tools.execute("get_navigation", Map.of("menuName", "missing"))
+                        .block())
+                .containsEntry("menus", List.of())
+                .containsEntry("hasNext", false);
     }
 
     @Test
     void rejectsInvalidBoundsBeforeAccessAndDefinesOnlyTwoTools() {
-        for (var args : List.<Map<String, Object>>of(Map.of("page", 0), Map.of("size", 11),
-            Map.of("maxDepth", 6), Map.of("maxItems", 101), Map.of("maxItems", 0),
-            Map.of("page", 1.2), Map.of("page", Double.NaN), Map.of("page", 2147483648L),
-            Map.of("size", "2"), Map.of("menuName", 3))) {
+        for (var args : List.<Map<String, Object>>of(
+                Map.of("page", 0),
+                Map.of("size", 11),
+                Map.of("maxDepth", 6),
+                Map.of("maxItems", 101),
+                Map.of("maxItems", 0),
+                Map.of("page", 1.2),
+                Map.of("page", Double.NaN),
+                Map.of("page", 2147483648L),
+                Map.of("size", "2"),
+                Map.of("menuName", 3))) {
             assertThatThrownBy(() -> tools.execute("get_navigation", args).block())
-                .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(IllegalArgumentException.class);
         }
-        assertThatThrownBy(() -> tools.execute("unknown", Map.of()).block()).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> tools.execute("unknown", Map.of()).block())
+                .isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(client, urls);
-        assertThat(SiteReferenceTools.definitions()).extracting(PageReferenceTools.Definition::name)
-            .containsExactly("get_site_profile", "get_navigation");
+        assertThat(SiteReferenceTools.definitions())
+                .extracting(PageReferenceTools.Definition::name)
+                .containsExactly("get_site_profile", "get_navigation");
     }
 
     private void config(String name, Map<String, String> data) {
@@ -276,8 +330,10 @@ class SiteReferenceToolsTest {
     }
 
     private void navigation(List<MenuItem> items) {
-        when(client.listBy(eq(Menu.class), any(), any())).thenReturn(Mono.just(new ListResult<>(1, 5, 1, List.of(menu()))));
-        when(client.listBy(eq(MenuItem.class), any(), any())).thenReturn(Mono.just(new ListResult<>(1, 100, items.size(), items)));
+        when(client.listBy(eq(Menu.class), any(), any()))
+                .thenReturn(Mono.just(new ListResult<>(1, 5, 1, List.of(menu()))));
+        when(client.listBy(eq(MenuItem.class), any(), any()))
+                .thenReturn(Mono.just(new ListResult<>(1, 100, items.size(), items)));
     }
 
     @SuppressWarnings("unchecked")

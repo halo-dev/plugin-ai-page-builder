@@ -8,8 +8,12 @@ import run.halo.app.extension.GVK;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@GVK(group = "aipagebuilder.halo.run", version = "v1alpha1", kind = "ThemePageRevision",
-    plural = "themepagerevisions", singular = "themepagerevision")
+@GVK(
+        group = "aipagebuilder.halo.run",
+        version = "v1alpha1",
+        kind = "ThemePageRevision",
+        plural = "themepagerevisions",
+        singular = "themepagerevision")
 public class ThemePageRevision extends AbstractExtension {
     @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
     private Spec spec;

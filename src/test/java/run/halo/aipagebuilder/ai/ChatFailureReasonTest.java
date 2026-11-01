@@ -12,14 +12,16 @@ class ChatFailureReasonTest {
     @Test
     void classifiesTimeoutAndKnownErrorsWithoutExposingProviderMessages() {
         var copy = copy();
-        assertThat(PageChatService.failureReason(new RuntimeException("private-response",
-            new java.util.concurrent.TimeoutException()), copy)).isEqualTo(AiGenerationException.Reason.TIMEOUT);
+        assertThat(PageChatService.failureReason(
+                        new RuntimeException("private-response", new java.util.concurrent.TimeoutException()), copy))
+                .isEqualTo(AiGenerationException.Reason.TIMEOUT);
         for (var reason : AiGenerationException.Reason.values()) {
-            assertThat(PageChatService.failureReason(new AiGenerationException(reason), copy)).isEqualTo(reason);
+            assertThat(PageChatService.failureReason(new AiGenerationException(reason), copy))
+                    .isEqualTo(reason);
         }
         assertThat(PageChatService.failureReason(new RuntimeException("private-response"), copy).message)
-            .contains("工具错误", "AI Foundation", "用量统计")
-            .doesNotContain("private-response", "凭据", "供应商连接");
+                .contains("工具错误", "AI Foundation", "用量统计")
+                .doesNotContain("private-response", "凭据", "供应商连接");
     }
 
     @Test
@@ -28,13 +30,13 @@ class ChatFailureReasonTest {
         for (int i = 0; i < RunBudget.MAX_CALLS; i++) calls.read();
         assertThatThrownBy(calls::read).isInstanceOf(IllegalStateException.class);
         assertThat(PageChatService.failureReason(new RuntimeException(), calls))
-            .isEqualTo(AiGenerationException.Reason.TOOL_LIMIT);
+                .isEqualTo(AiGenerationException.Reason.TOOL_LIMIT);
         var bytes = copy();
         assertThatThrownBy(() -> bytes.consume("a".repeat(RunBudget.MAX_BYTES + 1)))
-            .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(bytes::read).isInstanceOf(IllegalStateException.class);
         assertThat(PageChatService.failureReason(new RuntimeException(), bytes))
-            .isEqualTo(AiGenerationException.Reason.DATA_LIMIT);
+                .isEqualTo(AiGenerationException.Reason.DATA_LIMIT);
     }
 
     @Test
@@ -49,22 +51,21 @@ class ChatFailureReasonTest {
             for (int i = 0; i < RunBudget.MAX_CALLS; i++) calls.read();
             assertThatThrownBy(calls::read).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> bytes.consume("a".repeat(RunBudget.MAX_BYTES + 1)))
-                .isInstanceOf(IllegalStateException.class);
+                    .isInstanceOf(IllegalStateException.class);
             if (!tokensFirst) {
                 calls.budget.usage(RunBudget.MAX_REPORTED_TOKENS, 0);
                 bytes.budget.usage(RunBudget.MAX_REPORTED_TOKENS, 0);
             }
-            var wrapped = new RuntimeException(new AiGenerationException(
-                AiGenerationException.Reason.CHECKPOINT_FAILED));
+            var wrapped =
+                    new RuntimeException(new AiGenerationException(AiGenerationException.Reason.CHECKPOINT_FAILED));
             assertThat(PageChatService.failureReason(wrapped, calls))
-                .isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT);
+                    .isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT);
             assertThat(PageChatService.failureReason(wrapped, bytes))
-                .isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT);
+                    .isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT);
         }
     }
 
     private PageWorkingCopy copy() {
-        return new PageWorkingCopy(new PageDocument(1, "code", null, null, "", ""),
-            new ContentPolicy());
+        return new PageWorkingCopy(new PageDocument(1, "code", null, null, "", ""), new ContentPolicy());
     }
 }

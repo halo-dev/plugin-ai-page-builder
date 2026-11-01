@@ -36,16 +36,36 @@ class PageRouterTest {
     private final PageService service = mock(PageService.class);
     private final PageRenderer renderer = mock(PageRenderer.class);
     private final org.springframework.web.reactive.function.server.RouterFunction<ServerResponse> router =
-        new PageRouter().aiPageBuilderPublicRoutes(service, renderer);
+            new PageRouter().aiPageBuilderPublicRoutes(service, renderer);
 
     @Test
     void matchesOnlyAnExistingFullPathAndRendersWithStableName() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
-        var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true, false, null,
-            "draft", "published", Instant.now(), true);
+        var page = new PageApi.PageSummary(
+                "stable-id",
+                "about/company",
+                "Company",
+                "",
+                1L,
+                true,
+                false,
+                null,
+                "draft",
+                "published",
+                Instant.now(),
+                true);
         when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document), any(), any(),
-            eq(false), eq(true))).thenReturn(RenderingResponse.create("test").build());
+        when(renderer.render(
+                        any(),
+                        eq("stable-id"),
+                        eq("about/company"),
+                        eq(true),
+                        eq(document),
+                        any(),
+                        any(),
+                        eq(false),
+                        eq(true)))
+                .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
@@ -59,91 +79,145 @@ class PageRouterTest {
 
     @Test
     void neverClaimsReservedMalformedOrNonHtmlRequests() {
-        for (var path : new String[] {"/", "/console", "/console/settings", "/apis/foo", "/upload/a",
-            "/login", "/login/oauth2/code/provider", "/captcha/altcha", "/password-reset/email",
-            "/challenges/totp", "/%63onsole", "/login;test", "/about/../login", "/about%2fcompany"}) {
+        for (var path : new String[] {
+            "/",
+            "/console",
+            "/console/settings",
+            "/apis/foo",
+            "/upload/a",
+            "/login",
+            "/login/oauth2/code/provider",
+            "/captcha/altcha",
+            "/password-reset/email",
+            "/challenges/totp",
+            "/%63onsole",
+            "/login;test",
+            "/about/../login",
+            "/about%2fcompany"
+        }) {
             assertThat(router.route(request(path)).block()).as(path).isNull();
         }
-        assertThat(router.route(ServerRequest.create(MockServerWebExchange.from(
-            MockServerHttpRequest.post("/about")), HandlerStrategies.withDefaults().messageReaders())).block()).isNull();
-        assertThat(router.route(ServerRequest.create(MockServerWebExchange.from(
-            MockServerHttpRequest.get("/about").accept(MediaType.APPLICATION_JSON)),
-            HandlerStrategies.withDefaults().messageReaders())).block()).isNull();
+        assertThat(router.route(ServerRequest.create(
+                                MockServerWebExchange.from(MockServerHttpRequest.post("/about")),
+                                HandlerStrategies.withDefaults().messageReaders()))
+                        .block())
+                .isNull();
+        assertThat(router.route(ServerRequest.create(
+                                MockServerWebExchange.from(
+                                        MockServerHttpRequest.get("/about").accept(MediaType.APPLICATION_JSON)),
+                                HandlerStrategies.withDefaults().messageReaders()))
+                        .block())
+                .isNull();
         verifyNoInteractions(service, renderer);
     }
 
     @Test
     void onlySuperAdministratorsGetPageScriptsDisabled() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "", "document.title = 'changed';");
-        var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true, false, null,
-            "draft", "published", Instant.now(), true);
-        when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
-        when(renderer.render(any(), eq("stable-id"), eq("about/company"), eq(true), eq(document), any(), any(),
-            anyBoolean(), anyBoolean())).thenReturn(RenderingResponse.create("test").build());
+        var page = new PageApi.PageSummary(
+                "stable-id",
+                "about/company",
+                "Company",
+                "",
+                1L,
+                true,
+                false,
+                null,
+                "draft",
+                "published",
+                Instant.now(),
+                true);
+        when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
+        when(renderer.render(
+                        any(),
+                        eq("stable-id"),
+                        eq("about/company"),
+                        eq(true),
+                        eq(document),
+                        any(),
+                        any(),
+                        anyBoolean(),
+                        anyBoolean()))
+                .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
-        var admin = new UsernamePasswordAuthenticationToken("admin", "password",
-            AuthorityUtils.createAuthorityList("ROLE_super-role"));
+        var admin = new UsernamePasswordAuthenticationToken(
+                "admin", "password", AuthorityUtils.createAuthorityList("ROLE_super-role"));
         handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block();
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin))
+                .block();
         verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
 
-        var impersonating = new UsernamePasswordAuthenticationToken("member", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated",
-                "ROLE_PREVIOUS_ADMINISTRATOR"));
+        var impersonating = new UsernamePasswordAuthenticationToken(
+                "member",
+                "password",
+                AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_PREVIOUS_ADMINISTRATOR"));
         handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating)).block();
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating))
+                .block();
         verify(renderer, times(2))
-            .render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
+                .render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
 
-        var member = new UsernamePasswordAuthenticationToken("member", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        var member = new UsernamePasswordAuthenticationToken(
+                "member", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated"));
         handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)).block();
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member))
+                .block();
         verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
 
         handler.handle(request).block();
         verify(renderer, times(2))
-            .render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
+                .render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
     }
 
     @Test
     void onlyAnonymousVisitorsReceiveCacheValidators() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
-        var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true, false, null,
-            "draft", "published", Instant.now(), true);
-        when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
+        var page = new PageApi.PageSummary(
+                "stable-id",
+                "about/company",
+                "Company",
+                "",
+                1L,
+                true,
+                false,
+                null,
+                "draft",
+                "published",
+                Instant.now(),
+                true);
+        when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
-            .thenReturn(RenderingResponse.create("test").build());
+                .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
         assertThat(handler.handle(request).block()).isInstanceOf(PageCacheResponse.class);
 
-        var admin = new UsernamePasswordAuthenticationToken("admin", "password",
-            AuthorityUtils.createAuthorityList("ROLE_super-role"));
+        var admin = new UsernamePasswordAuthenticationToken(
+                "admin", "password", AuthorityUtils.createAuthorityList("ROLE_super-role"));
         assertThat(handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block())
-            .isNotInstanceOf(PageCacheResponse.class);
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin))
+                        .block())
+                .isNotInstanceOf(PageCacheResponse.class);
 
-        var member = new UsernamePasswordAuthenticationToken("member", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        var member = new UsernamePasswordAuthenticationToken(
+                "member", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated"));
         assertThat(handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)).block())
-            .isNotInstanceOf(PageCacheResponse.class);
+                        .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member))
+                        .block())
+                .isNotInstanceOf(PageCacheResponse.class);
     }
 
     @Test
     void unpublishedAndMissingPagesFallThroughButBusinessPathsCanMatch() {
         when(service.findPublished("about")).thenReturn(Mono.empty());
         assertThat(router.route(request("/about")).block()).isNull();
-        var page = new PageApi.PageSummary("stable", "categories", "Categories", "", 1L, true, false, null,
-            "rev", "rev", Instant.now(), false);
+        var page = new PageApi.PageSummary(
+                "stable", "categories", "Categories", "", 1L, true, false, null, "rev", "rev", Instant.now(), false);
         when(service.findPublished("categories")).thenReturn(Mono.just(new PageApi.PageDetail(page, null)));
         assertThat(router.route(request("/categories")).block()).isNotNull();
         verifyNoInteractions(renderer);
@@ -152,9 +226,10 @@ class PageRouterTest {
     @Test
     void protectsCorePathsBehindAnApplicationBasePath() {
         for (var path : new String[] {"/site/console/settings", "/site/login", "/site/captcha/altcha"}) {
-            var request = ServerRequest.create(MockServerWebExchange.from(
-                MockServerHttpRequest.get(path).contextPath("/site").accept(MediaType.TEXT_HTML)),
-                HandlerStrategies.withDefaults().messageReaders());
+            var request = ServerRequest.create(
+                    MockServerWebExchange.from(
+                            MockServerHttpRequest.get(path).contextPath("/site").accept(MediaType.TEXT_HTML)),
+                    HandlerStrategies.withDefaults().messageReaders());
             assertThat(router.route(request).block()).as(path).isNull();
         }
         verifyNoInteractions(service, renderer);
@@ -164,97 +239,104 @@ class PageRouterTest {
     void restrictedPagesAreOnlyReadableByTheSuperAdministrator() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(List.of()), document)));
+                .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(List.of()), document)));
         when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
-            .thenReturn(RenderingResponse.create("test").build());
+                .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
         assertNotFound(handler.handle(request));
-        var member = new UsernamePasswordAuthenticationToken("member", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
-        assertNotFound(handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)));
+        var member = new UsernamePasswordAuthenticationToken(
+                "member", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertNotFound(handler.handle(request).contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)));
         verifyNoInteractions(renderer);
 
-        var admin = new UsernamePasswordAuthenticationToken("admin", "password",
-            AuthorityUtils.createAuthorityList("ROLE_super-role"));
+        var admin = new UsernamePasswordAuthenticationToken(
+                "admin", "password", AuthorityUtils.createAuthorityList("ROLE_super-role"));
         handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin)).block();
-        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            true, true);
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(admin))
+                .block();
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
     }
 
     @Test
     void restrictedPagesAllowListedUsersAndRoles() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         var members = List.of(
-            new ThemePage.PageMember(ThemePage.MemberType.USER, "alice"),
-            new ThemePage.PageMember(ThemePage.MemberType.ROLE, "editors"));
+                new ThemePage.PageMember(ThemePage.MemberType.USER, "alice"),
+                new ThemePage.PageMember(ThemePage.MemberType.ROLE, "editors"));
         when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(members), document)));
+                .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(members), document)));
         when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
-            .thenReturn(RenderingResponse.create("test").build());
+                .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
-        var alice = new UsernamePasswordAuthenticationToken("alice", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        var alice = new UsernamePasswordAuthenticationToken(
+                "alice", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated"));
         var aliceResponse = handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(alice)).block();
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(alice))
+                .block();
         assertThat(aliceResponse).isNotNull();
         assertThat(aliceResponse).isNotInstanceOf(PageCacheResponse.class);
-        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            false, true);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
 
-        var editor = new UsernamePasswordAuthenticationToken("bob", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_editors"));
+        var editor = new UsernamePasswordAuthenticationToken(
+                "bob", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_editors"));
         handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(editor)).block();
-        verify(renderer, times(2)).render(request, "stable-id", "about/company", true, document,
-            "Company", "", false, true);
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(editor))
+                .block();
+        verify(renderer, times(2))
+                .render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
 
-        var outsider = new UsernamePasswordAuthenticationToken("carol", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
-        assertNotFound(handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(outsider)));
-        verify(renderer, never()).render(request, "stable-id", "about/company", true, document,
-            "Company", "", true, true);
+        var outsider = new UsernamePasswordAuthenticationToken(
+                "carol", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertNotFound(
+                handler.handle(request).contextWrite(ReactiveSecurityContextHolder.withAuthentication(outsider)));
+        verify(renderer, never())
+                .render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
     }
 
     @Test
     void unrestrictedPagesStayPublicEvenWithMembers() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
-        var page = new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true,
-            false, List.of(new ThemePage.PageMember(ThemePage.MemberType.USER, "alice")), "draft",
-            "published", Instant.now(), true);
-        when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
+        var page = new PageApi.PageSummary(
+                "stable-id",
+                "about/company",
+                "Company",
+                "",
+                1L,
+                true,
+                false,
+                List.of(new ThemePage.PageMember(ThemePage.MemberType.USER, "alice")),
+                "draft",
+                "published",
+                Instant.now(),
+                true);
+        when(service.findPublished("about/company")).thenReturn(Mono.just(new PageApi.PageDetail(page, document)));
         when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
-            .thenReturn(RenderingResponse.create("test").build());
+                .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
         assertThat(handler.handle(request).block()).isInstanceOf(PageCacheResponse.class);
-        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            false, true);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", false, true);
     }
 
     @Test
     void restrictedPagesWithoutMembersRejectSignedInUsers() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
+                .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
-        var member = new UsernamePasswordAuthenticationToken("member", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
-        assertNotFound(handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)));
+        var member = new UsernamePasswordAuthenticationToken(
+                "member", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertNotFound(handler.handle(request).contextWrite(ReactiveSecurityContextHolder.withAuthentication(member)));
         assertNotFound(handler.handle(request));
         verifyNoInteractions(renderer);
     }
@@ -262,22 +344,19 @@ class PageRouterTest {
     @Test
     void malformedMemberKindsDoNotGrantAccess() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
-        var members = List.of(new ThemePage.PageMember(null, "editors"),
-            new ThemePage.PageMember(null, "alice"));
+        var members = List.of(new ThemePage.PageMember(null, "editors"), new ThemePage.PageMember(null, "alice"));
         when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(members), document)));
+                .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(members), document)));
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
-        var editor = new UsernamePasswordAuthenticationToken("bob", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_editors"));
-        assertNotFound(handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(editor)));
-        var alice = new UsernamePasswordAuthenticationToken("alice", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated"));
-        assertNotFound(handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(alice)));
+        var editor = new UsernamePasswordAuthenticationToken(
+                "bob", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_editors"));
+        assertNotFound(handler.handle(request).contextWrite(ReactiveSecurityContextHolder.withAuthentication(editor)));
+        var alice = new UsernamePasswordAuthenticationToken(
+                "alice", "password", AuthorityUtils.createAuthorityList("ROLE_authenticated"));
+        assertNotFound(handler.handle(request).contextWrite(ReactiveSecurityContextHolder.withAuthentication(alice)));
         verifyNoInteractions(renderer);
     }
 
@@ -285,15 +364,16 @@ class PageRouterTest {
     void restrictedPagesLookLikeMissingResources() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
+                .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
         assertThatThrownBy(() -> handler.handle(request).block())
-            .isInstanceOfSatisfying(NoResourceFoundException.class,
-                error -> assertThat(error.getBody().getDetail())
-                    .isEqualTo("No static resource about/company."));
+                .isInstanceOfSatisfying(
+                        NoResourceFoundException.class,
+                        error ->
+                                assertThat(error.getBody().getDetail()).isEqualTo("No static resource about/company."));
         verifyNoInteractions(renderer);
     }
 
@@ -301,36 +381,51 @@ class PageRouterTest {
     void impersonatingAdministratorsReadRestrictedPages() {
         var document = new PageDocument(2, "code", null, null, "<p>Company</p>", "");
         when(service.findPublished("about/company"))
-            .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
+                .thenReturn(Mono.just(new PageApi.PageDetail(restrictedPage(null), document)));
         when(renderer.render(any(), any(), any(), anyBoolean(), any(), any(), any(), anyBoolean(), anyBoolean()))
-            .thenReturn(RenderingResponse.create("test").build());
+                .thenReturn(RenderingResponse.create("test").build());
         var request = request("/about/company");
         var handler = router.route(request).block();
         assertThat(handler).isNotNull();
 
-        var impersonating = new UsernamePasswordAuthenticationToken("member", "password",
-            AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_PREVIOUS_ADMINISTRATOR"));
+        var impersonating = new UsernamePasswordAuthenticationToken(
+                "member",
+                "password",
+                AuthorityUtils.createAuthorityList("ROLE_authenticated", "ROLE_PREVIOUS_ADMINISTRATOR"));
         var response = handler.handle(request)
-            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating)).block();
+                .contextWrite(ReactiveSecurityContextHolder.withAuthentication(impersonating))
+                .block();
         assertThat(response).isNotNull();
         assertThat(response).isNotInstanceOf(PageCacheResponse.class);
-        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "",
-            true, true);
+        verify(renderer).render(request, "stable-id", "about/company", true, document, "Company", "", true, true);
     }
 
     private static PageApi.PageSummary restrictedPage(List<ThemePage.PageMember> members) {
-        return new PageApi.PageSummary("stable-id", "about/company", "Company", "", 1L, true, true,
-            members, "draft", "published", Instant.now(), true);
+        return new PageApi.PageSummary(
+                "stable-id",
+                "about/company",
+                "Company",
+                "",
+                1L,
+                true,
+                true,
+                members,
+                "draft",
+                "published",
+                Instant.now(),
+                true);
     }
 
     private static void assertNotFound(Mono<ServerResponse> response) {
-        assertThatThrownBy(response::block).isInstanceOf(ResponseStatusException.class)
-            .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
-                .isEqualTo(HttpStatus.NOT_FOUND));
+        assertThatThrownBy(response::block)
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND));
     }
 
     private static ServerRequest request(String path) {
-        return ServerRequest.create(MockServerWebExchange.from(MockServerHttpRequest.get(path)
-            .accept(MediaType.TEXT_HTML)), HandlerStrategies.withDefaults().messageReaders());
+        return ServerRequest.create(
+                MockServerWebExchange.from(MockServerHttpRequest.get(path).accept(MediaType.TEXT_HTML)),
+                HandlerStrategies.withDefaults().messageReaders());
     }
 }

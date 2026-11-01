@@ -33,19 +33,19 @@ public class PagePreviewStore {
     }
 
     public synchronized Ticket issue(PageApi.PageSummary page, String actor) {
-        entries.values().removeIf(entry -> !clock.instant().isBefore(entry.expiresAt())
-            || entry.name().equals(page.name()) && entry.actor().equals(actor));
+        entries.values()
+                .removeIf(entry -> !clock.instant().isBefore(entry.expiresAt())
+                        || entry.name().equals(page.name()) && entry.actor().equals(actor));
         if (entries.size() >= CAPACITY) {
-            entries.entrySet().stream().min(Comparator.comparing(item -> item.getValue()
-                .expiresAt()))
-                .ifPresent(item -> entries.remove(item.getKey()));
+            entries.entrySet().stream()
+                    .min(Comparator.comparing(item -> item.getValue().expiresAt()))
+                    .ifPresent(item -> entries.remove(item.getKey()));
         }
         var bytes = new byte[32];
         random.nextBytes(bytes);
         var token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
         var expiry = clock.instant().plus(TTL);
-        entries.put(hash(token), new Entry(page.name(), actor, page.version(),
-            page.draftRevision(), expiry));
+        entries.put(hash(token), new Entry(page.name(), actor, page.version(), page.draftRevision(), expiry));
         return new Ticket(token, expiry);
     }
 
@@ -67,8 +67,8 @@ public class PagePreviewStore {
 
     private static String hash(String value) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(value.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of()
+                    .formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException error) {
             throw new IllegalStateException(error);
         }
@@ -76,8 +76,10 @@ public class PagePreviewStore {
 
     public record Ticket(String token, Instant expiresAt) {
         @Override
-        public String toString() { return "PreviewTicket[redacted]"; }
+        public String toString() {
+            return "PreviewTicket[redacted]";
+        }
     }
 
-    record Entry(String name, String actor, Long version, String revision, Instant expiresAt) { }
+    record Entry(String name, String actor, Long version, String revision, Instant expiresAt) {}
 }

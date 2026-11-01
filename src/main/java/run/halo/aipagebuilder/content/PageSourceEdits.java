@@ -14,9 +14,7 @@ public final class PageSourceEdits {
     public PreparedEdit prepare(PageDocument base, String html, String css, String js) {
         var cssChanged = !css.equals(base.css());
         var changed = !html.equals(base.html()) || cssChanged || !js.equals(base.js());
-        var candidate = changed
-            ? new PageDocument(js.isEmpty() ? 1 : 2, "code", null, null, html, css, js)
-            : base;
+        var candidate = changed ? new PageDocument(js.isEmpty() ? 1 : 2, "code", null, null, html, css, js) : base;
         policy.validate(candidate);
         return new PreparedEdit(candidate, changed, cssChanged);
     }

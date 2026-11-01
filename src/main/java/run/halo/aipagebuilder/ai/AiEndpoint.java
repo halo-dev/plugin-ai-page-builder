@@ -32,23 +32,31 @@ public class AiEndpoint implements CustomEndpoint {
 
     @Override
     public RouterFunction<ServerResponse> endpoint() {
-        return route().GET("ai/status", this::status, operation -> operation
-            .operationId("GetAiPageBuilderAiStatus").tag("AiPageBuilderAiV1alpha1Console")
-            .description("Check for an enabled AI Foundation service; does not call a model")
-            .response(responseBuilder().implementation(AiStatus.class))).build();
+        return route().GET(
+                        "ai/status",
+                        this::status,
+                        operation -> operation
+                                .operationId("GetAiPageBuilderAiStatus")
+                                .tag("AiPageBuilderAiV1alpha1Console")
+                                .description("Check for an enabled AI Foundation service; does not call a model")
+                                .response(responseBuilder().implementation(AiStatus.class)))
+                .build();
     }
 
     private Mono<ServerResponse> status(ServerRequest request) {
         return PageAccess.superAdministrator()
-            .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN)))
-            .then(Mono.defer(() -> gateway.status().timeout(Duration.ofSeconds(5))
-                .onErrorReturn(new AiStatus(false, "AI Foundation 暂不可用。"))
-                .flatMap(status -> ServerResponse.ok().bodyValue(status))));
+                .switchIfEmpty(Mono.error(new ResponseStatusException(HttpStatus.FORBIDDEN)))
+                .then(Mono.defer(() -> gateway.status()
+                        .timeout(Duration.ofSeconds(5))
+                        .onErrorReturn(new AiStatus(false, "AI Foundation 暂不可用。"))
+                        .flatMap(status -> ServerResponse.ok().bodyValue(status))));
     }
 
     @Schema(name = "AiStatus")
     public record AiStatus(
-        @Schema(requiredMode = Schema.RequiredMode.REQUIRED) boolean available,
-        @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String message
-    ) { }
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+            boolean available,
+
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
+            String message) {}
 }

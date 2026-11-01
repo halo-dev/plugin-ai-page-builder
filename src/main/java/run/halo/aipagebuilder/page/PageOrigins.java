@@ -17,8 +17,8 @@ final class PageOrigins {
     }
 
     /**
-     * Canonical public origin used for public links. Prefers the configured external URL so
-     * visitors behind a reverse proxy see the address they actually use.
+     * Canonical public origin used for public links. Prefers the configured external URL so visitors behind a reverse
+     * proxy see the address they actually use.
      */
     String publicOrigin(ServerRequest request) {
         var external = externalOrigin(request);
@@ -37,7 +37,7 @@ final class PageOrigins {
             url = externalUrlSupplier.getURL(request.exchange().getRequest());
         } catch (RuntimeException error) {
             org.slf4j.LoggerFactory.getLogger(PageOrigins.class)
-                .debug("Unable to resolve the external URL; falling back to the request", error);
+                    .debug("Unable to resolve the external URL; falling back to the request", error);
         }
         if (url == null) return null;
         var base = checkedOrigin(url.getProtocol(), url.getAuthority());
@@ -53,8 +53,9 @@ final class PageOrigins {
 
     private static String requestOrigin(ServerRequest request) {
         var forwarded = request.headers().firstHeader("X-Forwarded-Proto");
-        var scheme = forwarded != null ? forwarded.split(",", 2)[0].trim()
-            : request.uri().getScheme();
+        var scheme = forwarded != null
+                ? forwarded.split(",", 2)[0].trim()
+                : request.uri().getScheme();
         if (scheme == null || scheme.isBlank()) scheme = "http";
         var authority = request.uri().getRawAuthority();
         if (authority == null) authority = request.headers().firstHeader("Host");

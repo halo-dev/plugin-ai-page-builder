@@ -1,11 +1,12 @@
 package run.halo.aipagebuilder.ai;
 
+import static org.assertj.core.api.Assertions.*;
+
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import run.halo.aifoundation.message.ModelMessage;
 import run.halo.aifoundation.tool.ToolDefinition;
-import static org.assertj.core.api.Assertions.*;
 
 class RunResourceBudgetTest {
     @Test
@@ -35,22 +36,28 @@ class RunResourceBudgetTest {
         assertThat(usage.outputTokens()).isEqualTo(30);
         assertThat(usage.missingUsageSteps()).isEqualTo(1);
         budget.usage(RunBudget.MAX_REPORTED_TOKENS, 0);
-        assertThatThrownBy(budget::nextStep).isInstanceOfSatisfying(AiGenerationException.class,
-            error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT));
+        assertThatThrownBy(budget::nextStep)
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT));
     }
 
     @Test
     void contextLimitIncludesSystemAndToolSchemasNotOnlyHistory() {
         var budget = new RunBudget();
-        var tool = ToolDefinition.builder().name("read")
-            .description("x".repeat(RunBudget.MAX_CONTEXT_BYTES / 2))
-            .inputSchema(Map.of("type", "object")).build();
+        var tool = ToolDefinition.builder()
+                .name("read")
+                .description("x".repeat(RunBudget.MAX_CONTEXT_BYTES / 2))
+                .inputSchema(Map.of("type", "object"))
+                .build();
         assertThatThrownBy(() -> budget.requireContextFits(ModelContextBudget.bytes(
-            "s".repeat(RunBudget.MAX_CONTEXT_BYTES / 2), List.of(ModelMessage.user("hello")),
-            List.of(tool)))).isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
-        assertThat(budget.snapshot("m", 0).maxContextBytes())
-            .isGreaterThan(RunBudget.MAX_CONTEXT_BYTES);
+                        "s".repeat(RunBudget.MAX_CONTEXT_BYTES / 2),
+                        List.of(ModelMessage.user("hello")),
+                        List.of(tool))))
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
+        assertThat(budget.snapshot("m", 0).maxContextBytes()).isGreaterThan(RunBudget.MAX_CONTEXT_BYTES);
     }
 
     @Test
@@ -63,15 +70,13 @@ class RunResourceBudgetTest {
         assertThat(budget.snapshot("m", 0).previewBytes()).isEqualTo(3);
         budget.requireContextFits(RunBudget.MAX_CONTEXT_BYTES);
         budget.requireContextFits(1);
-        assertThat(budget.snapshot("m", 0).maxContextBytes())
-            .isEqualTo(RunBudget.MAX_CONTEXT_BYTES);
+        assertThat(budget.snapshot("m", 0).maxContextBytes()).isEqualTo(RunBudget.MAX_CONTEXT_BYTES);
         assertThatThrownBy(() -> budget.requireContextFits(RunBudget.MAX_CONTEXT_BYTES + 1))
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason())
-                    .isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
         budget.requireContextFits(1);
-        assertThat(budget.snapshot("m", 0).maxContextBytes())
-            .isEqualTo(RunBudget.MAX_CONTEXT_BYTES + 1);
+        assertThat(budget.snapshot("m", 0).maxContextBytes()).isEqualTo(RunBudget.MAX_CONTEXT_BYTES + 1);
         assertThat(budget.exhausted()).isFalse();
     }
 
@@ -95,7 +100,7 @@ class RunResourceBudgetTest {
         assertThatThrownBy(calls::call).isInstanceOf(IllegalStateException.class);
         var bytes = new RunBudget();
         assertThatThrownBy(() -> bytes.consume("x".repeat(RunBudget.MAX_BYTES + 1)))
-            .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(IllegalStateException.class);
         var tokens = new RunBudget();
         tokens.usage(RunBudget.MAX_REPORTED_TOKENS, 0);
         for (var budget : List.of(calls, bytes, tokens)) {
@@ -112,8 +117,9 @@ class RunResourceBudgetTest {
         assertThat(budget.exhausted()).isFalse();
         assertThat(budget.tryContinuation(true)).isTrue();
         budget.usage(RunBudget.MAX_REPORTED_TOKENS, 0);
-        assertThatThrownBy(budget::nextStep).isInstanceOfSatisfying(AiGenerationException.class,
-            error -> assertThat(error.reason())
-                .isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT));
+        assertThatThrownBy(budget::nextStep)
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TOKEN_LIMIT));
     }
 }

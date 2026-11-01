@@ -57,8 +57,8 @@ final class PublicApiSchemaResolver {
         private final Map<String, Object> reachable = new LinkedHashMap<>();
 
         Resolution() {
-            mapper.setTypeFactory(mapper.getTypeFactory().withCache(
-                (LookupCache<Object, JavaType>) new LRUMap<Object, JavaType>(16, 200)));
+            mapper.setTypeFactory(mapper.getTypeFactory()
+                    .withCache((LookupCache<Object, JavaType>) new LRUMap<Object, JavaType>(16, 200)));
             context = new ModelConverterContextImpl(new LocalModelResolver()) {
                 private final Map<String, JavaType> modelTypes = new LinkedHashMap<>();
 
@@ -70,15 +70,18 @@ final class PublicApiSchemaResolver {
                 }
 
                 @Override
-                public void defineModel(String name, io.swagger.v3.oas.models.media.Schema model,
-                    AnnotatedType type, String previousName) {
+                public void defineModel(
+                        String name,
+                        io.swagger.v3.oas.models.media.Schema model,
+                        AnnotatedType type,
+                        String previousName) {
                     if (type != null && type.getType() != null) {
                         var javaType = mapper.constructType(type.getType());
                         var previous = modelTypes.putIfAbsent(name, javaType);
                         if (previous != null && !previous.equals(javaType)) {
                             throw new IllegalArgumentException("Conflicting API schema name '"
-                                + name + "': " + previous.toCanonical() + " and "
-                                + javaType.toCanonical());
+                                    + name + "': " + previous.toCanonical() + " and "
+                                    + javaType.toCanonical());
                         }
                     }
                     super.defineModel(name, model, type, previousName);
@@ -94,8 +97,10 @@ final class PublicApiSchemaResolver {
             }
 
             @Override
-            public io.swagger.v3.oas.models.media.Schema resolve(AnnotatedType annotatedType,
-                ModelConverterContext converterContext, Iterator<ModelConverter> chain) {
+            public io.swagger.v3.oas.models.media.Schema resolve(
+                    AnnotatedType annotatedType,
+                    ModelConverterContext converterContext,
+                    Iterator<ModelConverter> chain) {
                 // ModelResolver also recurses directly, bypassing ModelConverterContext.
                 var type = mapper.constructType(annotatedType.getType());
                 annotatedType.type(type);
@@ -113,7 +118,7 @@ final class PublicApiSchemaResolver {
                         if (member != null) {
                             var schema = member.getAnnotation(Schema.class);
                             if (schema != null && schema.hidden()
-                                || member.hasAnnotation(io.swagger.v3.oas.annotations.Hidden.class)) {
+                                    || member.hasAnnotation(io.swagger.v3.oas.annotations.Hidden.class)) {
                                 continue;
                             }
                             var memberAnnotations = member.getAllAnnotations();
@@ -127,16 +132,19 @@ final class PublicApiSchemaResolver {
                     if (type.isEnumType()) {
                         // Match Swagger: enabled fields take precedence, but methods include false.
                         var valueType = Arrays.stream(type.getRawClass().getDeclaredFields())
-                            .filter(field -> field.isAnnotationPresent(JsonValue.class)
-                                && field.getAnnotation(JsonValue.class).value())
-                            .map(java.lang.reflect.Field::getType).findFirst()
-                            .orElseGet(() -> ReflectionUtils
-                                .getAnnotatedMethods(type.getRawClass(), JsonValue.class).stream()
-                                .map(java.lang.reflect.Method::getReturnType).findFirst().orElse(null));
+                                .filter(field -> field.isAnnotationPresent(JsonValue.class)
+                                        && field.getAnnotation(JsonValue.class).value())
+                                .map(java.lang.reflect.Field::getType)
+                                .findFirst()
+                                .orElseGet(() ->
+                                        ReflectionUtils.getAnnotatedMethods(type.getRawClass(), JsonValue.class)
+                                                .stream()
+                                                .map(java.lang.reflect.Method::getReturnType)
+                                                .findFirst()
+                                                .orElse(null));
                         if (valueType != null && !safeGlobalType(valueType)) {
                             throw new IllegalArgumentException(
-                                "Cannot safely resolve API enum @JsonValue type: "
-                                    + valueType.getName());
+                                    "Cannot safely resolve API enum @JsonValue type: " + valueType.getName());
                         }
                     }
                 }
@@ -148,8 +156,7 @@ final class PublicApiSchemaResolver {
             if (annotation instanceof ArraySchema array) {
                 // ModelResolver has raw-Class and context-free paths for array implementations.
                 if (!safeGlobalType(array.schema().implementation())) {
-                    throw new IllegalArgumentException(
-                        "Cannot safely resolve API DTO @ArraySchema implementation");
+                    throw new IllegalArgumentException("Cannot safely resolve API DTO @ArraySchema implementation");
                 }
                 safeAnnotation(array.schema());
                 safeAnnotation(array.arraySchema());
@@ -160,19 +167,22 @@ final class PublicApiSchemaResolver {
                 }
             } else if (annotation instanceof Schema schema) {
                 // AnnotationsUtils resolves these Classes before consulting the local context.
-                if (!safeGlobalTypes(schema.not(), schema.additionalPropertiesSchema(),
-                    schema.contentSchema(), schema.propertyNames(), schema._if(), schema._else(),
-                    schema.then(), schema.unevaluatedProperties())
-                    || !safeGlobalTypes(schema.oneOf()) || !safeGlobalTypes(schema.anyOf())
-                    || !safeGlobalTypes(schema.allOf())
-                    || Arrays.stream(schema.dependentSchemas())
-                        .anyMatch(item -> !safeGlobalType(item.value()))
-                    || Arrays.stream(schema.patternProperties())
-                        .anyMatch(item -> !safeGlobalType(item.value()))
-                    || Arrays.stream(schema.properties())
-                        .anyMatch(item -> !safeGlobalType(item.value()))) {
-                    throw new IllegalArgumentException(
-                        "Cannot safely resolve API @Schema class-valued composition");
+                if (!safeGlobalTypes(
+                                schema.not(),
+                                schema.additionalPropertiesSchema(),
+                                schema.contentSchema(),
+                                schema.propertyNames(),
+                                schema._if(),
+                                schema._else(),
+                                schema.then(),
+                                schema.unevaluatedProperties())
+                        || !safeGlobalTypes(schema.oneOf())
+                        || !safeGlobalTypes(schema.anyOf())
+                        || !safeGlobalTypes(schema.allOf())
+                        || Arrays.stream(schema.dependentSchemas()).anyMatch(item -> !safeGlobalType(item.value()))
+                        || Arrays.stream(schema.patternProperties()).anyMatch(item -> !safeGlobalType(item.value()))
+                        || Arrays.stream(schema.properties()).anyMatch(item -> !safeGlobalType(item.value()))) {
+                    throw new IllegalArgumentException("Cannot safely resolve API @Schema class-valued composition");
                 }
             }
         }
@@ -183,8 +193,8 @@ final class PublicApiSchemaResolver {
 
         private boolean safeGlobalType(Class<?> type) {
             // Only bootstrap scalars may enter Swagger's raw-Class/global-cache shortcuts.
-            return type == Void.class || type.getClassLoader() == null
-                && PrimitiveType.fromType(mapper.constructType(type)) != null;
+            return type == Void.class
+                    || type.getClassLoader() == null && PrimitiveType.fromType(mapper.constructType(type)) != null;
         }
 
         Map<String, Object> resolve(Operation operation) {
@@ -204,8 +214,7 @@ final class PublicApiSchemaResolver {
                     } else {
                         warnings.add("Parameter location is unspecified: " + annotation.name());
                     }
-                    parameter.put("required", annotation.required()
-                        || annotation.in() == ParameterIn.PATH);
+                    parameter.put("required", annotation.required() || annotation.in() == ParameterIn.PATH);
                     text(parameter, "description", annotation.description());
                     if (annotation.deprecated()) {
                         parameter.put("deprecated", true);
@@ -234,17 +243,35 @@ final class PublicApiSchemaResolver {
                     text(parameter, "example", annotation.example());
                     examples(parameter, annotation.examples());
                 }
-                unsupported(annotation, Set.of("name", "in", "description", "required",
-                    "deprecated", "allowEmptyValue", "allowReserved", "style", "explode",
-                    "content", "schema", "array", "hidden", "example", "examples", "ref"));
+                unsupported(
+                        annotation,
+                        Set.of(
+                                "name",
+                                "in",
+                                "description",
+                                "required",
+                                "deprecated",
+                                "allowEmptyValue",
+                                "allowReserved",
+                                "style",
+                                "explode",
+                                "content",
+                                "schema",
+                                "array",
+                                "hidden",
+                                "example",
+                                "examples",
+                                "ref"));
                 parameters.add(parameter);
             }
             result.put("parameters", parameters);
             var body = operation.requestBody();
             if (!body.ref().isBlank()) {
                 result.put("requestBody", Map.of("$ref", body.ref()));
-            } else if (body.content().length > 0 || body.required()
-                || !body.description().isBlank() || body.useParameterTypeSchema()) {
+            } else if (body.content().length > 0
+                    || body.required()
+                    || !body.description().isBlank()
+                    || body.useParameterTypeSchema()) {
                 var requestBody = new LinkedHashMap<String, Object>();
                 requestBody.put("required", body.required());
                 text(requestBody, "description", body.description());
@@ -264,15 +291,25 @@ final class PublicApiSchemaResolver {
                     }
                 }
                 unsupported(annotation, Set.of("ref", "description", "content", "responseCode"));
-                var code = annotation.responseCode().isBlank() ? "default"
-                    : annotation.responseCode();
+                var code = annotation.responseCode().isBlank() ? "default" : annotation.responseCode();
                 if (responses.put(code, response) != null) {
                     warnings.add("Duplicate response code: " + code);
                 }
             }
             result.put("responses", responses);
-            unsupported(operation, Set.of("parameters", "requestBody", "responses", "method",
-                "tags", "summary", "description", "operationId", "deprecated", "hidden"));
+            unsupported(
+                    operation,
+                    Set.of(
+                            "parameters",
+                            "requestBody",
+                            "responses",
+                            "method",
+                            "tags",
+                            "summary",
+                            "description",
+                            "operationId",
+                            "deprecated",
+                            "hidden"));
             visit(result, 0, "operation");
             result.put("components", Map.of("schemas", reachable));
             if (!warnings.isEmpty()) {
@@ -309,8 +346,8 @@ final class PublicApiSchemaResolver {
                 for (var item : array.prefixItems()) {
                     safeAnnotation(item);
                 }
-                var result = json(AnnotationsUtils.getArraySchema(array, components, null,
-                    false, null, false, context).orElseThrow());
+                var result = json(AnnotationsUtils.getArraySchema(array, components, null, false, null, false, context)
+                        .orElseThrow());
                 var items = schema(array.schema());
                 if (!items.isEmpty()) {
                     result.put("items", items);
@@ -322,8 +359,9 @@ final class PublicApiSchemaResolver {
 
         private Map<String, Object> schema(Schema annotation) {
             safeAnnotation(annotation);
-            var explicit = AnnotationsUtils.getSchemaFromAnnotation(annotation, components,
-                null, false, null, context).map(this::json).orElseGet(LinkedHashMap::new);
+            var explicit = AnnotationsUtils.getSchemaFromAnnotation(annotation, components, null, false, null, context)
+                    .map(this::json)
+                    .orElseGet(LinkedHashMap::new);
             if (!annotation.ref().isBlank() || annotation.implementation() == Void.class) {
                 return normalize(explicit);
             }
@@ -331,14 +369,16 @@ final class PublicApiSchemaResolver {
             var type = mapper.constructType(annotation.implementation());
             var primitive = PrimitiveType.fromType(type);
             var model = primitive == null
-                ? context.resolve(new AnnotatedType(type).components(components).resolveAsRef(true))
-                : primitive.createProperty();
+                    ? context.resolve(
+                            new AnnotatedType(type).components(components).resolveAsRef(true))
+                    : primitive.createProperty();
             if (model == null) {
                 throw new IllegalArgumentException("Cannot resolve API schema: " + type);
             }
             var inferred = json(model);
-            if (!annotation.type().isBlank() && !"object".equals(annotation.type())
-                && !annotation.type().equals(inferred.get("type"))) {
+            if (!annotation.type().isBlank()
+                    && !"object".equals(annotation.type())
+                    && !annotation.type().equals(inferred.get("type"))) {
                 // An explicit primitive type must not inherit object properties or a model ref.
                 return normalize(explicit);
             }
@@ -362,8 +402,11 @@ final class PublicApiSchemaResolver {
                     schema.put("default", scalar(schema.get("default"), type.toString()));
                 }
                 if (schema.get("enum") instanceof List<?> values) {
-                    schema.put("enum", values.stream()
-                        .map(value -> scalar(value, type.toString())).toList());
+                    schema.put(
+                            "enum",
+                            values.stream()
+                                    .map(value -> scalar(value, type.toString()))
+                                    .toList());
                 }
             }
             return schema;
@@ -375,9 +418,10 @@ final class PublicApiSchemaResolver {
             }
             try {
                 var parsed = mapper.readTree(text);
-                if (parsed != null && ("integer".equals(type) && parsed.isIntegralNumber()
-                    || "number".equals(type) && parsed.isNumber()
-                    || "boolean".equals(type) && parsed.isBoolean())) {
+                if (parsed != null
+                        && ("integer".equals(type) && parsed.isIntegralNumber()
+                                || "number".equals(type) && parsed.isNumber()
+                                || "boolean".equals(type) && parsed.isBoolean())) {
                     return mapper.convertValue(parsed, Object.class);
                 }
             } catch (java.io.IOException ignored) {
@@ -387,8 +431,8 @@ final class PublicApiSchemaResolver {
             return value;
         }
 
-        private void examples(Map<String, Object> target,
-            io.swagger.v3.oas.annotations.media.ExampleObject[] annotations) {
+        private void examples(
+                Map<String, Object> target, io.swagger.v3.oas.annotations.media.ExampleObject[] annotations) {
             if (annotations.length == 0) {
                 return;
             }
@@ -398,37 +442,37 @@ final class PublicApiSchemaResolver {
                     reference(annotation.ref());
                 }
                 AnnotationsUtils.getExample(annotation)
-                    .ifPresent(example -> examples.put(annotation.name(), json(example)));
+                        .ifPresent(example -> examples.put(annotation.name(), json(example)));
             }
             target.put("examples", examples);
         }
 
         private Map<String, Object> json(Object value) {
-            return mapper.convertValue(value,
-                new TypeReference<LinkedHashMap<String, Object>>() { });
+            return mapper.convertValue(value, new TypeReference<LinkedHashMap<String, Object>>() {});
         }
 
         private void unsupported(Annotation annotation, Set<String> supported) {
             // Springdoc's functional builders implement annotations without annotationType().
-            Class<? extends Annotation> annotationType = switch (annotation) {
-                case Operation ignored -> Operation.class;
-                case io.swagger.v3.oas.annotations.Parameter ignored ->
-                    io.swagger.v3.oas.annotations.Parameter.class;
-                case io.swagger.v3.oas.annotations.parameters.RequestBody ignored ->
-                    io.swagger.v3.oas.annotations.parameters.RequestBody.class;
-                case io.swagger.v3.oas.annotations.responses.ApiResponse ignored ->
-                    io.swagger.v3.oas.annotations.responses.ApiResponse.class;
-                case Content ignored -> Content.class;
-                default -> annotation.annotationType();
-            };
+            Class<? extends Annotation> annotationType =
+                    switch (annotation) {
+                        case Operation ignored -> Operation.class;
+                        case io.swagger.v3.oas.annotations.Parameter ignored ->
+                            io.swagger.v3.oas.annotations.Parameter.class;
+                        case io.swagger.v3.oas.annotations.parameters.RequestBody ignored ->
+                            io.swagger.v3.oas.annotations.parameters.RequestBody.class;
+                        case io.swagger.v3.oas.annotations.responses.ApiResponse ignored ->
+                            io.swagger.v3.oas.annotations.responses.ApiResponse.class;
+                        case Content ignored -> Content.class;
+                        default -> annotation.annotationType();
+                    };
             for (var member : annotationType.getDeclaredMethods()) {
                 if (supported.contains(member.getName())) {
                     continue;
                 }
                 try {
                     if (!matchesDefault(member.getDefaultValue(), member.invoke(annotation))) {
-                        warnings.add("Unsupported annotation field: "
-                            + annotationType.getSimpleName() + "." + member.getName());
+                        warnings.add("Unsupported annotation field: " + annotationType.getSimpleName() + "."
+                                + member.getName());
                     }
                 } catch (ReflectiveOperationException exception) {
                     throw new IllegalArgumentException("Cannot inspect API annotation", exception);
@@ -436,8 +480,7 @@ final class PublicApiSchemaResolver {
             }
         }
 
-        private boolean matchesDefault(Object expected, Object actual)
-            throws ReflectiveOperationException {
+        private boolean matchesDefault(Object expected, Object actual) throws ReflectiveOperationException {
             // Builder annotations may use null for an unset member and identity-based equals.
             if (actual == null) {
                 return true;
@@ -478,10 +521,8 @@ final class PublicApiSchemaResolver {
                 }
                 for (var entry : map.entrySet()) {
                     // Example/default payloads are data, not schema references.
-                    if (Set.of("responses", "properties", "schemas", "content")
-                        .contains(position)
-                        || !Set.of("example", "examples", "default", "enum")
-                        .contains(entry.getKey())) {
+                    if (Set.of("responses", "properties", "schemas", "content").contains(position)
+                            || !Set.of("example", "examples", "default", "enum").contains(entry.getKey())) {
                         visit(entry.getValue(), depth + 1, entry.getKey().toString());
                     }
                 }
@@ -502,7 +543,9 @@ final class PublicApiSchemaResolver {
             if (reachable.containsKey(name)) {
                 return;
             }
-            var model = components.getSchemas() == null ? null : components.getSchemas().get(name);
+            var model = components.getSchemas() == null
+                    ? null
+                    : components.getSchemas().get(name);
             if (model == null) {
                 model = context.getDefinedModels().get(name);
             }

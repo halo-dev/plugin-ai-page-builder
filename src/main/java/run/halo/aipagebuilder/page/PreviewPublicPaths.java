@@ -6,11 +6,11 @@ import java.util.List;
 final class PreviewPublicPaths {
     static final List<String> ALL = List.of("/rss.xml", "/feed.xml", "/sitemap.xml", "/feed/");
 
-    private PreviewPublicPaths() {
-    }
+    private PreviewPublicPaths() {}
 
     static boolean matches(String path) {
-        return ALL.stream().anyMatch(publicPath -> publicPath.endsWith("/")
-            ? path.startsWith(publicPath) : path.equals(publicPath));
+        return ALL.stream()
+                .anyMatch(
+                        publicPath -> publicPath.endsWith("/") ? path.startsWith(publicPath) : path.equals(publicPath));
     }
 }

@@ -10,8 +10,12 @@ import run.halo.app.extension.GVK;
 /** A recoverable working copy, never a page revision or published content. */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@GVK(group = "aipagebuilder.halo.run", version = "v1alpha1", kind = "PageChatCheckpoint",
-    plural = "pagechatcheckpoints", singular = "pagechatcheckpoint")
+@GVK(
+        group = "aipagebuilder.halo.run",
+        version = "v1alpha1",
+        kind = "PageChatCheckpoint",
+        plural = "pagechatcheckpoints",
+        singular = "pagechatcheckpoint")
 public class PageChatCheckpoint extends AbstractExtension {
     private Spec spec;
 

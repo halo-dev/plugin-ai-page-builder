@@ -8,8 +8,7 @@ import java.util.HexFormat;
 
 /** SHA-256 of HTML then CSS, each prefixed by its four-byte big-endian UTF-8 byte length. */
 public final class DocumentHash {
-    private DocumentHash() {
-    }
+    private DocumentHash() {}
 
     public static String of(String html, String css) {
         return of(html, css, "");
@@ -21,7 +20,8 @@ public final class DocumentHash {
             var fields = js == null || js.isEmpty() ? new String[] {html, css} : new String[] {html, css, js};
             for (var text : fields) {
                 var bytes = text.getBytes(StandardCharsets.UTF_8);
-                digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+                digest.update(
+                        ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
                 digest.update(bytes);
             }
             return HexFormat.of().formatHex(digest.digest());

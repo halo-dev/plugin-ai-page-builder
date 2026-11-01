@@ -27,11 +27,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
-import run.halo.app.extension.ListOptions;
-import run.halo.app.extension.Metadata;
-import run.halo.app.extension.PageRequestImpl;
-import run.halo.app.extension.ReactiveExtensionClient;
-import run.halo.app.extension.router.selector.FieldSelector;
 import run.halo.aipagebuilder.Json;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
@@ -47,6 +42,11 @@ import run.halo.aipagebuilder.page.PageApi.RevisionDetail;
 import run.halo.aipagebuilder.page.PageApi.RevisionSummary;
 import run.halo.aipagebuilder.page.PageApi.SavePageRequest;
 import run.halo.aipagebuilder.theme.ThemeContextService;
+import run.halo.app.extension.ListOptions;
+import run.halo.app.extension.Metadata;
+import run.halo.app.extension.PageRequestImpl;
+import run.halo.app.extension.ReactiveExtensionClient;
+import run.halo.app.extension.router.selector.FieldSelector;
 
 @Service
 public class PageService {
@@ -57,8 +57,11 @@ public class PageService {
     private final Set<String> slugWrites = ConcurrentHashMap.newKeySet();
     private final Map<String, Object> pageWrites = new ConcurrentHashMap<>();
 
-    public PageService(ReactiveExtensionClient client, ContentPolicy contentPolicy,
-        PageImportReviewService importReviews, ThemeContextService themes) {
+    public PageService(
+            ReactiveExtensionClient client,
+            ContentPolicy contentPolicy,
+            PageImportReviewService importReviews,
+            ThemeContextService themes) {
         this.client = client;
         this.contentPolicy = contentPolicy;
         this.importReviews = importReviews;
@@ -71,8 +74,7 @@ public class PageService {
         }
         var selector = FieldSelector.of(isNull("metadata.deletionTimestamp"));
         if (keyword != null && !keyword.isBlank()) {
-            selector = selector.andQuery(or(contains("spec.title", keyword),
-                contains("spec.slug", keyword)));
+            selector = selector.andQuery(or(contains("spec.title", keyword), contains("spec.slug", keyword)));
         }
         if ("published".equals(status)) {
             selector = selector.andQuery(not(isNull("spec.publishedRevision")));
@@ -90,94 +92,144 @@ public class PageService {
             return Mono.error(badRequest("sort must be created"));
         }
         var options = new ListOptions().setFieldSelector(selector);
-        return client.listBy(ThemePage.class, options,
-                PageRequestImpl.of(page, size, Sort.by(order, Sort.Order.asc("metadata.name"))))
-            .flatMap(result -> withActiveTheme(theme -> Mono.just(new PageList(
-                result.getItems().stream().map(PageService::summary).toList(),
-                result.getTotal(), result.getPage(), result.getSize(), theme))));
+        return client.listBy(
+                        ThemePage.class,
+                        options,
+                        PageRequestImpl.of(page, size, Sort.by(order, Sort.Order.asc("metadata.name"))))
+                .flatMap(result -> withActiveTheme(theme -> Mono.just(new PageList(
+                        result.getItems().stream().map(PageService::summary).toList(),
+                        result.getTotal(),
+                        result.getPage(),
+                        result.getSize(),
+                        theme))));
     }
 
     public Mono<PageDetail> create(CreatePageRequest request, String actor) {
-        return createDocument(request.slug(),
-            new PageDocument(1, "code", "", Map.of(), "", ""),
-            request.title(), "", request.themeLayout(), false, null, actor);
+        return createDocument(
+                request.slug(),
+                new PageDocument(1, "code", "", Map.of(), "", ""),
+                request.title(),
+                "",
+                request.themeLayout(),
+                false,
+                null,
+                actor);
     }
 
-    public Mono<PageDetail> importPage(String reviewId, byte[] archive, String actor,
-        boolean confirmed) {
-        return importReviews.authorize(reviewId, archive, actor, confirmed)
-            .then(Mono.fromCallable(() -> PageArchive.read(archive))
-                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic()))
-            .flatMap(imported -> createDocument(null, imported.document(),
-                imported.title(), imported.description(), imported.themeLayout(),
-                imported.authorizeRequired(), null, actor));
+    public Mono<PageDetail> importPage(String reviewId, byte[] archive, String actor, boolean confirmed) {
+        return importReviews
+                .authorize(reviewId, archive, actor, confirmed)
+                .then(Mono.fromCallable(() -> PageArchive.read(archive))
+                        .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic()))
+                .flatMap(imported -> createDocument(
+                        null,
+                        imported.document(),
+                        imported.title(),
+                        imported.description(),
+                        imported.themeLayout(),
+                        imported.authorizeRequired(),
+                        null,
+                        actor));
     }
 
     public Mono<PageDetail> clonePage(String name, PageApi.ClonePageRequest request, String actor) {
-        return mutate(name, request.version(), source -> draftDetail(source).flatMap(detail -> {
-            var original = detail.document();
-            var copy = new PageDocument(original.js().isEmpty() ? 1 : 2, "code", null, null,
-                original.html(), original.css(), original.js());
-            return createDocument(request.slug(), copy, request.title(), source.getSpec().getDescription(),
-                source.getSpec().isThemeLayout(), source.getSpec().isAuthorizeRequired(),
-                source.getSpec().getMembers(), actor);
-        }));
+        return mutate(
+                name,
+                request.version(),
+                source -> draftDetail(source).flatMap(detail -> {
+                    var original = detail.document();
+                    var copy = new PageDocument(
+                            original.js().isEmpty() ? 1 : 2,
+                            "code",
+                            null,
+                            null,
+                            original.html(),
+                            original.css(),
+                            original.js());
+                    return createDocument(
+                            request.slug(),
+                            copy,
+                            request.title(),
+                            source.getSpec().getDescription(),
+                            source.getSpec().isThemeLayout(),
+                            source.getSpec().isAuthorizeRequired(),
+                            source.getSpec().getMembers(),
+                            actor);
+                }));
     }
 
-    private Mono<PageDetail> createDocument(String slug, PageDocument document, String title,
-        String description, Boolean themeLayout, boolean authorizeRequired,
-        List<ThemePage.PageMember> members, String actor) {
+    private Mono<PageDetail> createDocument(
+            String slug,
+            PageDocument document,
+            String title,
+            String description,
+            Boolean themeLayout,
+            boolean authorizeRequired,
+            List<ThemePage.PageMember> members,
+            String actor) {
         return Mono.defer(() -> {
-            // Normalize blank slugs so callers cannot persist an empty string.
-            final var normalizedSlug = slug == null || slug.isBlank() ? null : slug;
-            validateProperties(title, description);
-            contentPolicy.validate(document);
-            Supplier<Mono<PageDetail>> write = () -> withActiveTheme(theme -> {
-                var name = UUID.randomUUID().toString();
-                var revision = newRevision(name, document, "manual", actor, theme);
-                return client.create(revision).flatMap(created -> {
-                    var page = new ThemePage();
-                    var metadata = new Metadata();
-                    metadata.setName(name);
-                    metadata.setFinalizers(Set.of(PageReconciler.FINALIZER));
-                    page.setMetadata(metadata);
-                    page.setSpec(new ThemePage.Spec());
-                    page.getSpec().setTitle(title);
-                    page.getSpec().setDescription(description);
-                    page.getSpec().setSlug(normalizedSlug);
-                    page.getSpec().setThemeLayout(themeLayout == null || themeLayout);
-                    page.getSpec().setAuthorizeRequired(authorizeRequired);
-                    // Drop malformed entries before creating the page; a null member would
-                    // otherwise fail after the revision was already written.
-                    page.getSpec().setMembers(members == null ? null
-                        : members.stream().filter(Objects::nonNull).toList());
-                    applyDraft(page, created);
-                    return client.create(page).flux().single()
-                        .onErrorResume(error -> {
-                            if (error instanceof OptimisticLockingFailureException
-                                || error instanceof DuplicateKeyException) {
-                                return client.delete(created).onErrorResume(cleanupError -> Mono.empty())
-                                    .then(Mono.error(error));
-                            }
-                            // A lost create response can leave a live page referencing this revision.
-                            // Never destroy its source merely because the caller observed an error.
-                            return client.fetch(ThemePage.class, name)
-                                .filter(saved -> created.getMetadata().getName()
-                                    .equals(saved.getSpec().getDraftRevision()))
-                                .switchIfEmpty(Mono.error(error));
-                        })
-                        .map(saved -> detail(saved, created));
-                });
-            });
-            if (normalizedSlug == null) {
-                return write.get();
-            }
-            PagePaths.validate(normalizedSlug);
-            return writeSlug(normalizedSlug,
-                () -> checkSlugAvailable(normalizedSlug, null).then(Mono.defer(write::get)));
-        }).onErrorMap(DuplicateKeyException.class, error -> conflict("Slug already exists"))
-            .onErrorMap(OptimisticLockingFailureException.class,
-                error -> conflict("Slug already exists or page changed"));
+                    // Normalize blank slugs so callers cannot persist an empty string.
+                    final var normalizedSlug = slug == null || slug.isBlank() ? null : slug;
+                    validateProperties(title, description);
+                    contentPolicy.validate(document);
+                    Supplier<Mono<PageDetail>> write = () -> withActiveTheme(theme -> {
+                        var name = UUID.randomUUID().toString();
+                        var revision = newRevision(name, document, "manual", actor, theme);
+                        return client.create(revision).flatMap(created -> {
+                            var page = new ThemePage();
+                            var metadata = new Metadata();
+                            metadata.setName(name);
+                            metadata.setFinalizers(Set.of(PageReconciler.FINALIZER));
+                            page.setMetadata(metadata);
+                            page.setSpec(new ThemePage.Spec());
+                            page.getSpec().setTitle(title);
+                            page.getSpec().setDescription(description);
+                            page.getSpec().setSlug(normalizedSlug);
+                            page.getSpec().setThemeLayout(themeLayout == null || themeLayout);
+                            page.getSpec().setAuthorizeRequired(authorizeRequired);
+                            // Drop malformed entries before creating the page; a null member would
+                            // otherwise fail after the revision was already written.
+                            page.getSpec()
+                                    .setMembers(
+                                            members == null
+                                                    ? null
+                                                    : members.stream()
+                                                            .filter(Objects::nonNull)
+                                                            .toList());
+                            applyDraft(page, created);
+                            return client.create(page)
+                                    .flux()
+                                    .single()
+                                    .onErrorResume(error -> {
+                                        if (error instanceof OptimisticLockingFailureException
+                                                || error instanceof DuplicateKeyException) {
+                                            return client.delete(created)
+                                                    .onErrorResume(cleanupError -> Mono.empty())
+                                                    .then(Mono.error(error));
+                                        }
+                                        // A lost create response can leave a live page referencing this revision.
+                                        // Never destroy its source merely because the caller observed an error.
+                                        return client.fetch(ThemePage.class, name)
+                                                .filter(saved -> created.getMetadata()
+                                                        .getName()
+                                                        .equals(saved.getSpec().getDraftRevision()))
+                                                .switchIfEmpty(Mono.error(error));
+                                    })
+                                    .map(saved -> detail(saved, created));
+                        });
+                    });
+                    if (normalizedSlug == null) {
+                        return write.get();
+                    }
+                    PagePaths.validate(normalizedSlug);
+                    return writeSlug(
+                            normalizedSlug,
+                            () -> checkSlugAvailable(normalizedSlug, null).then(Mono.defer(write::get)));
+                })
+                .onErrorMap(DuplicateKeyException.class, error -> conflict("Slug already exists"))
+                .onErrorMap(
+                        OptimisticLockingFailureException.class,
+                        error -> conflict("Slug already exists or page changed"));
     }
 
     public Mono<PageDetail> get(String name) {
@@ -194,31 +246,46 @@ public class PageService {
                 if (Objects.equals(current.getSpec().getDocument(), request.document())) {
                     return Mono.just(detail(page, current));
                 }
-                return withActiveTheme(theme -> writeDraft(page, request.document(),
-                    request.source(), actor, null, theme));
+                return withActiveTheme(
+                        theme -> writeDraft(page, request.document(), request.source(), actor, null, theme));
             });
         });
     }
 
-    public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
-        String actor, String runId, String baseRevision, String slug, String title) {
+    public Mono<PageDetail> saveAi(
+            String name,
+            Long version,
+            PageDocument document,
+            String actor,
+            String runId,
+            String baseRevision,
+            String slug,
+            String title) {
         return saveAi(name, version, document, actor, runId, baseRevision, slug, title, null);
     }
 
-    public Mono<PageDetail> saveAi(String name, Long version, PageDocument document,
-        String actor, String runId, String baseRevision, String slug, String title,
-        String description) {
+    public Mono<PageDetail> saveAi(
+            String name,
+            Long version,
+            PageDocument document,
+            String actor,
+            String runId,
+            String baseRevision,
+            String slug,
+            String title,
+            String description) {
         return mutate(name, version, page -> {
             if (baseRevision != null && !baseRevision.equals(page.getSpec().getDraftRevision())) {
                 return Mono.error(conflict("Page changed; reload before saving"));
             }
             contentPolicy.validate(document);
             if (title != null || description != null) {
-                validateProperties(title == null ? page.getSpec().getTitle() : title,
-                    description == null ? page.getSpec().getDescription() : description);
+                validateProperties(
+                        title == null ? page.getSpec().getTitle() : title,
+                        description == null ? page.getSpec().getDescription() : description);
             }
-            if (slug != null && (page.getSpec().getSlug() != null
-                || page.getSpec().getPublishedRevision() != null)) {
+            if (slug != null
+                    && (page.getSpec().getSlug() != null || page.getSpec().getPublishedRevision() != null)) {
                 return Mono.error(conflict("已有访问路径或已发布的页面不能由 AI 更改路径"));
             }
             Supplier<Mono<PageDetail>> write = () -> {
@@ -231,19 +298,20 @@ public class PageService {
                     if (Objects.equals(current.getSpec().getDocument(), document)) {
                         return client.update(page).map(saved -> detail(saved, current));
                     }
-                    return withActiveTheme(theme -> writeDraft(page, document, "ai", actor,
-                        runId, theme));
+                    return withActiveTheme(theme -> writeDraft(page, document, "ai", actor, runId, theme));
                 });
             };
-            return slug == null ? write.get() : writeSlug(slug,
-                () -> checkSlugAvailable(slug, name).then(Mono.defer(write)));
+            return slug == null
+                    ? write.get()
+                    : writeSlug(slug, () -> checkSlugAvailable(slug, name).then(Mono.defer(write)));
         });
     }
 
     /** A pending run is committed only when its receipt reached the page CAS. */
     public Mono<ThemePage.AiCommit> committedAiRun(String name, String runId) {
-        return page(name).mapNotNull(page -> page.getSpec().getLastAiCommit())
-            .filter(commit -> runId.equals(commit.runId()));
+        return page(name)
+                .mapNotNull(page -> page.getSpec().getLastAiCommit())
+                .filter(commit -> runId.equals(commit.runId()));
     }
 
     public Mono<PageDetail> updateProperties(String name, PageApi.UpdatePagePropertiesRequest request) {
@@ -254,14 +322,16 @@ public class PageService {
             validateProperties(title, description);
             var slug = request.slug() == null ? spec.getSlug() : request.slug();
             var layout = request.themeLayout() == null ? spec.isThemeLayout() : request.themeLayout();
-            var authorizeRequired = request.authorizeRequired() == null
-                ? spec.isAuthorizeRequired() : request.authorizeRequired();
+            var authorizeRequired =
+                    request.authorizeRequired() == null ? spec.isAuthorizeRequired() : request.authorizeRequired();
             var members = request.members() == null ? spec.getMembers() : request.members();
             validateMembers(members);
-            if (Objects.equals(title, spec.getTitle()) && Objects.equals(description, spec.getDescription())
-                && Objects.equals(slug, spec.getSlug()) && layout == spec.isThemeLayout()
-                && authorizeRequired == spec.isAuthorizeRequired()
-                && Objects.equals(members, spec.getMembers())) {
+            if (Objects.equals(title, spec.getTitle())
+                    && Objects.equals(description, spec.getDescription())
+                    && Objects.equals(slug, spec.getSlug())
+                    && layout == spec.isThemeLayout()
+                    && authorizeRequired == spec.isAuthorizeRequired()
+                    && Objects.equals(members, spec.getMembers())) {
                 return draftDetail(page);
             }
             Supplier<Mono<PageDetail>> write = () -> {
@@ -274,8 +344,9 @@ public class PageService {
                 spec.setUpdatedAt(Instant.now());
                 return client.update(page).flatMap(this::draftDetail);
             };
-            return Objects.equals(slug, spec.getSlug()) ? write.get() : writeSlug(slug,
-                () -> checkSlugAvailable(slug, name).then(Mono.defer(write)));
+            return Objects.equals(slug, spec.getSlug())
+                    ? write.get()
+                    : writeSlug(slug, () -> checkSlugAvailable(slug, name).then(Mono.defer(write)));
         });
     }
 
@@ -296,8 +367,11 @@ public class PageService {
             throw badRequest("页面访问成员不能超过 100 个");
         }
         for (var member : members) {
-            if (member == null || member.kind() == null || member.name() == null
-                || member.name().isBlank() || member.name().length() > 200) {
+            if (member == null
+                    || member.kind() == null
+                    || member.name() == null
+                    || member.name().isBlank()
+                    || member.name().length() > 200) {
                 throw badRequest("页面访问成员须包含有效的类型和名称");
             }
         }
@@ -310,21 +384,26 @@ public class PageService {
     public Mono<PageDetail> publish(String name, Long version, String expectedDraftRevision) {
         return mutate(name, version, page -> {
             if (expectedDraftRevision != null
-                && !expectedDraftRevision.equals(page.getSpec().getDraftRevision())) {
+                    && !expectedDraftRevision.equals(page.getSpec().getDraftRevision())) {
                 return Mono.error(conflict("Page changed; reload before publishing"));
             }
             var slug = page.getSpec().getSlug();
             if (slug == null || slug.isBlank()) {
                 return Mono.error(badRequest("请先设置访问路径再发布"));
             }
-            return writeSlug(slug, () -> checkSlugAvailable(slug, name)
-                .then(revision(name, page.getSpec().getDraftRevision())).flatMap(draft -> {
-                    contentPolicy.validate(draft.getSpec().getDocument());
-                    page.getSpec().setPublishedRevision(draft.getMetadata().getName());
-                    page.getSpec().setPublishedTheme(draft.getSpec().getTheme());
-                    page.getSpec().setUpdatedAt(Instant.now());
-                    return client.update(page).map(saved -> detail(saved, draft));
-                }));
+            return writeSlug(
+                    slug,
+                    () -> checkSlugAvailable(slug, name)
+                            .then(revision(name, page.getSpec().getDraftRevision()))
+                            .flatMap(draft -> {
+                                contentPolicy.validate(draft.getSpec().getDocument());
+                                page.getSpec()
+                                        .setPublishedRevision(
+                                                draft.getMetadata().getName());
+                                page.getSpec().setPublishedTheme(draft.getSpec().getTheme());
+                                page.getSpec().setUpdatedAt(Instant.now());
+                                return client.update(page).map(saved -> detail(saved, draft));
+                            }));
         });
     }
 
@@ -338,12 +417,19 @@ public class PageService {
     }
 
     public Mono<PageDetail> restore(String name, RestoreRequest request, String actor) {
-        return mutate(name, request.version(), page ->
-            revision(name, request.revision()).flatMap(historical -> {
-                contentPolicy.validate(historical.getSpec().getDocument());
-                return writeDraft(page, historical.getSpec().getDocument(), "restore", actor,
-                    null, historical.getSpec().getTheme());
-            }));
+        return mutate(
+                name,
+                request.version(),
+                page -> revision(name, request.revision()).flatMap(historical -> {
+                    contentPolicy.validate(historical.getSpec().getDocument());
+                    return writeDraft(
+                            page,
+                            historical.getSpec().getDocument(),
+                            "restore",
+                            actor,
+                            null,
+                            historical.getSpec().getTheme());
+                }));
     }
 
     public Mono<Void> delete(String name, Long version) {
@@ -352,43 +438,63 @@ public class PageService {
             if (existing.getMetadata().getDeletionTimestamp() != null) {
                 return PageReconciler.cleanup(client, existing);
             }
-            return mutate(name, version, page -> client.fetch(
-                    run.halo.aipagebuilder.model.PageChatSession.class, name)
-                .flatMap(session -> session.getSpec().getActive() != null
-                    || session.getSpec().getDeletingSessionId() != null
-                    ? Mono.<Void>error(conflict("请先结束当前聊天操作再删除页面")) : Mono.empty())
-                .then(Mono.defer(() -> run.halo.app.extension.ExtensionUtil.addFinalizers(
-                    page.getMetadata(), Set.of(PageReconciler.FINALIZER))
-                    ? client.update(page) : Mono.just(page)))
-                .flatMap(client::delete)
-                .flatMap(deleted -> PageReconciler.cleanup(client, deleted)));
+            return mutate(
+                    name,
+                    version,
+                    page -> client.fetch(run.halo.aipagebuilder.model.PageChatSession.class, name)
+                            .flatMap(session -> session.getSpec().getActive() != null
+                                            || session.getSpec().getDeletingSessionId() != null
+                                    ? Mono.<Void>error(conflict("请先结束当前聊天操作再删除页面"))
+                                    : Mono.empty())
+                            .then(Mono.defer(() -> run.halo.app.extension.ExtensionUtil.addFinalizers(
+                                            page.getMetadata(), Set.of(PageReconciler.FINALIZER))
+                                    ? client.update(page)
+                                    : Mono.just(page)))
+                            .flatMap(client::delete)
+                            .flatMap(deleted -> PageReconciler.cleanup(client, deleted)));
         });
     }
 
     public Mono<List<RevisionSummary>> revisions(String name) {
-        return page(name).thenMany(client.listAll(ThemePageRevision.class, revisionOptions(name),
-                Sort.by(Sort.Order.desc("metadata.creationTimestamp"),
-                    Sort.Order.asc("metadata.name"))))
-            .map(PageService::revisionSummary).collectList();
+        return page(name)
+                .thenMany(client.listAll(
+                        ThemePageRevision.class,
+                        revisionOptions(name),
+                        Sort.by(Sort.Order.desc("metadata.creationTimestamp"), Sort.Order.asc("metadata.name"))))
+                .map(PageService::revisionSummary)
+                .collectList();
     }
 
-    public record RevisionList(List<RevisionSummary> items, long total, int page, int size) { }
+    public record RevisionList(List<RevisionSummary> items, long total, int page, int size) {}
 
     public Mono<RevisionList> revisions(String name, int page, int size) {
         if (page < 1 || size < 1 || size > 100) {
             return Mono.error(badRequest("page must be positive; size must be between 1 and 100"));
         }
-        return page(name).then(client.listBy(ThemePageRevision.class, revisionOptions(name),
-            PageRequestImpl.of(page, size, Sort.by(Sort.Order.desc("metadata.creationTimestamp"),
-                Sort.Order.asc("metadata.name")))))
-            .map(result -> new RevisionList(result.getItems().stream()
-                .map(PageService::revisionSummary).toList(), result.getTotal(), page, size));
+        return page(name)
+                .then(client.listBy(
+                        ThemePageRevision.class,
+                        revisionOptions(name),
+                        PageRequestImpl.of(
+                                page,
+                                size,
+                                Sort.by(
+                                        Sort.Order.desc("metadata.creationTimestamp"),
+                                        Sort.Order.asc("metadata.name")))))
+                .map(result -> new RevisionList(
+                        result.getItems().stream()
+                                .map(PageService::revisionSummary)
+                                .toList(),
+                        result.getTotal(),
+                        page,
+                        size));
     }
 
     public Mono<RevisionDetail> revisionDetail(String name, String revisionName) {
-        return page(name).then(revision(name, revisionName))
-            .map(revision -> new RevisionDetail(revisionSummary(revision),
-                revision.getSpec().getDocument()));
+        return page(name)
+                .then(revision(name, revisionName))
+                .map(revision -> new RevisionDetail(
+                        revisionSummary(revision), revision.getSpec().getDocument()));
     }
 
     public Mono<PageDetail> published(String slug) {
@@ -397,11 +503,12 @@ public class PageService {
 
     public Mono<PageDetail> findPublished(String slug) {
         return client.listAll(ThemePage.class, slugOptions(slug), Sort.unsorted())
-            .filter(page -> page.getMetadata().getDeletionTimestamp() == null
-                && page.getSpec().getPublishedRevision() != null)
-            .next()
-            .flatMap(page -> revision(page.getMetadata().getName(),
-                page.getSpec().getPublishedRevision()).map(revision -> detail(page, revision)));
+                .filter(page -> page.getMetadata().getDeletionTimestamp() == null
+                        && page.getSpec().getPublishedRevision() != null)
+                .next()
+                .flatMap(page -> revision(
+                                page.getMetadata().getName(), page.getSpec().getPublishedRevision())
+                        .map(revision -> detail(page, revision)));
     }
 
     private <T> Mono<T> writeSlug(String slug, Supplier<Mono<T>> write) {
@@ -412,10 +519,12 @@ public class PageService {
             }
             // Wait for onComplete (including transaction commit), not just the first value.
             // Once subscribed, cache keeps the write alive if the HTTP request is cancelled.
-            return Mono.defer(write).flux().collectList()
-                .doOnTerminate(() -> slugWrites.remove(slug))
-                .flatMap(values -> values.isEmpty() ? Mono.<T>empty() : Mono.just(values.getFirst()))
-                .cache();
+            return Mono.defer(write)
+                    .flux()
+                    .collectList()
+                    .doOnTerminate(() -> slugWrites.remove(slug))
+                    .flatMap(values -> values.isEmpty() ? Mono.<T>empty() : Mono.just(values.getFirst()))
+                    .cache();
         });
     }
 
@@ -423,10 +532,10 @@ public class PageService {
         return Mono.defer(() -> {
             PagePaths.validate(slug);
             return client.listAll(ThemePage.class, slugOptions(slug), Sort.unsorted())
-                .filter(page -> !Objects.equals(name, page.getMetadata().getName()))
-                .hasElements().flatMap(occupied -> occupied
-                    ? Mono.error(conflict("访问路径“" + slug + "”已被占用，请选择其他路径"))
-                    : Mono.empty());
+                    .filter(page -> !Objects.equals(name, page.getMetadata().getName()))
+                    .hasElements()
+                    .flatMap(occupied ->
+                            occupied ? Mono.error(conflict("访问路径“" + slug + "”已被占用，请选择其他路径")) : Mono.empty());
         });
     }
 
@@ -434,39 +543,45 @@ public class PageService {
         return new ListOptions().setFieldSelector(FieldSelector.of(equal("spec.slug", slug)));
     }
 
-    private Mono<PageDetail> writeDraft(ThemePage page, PageDocument document, String source,
-        String actor, String runId, ThemeRef theme) {
+    private Mono<PageDetail> writeDraft(
+            ThemePage page, PageDocument document, String source, String actor, String runId, ThemeRef theme) {
         var revision = newRevision(page.getMetadata().getName(), document, source, actor, theme);
         revision.getSpec().setParentRevision(page.getSpec().getDraftRevision());
         return client.create(revision).flatMap(created -> {
             applyDraft(page, created);
             if (runId != null) {
-                page.getSpec().setLastAiCommit(new ThemePage.AiCommit(
-                    runId, created.getMetadata().getName()));
+                page.getSpec()
+                        .setLastAiCommit(new ThemePage.AiCommit(
+                                runId, created.getMetadata().getName()));
             }
             return client.update(page)
-                .onErrorResume(OptimisticLockingFailureException.class, error ->
-                    // A rejected compare-and-set cannot have referenced this unique revision.
-                    client.delete(created).onErrorResume(cleanupError -> Mono.empty())
-                        .then(Mono.error(error)))
-                .map(saved -> detail(saved, created));
+                    .onErrorResume(
+                            OptimisticLockingFailureException.class,
+                            error ->
+                                    // A rejected compare-and-set cannot have referenced this unique revision.
+                                    client.delete(created)
+                                            .onErrorResume(cleanupError -> Mono.empty())
+                                            .then(Mono.error(error)))
+                    .map(saved -> detail(saved, created));
         });
     }
 
     private <T> Mono<T> mutate(String name, Long version, Function<ThemePage, Mono<T>> action) {
         return coordinate(name, () -> {
-            if (version == null) {
-                return Mono.error(badRequest("version is required"));
-            }
-            return page(name).flatMap(page -> {
-                if (!Objects.equals(version, page.getMetadata().getVersion())) {
-                    return Mono.error(conflict("Page changed; reload before saving"));
-                }
-                return action.apply(page);
-            });
-        }).onErrorMap(DuplicateKeyException.class, error -> conflict("Slug already exists"))
-            .onErrorMap(OptimisticLockingFailureException.class,
-                error -> conflict("Page changed; reload before saving"));
+                    if (version == null) {
+                        return Mono.error(badRequest("version is required"));
+                    }
+                    return page(name).flatMap(page -> {
+                        if (!Objects.equals(version, page.getMetadata().getVersion())) {
+                            return Mono.error(conflict("Page changed; reload before saving"));
+                        }
+                        return action.apply(page);
+                    });
+                })
+                .onErrorMap(DuplicateKeyException.class, error -> conflict("Slug already exists"))
+                .onErrorMap(
+                        OptimisticLockingFailureException.class,
+                        error -> conflict("Page changed; reload before saving"));
     }
 
     /** Prevent a chat reservation/creation from racing the page's deletion in this process. */
@@ -484,16 +599,17 @@ public class PageService {
             if (pageWrites.putIfAbsent(name, token) != null) {
                 return Mono.error(conflict("页面正在修改，请稍后重试"));
             }
-            return Mono.defer(action).doOnSuccess(value -> pageWrites.remove(name, token))
-                .doOnError(error -> pageWrites.remove(name, token))
-                .doFinally(signal -> pageWrites.remove(name, token));
+            return Mono.defer(action)
+                    .doOnSuccess(value -> pageWrites.remove(name, token))
+                    .doOnError(error -> pageWrites.remove(name, token))
+                    .doFinally(signal -> pageWrites.remove(name, token));
         });
     }
 
     private Mono<ThemePage> page(String name) {
         return client.fetch(ThemePage.class, name)
-            .filter(page -> page.getMetadata().getDeletionTimestamp() == null)
-            .switchIfEmpty(Mono.error(notFound()));
+                .filter(page -> page.getMetadata().getDeletionTimestamp() == null)
+                .switchIfEmpty(Mono.error(notFound()));
     }
 
     private Mono<ThemePageRevision> revision(String name, String reference) {
@@ -501,31 +617,32 @@ public class PageService {
             return Mono.error(notFound());
         }
         return client.fetch(ThemePageRevision.class, reference)
-            .filter(revision -> revision.getMetadata().getDeletionTimestamp() == null
-                && name.equals(revision.getSpec().getPageName()))
-            .switchIfEmpty(Mono.error(notFound()));
+                .filter(revision -> revision.getMetadata().getDeletionTimestamp() == null
+                        && name.equals(revision.getSpec().getPageName()))
+                .switchIfEmpty(Mono.error(notFound()));
     }
 
     private Mono<PageDetail> draftDetail(ThemePage page) {
         return revision(page.getMetadata().getName(), page.getSpec().getDraftRevision())
-            .map(revision -> detail(page, revision));
+                .map(revision -> detail(page, revision));
     }
 
     private static ListOptions revisionOptions(String name) {
-        return new ListOptions().setFieldSelector(FieldSelector.of(equal("spec.pageName", name))
-            .andQuery(isNull("metadata.deletionTimestamp")));
+        return new ListOptions()
+                .setFieldSelector(
+                        FieldSelector.of(equal("spec.pageName", name)).andQuery(isNull("metadata.deletionTimestamp")));
     }
 
     /** Theme lookup is advisory: a missing or unreadable theme never blocks the write. */
     private <T> Mono<T> withActiveTheme(Function<ThemeRef, Mono<T>> action) {
         return themes.activeThemeIdentity()
-            .map(Optional::of)
-            .defaultIfEmpty(Optional.empty())
-            .flatMap(theme -> action.apply(theme.orElse(null)));
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(theme -> action.apply(theme.orElse(null)));
     }
 
-    private static ThemePageRevision newRevision(String name, PageDocument document, String source,
-        String actor, ThemeRef theme) {
+    private static ThemePageRevision newRevision(
+            String name, PageDocument document, String source, String actor, ThemeRef theme) {
         var revision = new ThemePageRevision();
         var metadata = new Metadata();
         metadata.setName(UUID.randomUUID().toString());
@@ -545,8 +662,8 @@ public class PageService {
 
     private static String sha256(String value) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(value.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of()
+                    .formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
@@ -558,26 +675,39 @@ public class PageService {
     }
 
     private static PageDetail detail(ThemePage page, ThemePageRevision revision) {
-        return new PageDetail(summary(page), revision.getSpec().getDocument(),
-            revision.getSpec().getTheme());
+        return new PageDetail(
+                summary(page),
+                revision.getSpec().getDocument(),
+                revision.getSpec().getTheme());
     }
 
     private static PageSummary summary(ThemePage page) {
         var spec = page.getSpec();
         var name = page.getMetadata().getName();
-        return new PageSummary(name, spec.getSlug(), spec.getTitle(), spec.getDescription(),
-            page.getMetadata().getVersion(), page.getSpec().isThemeLayout(),
-            spec.isAuthorizeRequired(), spec.getMembers(), spec.getDraftRevision(),
-            spec.getPublishedRevision(),
-            spec.getUpdatedAt(), !Objects.equals(spec.getDraftRevision(), spec.getPublishedRevision()),
-            spec.getPublishedTheme());
+        return new PageSummary(
+                name,
+                spec.getSlug(),
+                spec.getTitle(),
+                spec.getDescription(),
+                page.getMetadata().getVersion(),
+                page.getSpec().isThemeLayout(),
+                spec.isAuthorizeRequired(),
+                spec.getMembers(),
+                spec.getDraftRevision(),
+                spec.getPublishedRevision(),
+                spec.getUpdatedAt(),
+                !Objects.equals(spec.getDraftRevision(), spec.getPublishedRevision()),
+                spec.getPublishedTheme());
     }
 
     private static RevisionSummary revisionSummary(ThemePageRevision revision) {
-        return new RevisionSummary(revision.getMetadata().getName(),
-            revision.getMetadata().getCreationTimestamp(), revision.getSpec().getCreatedBy(),
-            revision.getSpec().getSource(),
-            revision.getSpec().getParentRevision(), revision.getSpec().getTheme());
+        return new RevisionSummary(
+                revision.getMetadata().getName(),
+                revision.getMetadata().getCreationTimestamp(),
+                revision.getSpec().getCreatedBy(),
+                revision.getSpec().getSource(),
+                revision.getSpec().getParentRevision(),
+                revision.getSpec().getTheme());
     }
 
     private static ResponseStatusException badRequest(String reason) {

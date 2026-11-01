@@ -11,9 +11,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import run.halo.aifoundation.part.PartType;
-import run.halo.aipagebuilder.Json;
-import run.halo.aipagebuilder.content.ContentPolicy;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import run.halo.aifoundation.AiModelService;
@@ -24,7 +21,10 @@ import run.halo.aifoundation.chat.LanguageModel;
 import run.halo.aifoundation.chat.StreamTextResult;
 import run.halo.aifoundation.exception.DefaultModelNotConfiguredException;
 import run.halo.aifoundation.exception.StructuredOutputValidationException;
+import run.halo.aifoundation.part.PartType;
 import run.halo.aifoundation.part.TextStreamPart;
+import run.halo.aipagebuilder.Json;
+import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.app.plugin.extensionpoint.ExtensionGetter;
 
 class FoundationBridgeTest {
@@ -36,7 +36,7 @@ class FoundationBridgeTest {
     @Test
     void resolvesEnabledServiceForEveryCallIncludingReenable() {
         when(extensions.getEnabledExtension(AiModelService.class))
-            .thenReturn(Mono.just(service), Mono.empty(), Mono.just(service));
+                .thenReturn(Mono.just(service), Mono.empty(), Mono.just(service));
         assertThat(bridge.available().block()).isTrue();
         assertThat(bridge.available().block()).isFalse();
         assertThat(bridge.available().block()).isTrue();
@@ -51,10 +51,23 @@ class FoundationBridgeTest {
             captured.set(invocation.getArgument(0));
             var result = new GenerateTextResult();
             result.setFinishReason(FinishReason.STOP);
-            result.setOutput(java.util.Map.of("verdict", "SUSPICIOUS", "summary", "发现外部请求",
-                "findings", java.util.List.of(java.util.Map.of("severity", "HIGH",
-                    "category", "DATA_EXFILTRATION", "file", "script.js",
-                    "evidence", "fetch('https://example.com')", "explanation", "向外部发送数据"))));
+            result.setOutput(java.util.Map.of(
+                    "verdict",
+                    "SUSPICIOUS",
+                    "summary",
+                    "发现外部请求",
+                    "findings",
+                    java.util.List.of(java.util.Map.of(
+                            "severity",
+                            "HIGH",
+                            "category",
+                            "DATA_EXFILTRATION",
+                            "file",
+                            "script.js",
+                            "evidence",
+                            "fetch('https://example.com')",
+                            "explanation",
+                            "向外部发送数据"))));
             return Mono.just(result);
         });
 
@@ -81,8 +94,9 @@ class FoundationBridgeTest {
         when(service.languageModel("model-a")).thenReturn(Mono.empty());
 
         assertThatThrownBy(() -> bridge.review("model-a", "system", "prompt").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.UNAVAILABLE));
 
         org.mockito.Mockito.verify(service).languageModel("model-a");
         org.mockito.Mockito.verify(service, never()).languageModel();
@@ -95,41 +109,45 @@ class FoundationBridgeTest {
         when(model.generateText(any(GenerateTextRequest.class))).thenAnswer(invocation -> {
             var result = new GenerateTextResult();
             result.setFinishReason(FinishReason.LENGTH);
-            result.setOutput(java.util.Map.of("verdict", "SAFE", "summary", "",
-                "findings", java.util.List.of()));
+            result.setOutput(java.util.Map.of("verdict", "SAFE", "summary", "", "findings", java.util.List.of()));
             return Mono.just(result);
         });
         assertThatThrownBy(() -> bridge.review("s", "p").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.INVALID_OUTPUT));
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.INVALID_OUTPUT));
 
-        when(model.generateText(any(GenerateTextRequest.class))).thenReturn(Mono.error(
-            new StructuredOutputValidationException("private-output")));
+        when(model.generateText(any(GenerateTextRequest.class)))
+                .thenReturn(Mono.error(new StructuredOutputValidationException("private-output")));
         assertThatThrownBy(() -> bridge.review("s", "p").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.INVALID_OUTPUT))
-            .hasMessageNotContaining("private-output");
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.INVALID_OUTPUT))
+                .hasMessageNotContaining("private-output");
 
-        when(model.generateText(any(GenerateTextRequest.class))).thenReturn(Mono.error(
-            new DefaultModelNotConfiguredException("private-provider")));
+        when(model.generateText(any(GenerateTextRequest.class)))
+                .thenReturn(Mono.error(new DefaultModelNotConfiguredException("private-provider")));
         assertThatThrownBy(() -> bridge.review("s", "p").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.UNAVAILABLE))
-            .hasMessageNotContaining("private-provider");
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.UNAVAILABLE))
+                .hasMessageNotContaining("private-provider");
     }
 
     @Test
     void reviewRequiresAnEnabledServiceAndDefaultModel() {
         when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.empty());
         assertThatThrownBy(() -> bridge.review("s", "p").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.UNAVAILABLE));
 
         when(extensions.getEnabledExtension(AiModelService.class)).thenReturn(Mono.just(service));
         when(service.languageModel()).thenReturn(Mono.empty());
         assertThatThrownBy(() -> bridge.review("s", "p").block())
-            .isInstanceOfSatisfying(AiReviewException.class, error -> assertThat(error.reason())
-                .isEqualTo(AiReviewException.Reason.UNAVAILABLE));
+                .isInstanceOfSatisfying(
+                        AiReviewException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiReviewException.Reason.UNAVAILABLE));
     }
 
     @Test
@@ -138,76 +156,113 @@ class FoundationBridgeTest {
         when(service.languageModel()).thenReturn(Mono.just(model));
         when(model.generateText(any(GenerateTextRequest.class))).thenReturn(Mono.never());
         reactor.test.StepVerifier.withVirtualTime(() -> bridge.review("s", "p"))
-            .expectSubscription().thenAwait(java.time.Duration.ofSeconds(120))
-            .expectErrorSatisfies(error -> assertThat(error).isInstanceOfSatisfying(
-                AiReviewException.class, known -> assertThat(known.reason())
-                    .isEqualTo(AiReviewException.Reason.TIMEOUT)))
-            .verify(java.time.Duration.ofSeconds(5));
+                .expectSubscription()
+                .thenAwait(java.time.Duration.ofSeconds(120))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOfSatisfying(
+                                AiReviewException.class,
+                                known -> assertThat(known.reason()).isEqualTo(AiReviewException.Reason.TIMEOUT)))
+                .verify(java.time.Duration.ofSeconds(5));
     }
 
     @Test
     void chatUsesServerToolsAndSdkChunksButWithholdsFinalFinish() {
-        var request = setup(Flux.just(TextStreamPart.textDelta("t", "done"),
-            TextStreamPart.finish(FinishReason.STOP, "stop", null)));
-        var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
-            null, null, "<p>old</p>", ""), new ContentPolicy());
-        var chunks = bridge.chat("model", java.util.List.of(), "change", copy).collectList().block();
+        var request = setup(Flux.just(
+                TextStreamPart.textDelta("t", "done"), TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var copy = new PageWorkingCopy(
+                new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null, "<p>old</p>", ""),
+                new ContentPolicy());
+        var chunks = bridge.chat("model", java.util.List.of(), "change", copy)
+                .collectList()
+                .block();
         assertThat(chunks).extracting(value -> value.get("type")).containsExactly("text-delta");
-        assertThat(request.get().getTools()).extracting(tool -> tool.getName())
-            .containsExactly("get_theme_context", "read_current_page", "set_page_slug", "update_page_title", "update_page_description", "rename_session", "patch_current_page", "update_current_page",
-                "ask_user", "list_theme_files", "read_theme_file", "search_theme_file", "list_posts", "list_single_pages",
-                "list_ai_pages", "read_ai_page", "get_site_profile", "get_navigation", "read_content", "search_attachments",
-                "fetch_webpage", "search_public_apis", "get_public_api");
-        assertThat(request.get().getTools()).allSatisfy(tool -> assertThat(tool.getExecutor()).isNotNull());
+        assertThat(request.get().getTools())
+                .extracting(tool -> tool.getName())
+                .containsExactly(
+                        "get_theme_context",
+                        "read_current_page",
+                        "set_page_slug",
+                        "update_page_title",
+                        "update_page_description",
+                        "rename_session",
+                        "patch_current_page",
+                        "update_current_page",
+                        "ask_user",
+                        "list_theme_files",
+                        "read_theme_file",
+                        "search_theme_file",
+                        "list_posts",
+                        "list_single_pages",
+                        "list_ai_pages",
+                        "read_ai_page",
+                        "get_site_profile",
+                        "get_navigation",
+                        "read_content",
+                        "search_attachments",
+                        "fetch_webpage",
+                        "search_public_apis",
+                        "get_public_api");
+        assertThat(request.get().getTools())
+                .allSatisfy(tool -> assertThat(tool.getExecutor()).isNotNull());
         assertThat(request.get().getStopWhen()).isNotNull();
         assertThat(request.get().getMaxRetries()).isZero();
         setup(Flux.just(TextStreamPart.finish(FinishReason.TOOL_CALLS, "tool_calls", null)));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy).blockLast())
-            .isInstanceOf(AiGenerationException.class);
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy)
+                        .blockLast())
+                .isInstanceOf(AiGenerationException.class);
         setup(Flux.empty());
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy).blockLast())
-            .isInstanceOf(AiGenerationException.class);
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy)
+                        .blockLast())
+                .isInstanceOf(AiGenerationException.class);
     }
 
     @Test
     void givesResumedTextAndReasoningSegmentsNewIds() {
         setup(Flux.just(
-            TextStreamPart.textStart("t"), TextStreamPart.textDelta("t", "先看页面"),
-            TextStreamPart.textEnd("t"),
-            TextStreamPart.toolInputStart("in-1", "call-1", "read_current_page"),
-            TextStreamPart.textStart("t"), TextStreamPart.textDelta("t", "再改标题"),
-            TextStreamPart.textEnd("t"),
-            TextStreamPart.reasoningStart("r"),
-            TextStreamPart.reasoningDelta("r", "第一段", java.util.Map.of()),
-            TextStreamPart.reasoningEnd("r"),
-            TextStreamPart.textStart("t2"), TextStreamPart.textDelta("t2", "回答"),
-            TextStreamPart.textEnd("t2"),
-            TextStreamPart.reasoningStart("r"),
-            TextStreamPart.reasoningDelta("r", "第二段", java.util.Map.of()),
-            TextStreamPart.reasoningEnd("r"),
-            TextStreamPart.finish(FinishReason.STOP, "stop", null)));
-        var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
-            null, null, "<p>old</p>", ""), new ContentPolicy());
-        var chunks = bridge.chat("model", java.util.List.of(), "change", copy).collectList().block();
+                TextStreamPart.textStart("t"),
+                TextStreamPart.textDelta("t", "先看页面"),
+                TextStreamPart.textEnd("t"),
+                TextStreamPart.toolInputStart("in-1", "call-1", "read_current_page"),
+                TextStreamPart.textStart("t"),
+                TextStreamPart.textDelta("t", "再改标题"),
+                TextStreamPart.textEnd("t"),
+                TextStreamPart.reasoningStart("r"),
+                TextStreamPart.reasoningDelta("r", "第一段", java.util.Map.of()),
+                TextStreamPart.reasoningEnd("r"),
+                TextStreamPart.textStart("t2"),
+                TextStreamPart.textDelta("t2", "回答"),
+                TextStreamPart.textEnd("t2"),
+                TextStreamPart.reasoningStart("r"),
+                TextStreamPart.reasoningDelta("r", "第二段", java.util.Map.of()),
+                TextStreamPart.reasoningEnd("r"),
+                TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var copy = new PageWorkingCopy(
+                new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null, "<p>old</p>", ""),
+                new ContentPolicy());
+        var chunks = bridge.chat("model", java.util.List.of(), "change", copy)
+                .collectList()
+                .block();
         var textStarts = ids(chunks, "text-start");
         assertThat(textStarts).hasSize(3).doesNotHaveDuplicates();
-        assertThat(textStarts.get(1)).isNotEqualTo(textStarts.get(0))
-            .startsWith(textStarts.get(0));
+        assertThat(textStarts.get(1)).isNotEqualTo(textStarts.get(0)).startsWith(textStarts.get(0));
         assertThat(ids(chunks, "text-delta")).containsExactlyElementsOf(textStarts);
         var reasoningStarts = ids(chunks, "reasoning-start");
         assertThat(reasoningStarts).hasSize(2).doesNotHaveDuplicates();
-        assertThat(reasoningStarts.get(1)).isNotEqualTo(reasoningStarts.get(0))
-            .startsWith(reasoningStarts.get(0));
+        assertThat(reasoningStarts.get(1)).isNotEqualTo(reasoningStarts.get(0)).startsWith(reasoningStarts.get(0));
         assertThat(ids(chunks, "reasoning-delta")).containsExactlyElementsOf(reasoningStarts);
         assertThat((String) chunks.stream()
-            .filter(value -> "tool-input-start".equals(value.get("type"))).findFirst().orElseThrow()
-            .get("toolCallId")).startsWith("attempt-");
+                        .filter(value -> "tool-input-start".equals(value.get("type")))
+                        .findFirst()
+                        .orElseThrow()
+                        .get("toolCallId"))
+                .startsWith("attempt-");
     }
 
-    private static java.util.List<String> ids(java.util.List<java.util.Map<String, Object>> chunks,
-        String type) {
-        return chunks.stream().filter(value -> type.equals(value.get("type")))
-            .map(value -> (String) value.get("id")).toList();
+    private static java.util.List<String> ids(java.util.List<java.util.Map<String, Object>> chunks, String type) {
+        return chunks.stream()
+                .filter(value -> type.equals(value.get("type")))
+                .map(value -> (String) value.get("id"))
+                .toList();
     }
 
     @Test
@@ -216,15 +271,19 @@ class FoundationBridgeTest {
         var copy = copy();
         bridge.chat("model", java.util.List.of(), "公司介绍页", copy).blockLast();
         var tool = captured.get().getTools().stream()
-            .filter(item -> "set_page_slug".equals(item.getName())).findFirst().orElseThrow();
+                .filter(item -> "set_page_slug".equals(item.getName()))
+                .findFirst()
+                .orElseThrow();
         var stored = reactor.core.publisher.Sinks.<Void>empty();
         copy.checkpoint(stored::asMono);
-        var result = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
-            .input(java.util.Map.of("slug", "company/about")).build()).toFuture();
+        var result = tool.getExecutor()
+                .execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                        .input(java.util.Map.of("slug", "company/about"))
+                        .build())
+                .toFuture();
         assertThat(result).isNotDone();
         stored.tryEmitEmpty();
-        assertThat(result.join()).isEqualTo(java.util.Map.of("valid", true, "staged", true,
-            "slug", "company/about"));
+        assertThat(result.join()).isEqualTo(java.util.Map.of("valid", true, "staged", true, "slug", "company/about"));
         assertThat(copy.slug()).isEqualTo("company/about");
         assertThat(captured.get().getSystem()).contains("canSetSlug=true", "never use random");
     }
@@ -233,18 +292,21 @@ class FoundationBridgeTest {
     void executesSessionRenameToolWithTheBoundHandler() {
         var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
         var copy = copy();
-        copy.sessionRename(title -> Mono.just(java.util.Map.of("valid", true, "renamed", true,
-            "title", title)));
+        copy.sessionRename(title -> Mono.just(java.util.Map.of("valid", true, "renamed", true, "title", title)));
         bridge.chat("model", java.util.List.of(), "公司介绍页", copy).blockLast();
         var tool = captured.get().getTools().stream()
-            .filter(item -> "rename_session".equals(item.getName())).findFirst().orElseThrow();
-        var result = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
-            .input(java.util.Map.of("title", " 公司介绍页 ")).build()).block();
-        assertThat(result).isEqualTo(java.util.Map.of("valid", true, "renamed", true,
-            "title", "公司介绍页"));
+                .filter(item -> "rename_session".equals(item.getName()))
+                .findFirst()
+                .orElseThrow();
+        var result = tool.getExecutor()
+                .execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                        .input(java.util.Map.of("title", " 公司介绍页 "))
+                        .build())
+                .block();
+        assertThat(result).isEqualTo(java.util.Map.of("valid", true, "renamed", true, "title", "公司介绍页"));
         assertThat(copy.summaries()).extracting(ChatApi.Tool::name).contains("rename_session");
         assertThat(captured.get().getSystem())
-            .contains("Use rename_session on the first user turn", "routine follow-up edits");
+                .contains("Use rename_session on the first user turn", "routine follow-up edits");
     }
 
     @Test
@@ -253,11 +315,15 @@ class FoundationBridgeTest {
         var copy = copy();
         bridge.chat("model", java.util.List.of(), "change", copy).blockLast();
         var tool = captured.get().getTools().stream()
-            .filter(item -> "rename_session".equals(item.getName())).findFirst().orElseThrow();
-        var result = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
-            .input(java.util.Map.of("title", "   ")).build()).block();
-        assertThat(result).isEqualTo(java.util.Map.of("valid", false, "renamed", false,
-            "error", "会话名称需要 1–100 字符"));
+                .filter(item -> "rename_session".equals(item.getName()))
+                .findFirst()
+                .orElseThrow();
+        var result = tool.getExecutor()
+                .execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                        .input(java.util.Map.of("title", "   "))
+                        .build())
+                .block();
+        assertThat(result).isEqualTo(java.util.Map.of("valid", false, "renamed", false, "error", "会话名称需要 1–100 字符"));
         assertThat(copy.hasInvalidUpdate()).isFalse();
     }
 
@@ -273,36 +339,42 @@ class FoundationBridgeTest {
             var arguments = java.util.Map.<String, Object>of("query", "posts");
             var expected = java.util.Map.<String, Object>of("items", java.util.List.of());
             when(session.execute(name, arguments)).thenReturn(Mono.just(expected));
-            var tool = captured.get().getTools().stream().filter(item -> name.equals(item.getName()))
-                .findFirst().orElseThrow();
-            var result = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
-                .input(arguments).build()).block();
+            var tool = captured.get().getTools().stream()
+                    .filter(item -> name.equals(item.getName()))
+                    .findFirst()
+                    .orElseThrow();
+            var result = tool.getExecutor()
+                    .execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                            .input(arguments)
+                            .build())
+                    .block();
             assertThat(result).isEqualTo(expected);
         }
         assertThat(copy.document()).isEqualTo(before);
-        assertThat(copy.summaries()).extracting(ChatApi.Tool::name)
-            .contains("search_public_apis", "get_public_api");
+        assertThat(copy.summaries()).extracting(ChatApi.Tool::name).contains("search_public_apis", "get_public_api");
         assertThat(captured.get().getSystem()).contains("credentials: 'omit'", "get_public_api");
     }
 
     @Test
     void injectsBoundMemoryAndRegistersItsToolWithoutChangingPageState() {
         var request = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
-        var tools = new PageMemoryTools(mock(run.halo.aipagebuilder.memory.SiteMemoryService.class),
-            PageMemoryToolsTest.snapshot(1),
-            new run.halo.aipagebuilder.memory.SiteMemoryService.SourceContext("p", "s", "r", "admin"));
+        var tools = new PageMemoryTools(
+                mock(run.halo.aipagebuilder.memory.SiteMemoryService.class),
+                PageMemoryToolsTest.snapshot(1),
+                new run.halo.aipagebuilder.memory.SiteMemoryService.SourceContext("p", "s", "r", "admin"));
         tools.prompt("公司电话 0571-12345678");
         var copy = copy();
         copy.memory(tools);
         bridge.chat("model", java.util.List.of(), "公司电话 0571-12345678", copy).blockLast();
         assertThat(request.get().getTools()).extracting(tool -> tool.getName()).contains("update_site_memory");
-        assertThat(Json.toJson(request.get().getMessages()))
-            .contains("currentRunSources", "r/prompt", "0571-12345678");
+        assertThat(Json.toJson(request.get().getMessages())).contains("currentRunSources", "r/prompt", "0571-12345678");
         assertThat(request.get().getMessages().getLast().getRole().toString()).isEqualTo("USER");
         assertThat(request.get().getSystem())
-            .contains("continue deleting in batches", "add and update are forbidden",
-                "A batch containing delete must contain only delete operations")
-            .doesNotContain("delete closes memory writes");
+                .contains(
+                        "continue deleting in batches",
+                        "add and update are forbidden",
+                        "A batch containing delete must contain only delete operations")
+                .doesNotContain("delete closes memory writes");
         assertThat(copy.hasInvalidUpdate()).isFalse();
     }
 
@@ -320,13 +392,18 @@ class FoundationBridgeTest {
     void silentProviderTimesOutAndCancelsWithoutSdkTimeoutRace() {
         var request = setup(Flux.never());
         reactor.test.StepVerifier.withVirtualTime(() -> bridge.chat("model", java.util.List.of(), "change", copy()))
-            .expectSubscription().expectNoEvent(java.time.Duration.ofSeconds(119))
-            .thenAwait(java.time.Duration.ofSeconds(1))
-            .expectErrorSatisfies(error -> assertThat(error).isInstanceOfSatisfying(AiGenerationException.class,
-                known -> assertThat(known.reason()).isEqualTo(AiGenerationException.Reason.RESPONSE_TIMEOUT)))
-            .verify(java.time.Duration.ofSeconds(5));
+                .expectSubscription()
+                .expectNoEvent(java.time.Duration.ofSeconds(119))
+                .thenAwait(java.time.Duration.ofSeconds(1))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOfSatisfying(
+                                AiGenerationException.class,
+                                known -> assertThat(known.reason())
+                                        .isEqualTo(AiGenerationException.Reason.RESPONSE_TIMEOUT)))
+                .verify(java.time.Duration.ofSeconds(5));
         assertThat(request.get().getTimeouts()).isNull();
-        assertThat(request.get().getCancellationToken().isCancellationRequested()).isTrue();
+        assertThat(request.get().getCancellationToken().isCancellationRequested())
+                .isTrue();
     }
 
     @Test
@@ -343,16 +420,30 @@ class FoundationBridgeTest {
             setup(Flux.empty());
             when(model.streamText(any())).thenAnswer(invocation -> {
                 captured.set(invocation.getArgument(0));
-                var tool = captured.get().getTools().stream().filter(t -> t.getName().equals("ask_user"))
-                    .findFirst().orElseThrow();
-                var source = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
-                    .input(java.util.Map.of("questions", java.util.List.of(java.util.Map.of(
-                        "id", "text", "title", "文案", "options", java.util.List.of(), "allowCustomAnswer", true))))
-                    .build()).doOnNext(result -> assertThat(result).isInstanceOf(ChatApi.Question.class))
-                    .thenMany(Flux.just(TextStreamPart.textDelta("t", "continued"),
-                        TextStreamPart.finish(FinishReason.STOP, "stop", null)));
-                return new StreamTextResult(source, Flux.empty(), Flux.empty(), Flux.empty(),
-                    Mono.empty(), Mono.empty());
+                var tool = captured.get().getTools().stream()
+                        .filter(t -> t.getName().equals("ask_user"))
+                        .findFirst()
+                        .orElseThrow();
+                var source = tool.getExecutor()
+                        .execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                                .input(java.util.Map.of(
+                                        "questions",
+                                        java.util.List.of(java.util.Map.of(
+                                                "id",
+                                                "text",
+                                                "title",
+                                                "文案",
+                                                "options",
+                                                java.util.List.of(),
+                                                "allowCustomAnswer",
+                                                true))))
+                                .build())
+                        .doOnNext(result -> assertThat(result).isInstanceOf(ChatApi.Question.class))
+                        .thenMany(Flux.just(
+                                TextStreamPart.textDelta("t", "continued"),
+                                TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+                return new StreamTextResult(
+                        source, Flux.empty(), Flux.empty(), Flux.empty(), Mono.empty(), Mono.empty());
             });
             var chunks = new java.util.ArrayList<java.util.Map<String, Object>>();
             var error = new AtomicReference<Throwable>();
@@ -360,11 +451,16 @@ class FoundationBridgeTest {
             clock.advanceTimeBy(java.time.Duration.ofMinutes(20));
             assertThat(error.get()).isNull();
             assertThat(chunks).isEmpty();
-            answer.tryEmitValue(new ChatApi.Question("batch", java.util.List.of(), java.util.List.of(),
-                java.time.Instant.now(), java.time.Instant.now()));
+            answer.tryEmitValue(new ChatApi.Question(
+                    "batch",
+                    java.util.List.of(),
+                    java.util.List.of(),
+                    java.time.Instant.now(),
+                    java.time.Instant.now()));
             assertThat(chunks).extracting(chunk -> chunk.get("type")).containsExactly("text-delta");
             assertThat(error.get()).isNull();
-            assertThat(captured.get().getCancellationToken().isCancellationRequested()).isTrue();
+            assertThat(captured.get().getCancellationToken().isCancellationRequested())
+                    .isTrue();
         } finally {
             reactor.test.scheduler.VirtualTimeScheduler.reset();
         }
@@ -377,8 +473,8 @@ class FoundationBridgeTest {
             setup(Flux.never());
             var copy = copy();
             var error = new AtomicReference<Throwable>();
-            var subscription = bridge.chat("model", java.util.List.of(), "change", copy)
-                .subscribe(ignored -> { }, error::set);
+            var subscription =
+                    bridge.chat("model", java.util.List.of(), "change", copy).subscribe(ignored -> {}, error::set);
             clock.advanceTimeBy(java.time.Duration.ofSeconds(50));
             copy.timeBudget.pause();
             clock.advanceTimeBy(java.time.Duration.ofMinutes(20));
@@ -387,8 +483,11 @@ class FoundationBridgeTest {
             clock.advanceTimeBy(java.time.Duration.ofSeconds(69));
             assertThat(error.get()).isNull();
             clock.advanceTimeBy(java.time.Duration.ofSeconds(1));
-            assertThat(error.get()).isInstanceOfSatisfying(AiGenerationException.class,
-                known -> assertThat(known.reason()).isEqualTo(AiGenerationException.Reason.RESPONSE_TIMEOUT));
+            assertThat(error.get())
+                    .isInstanceOfSatisfying(
+                            AiGenerationException.class,
+                            known -> assertThat(known.reason())
+                                    .isEqualTo(AiGenerationException.Reason.RESPONSE_TIMEOUT));
             subscription.dispose();
         } finally {
             reactor.test.scheduler.VirtualTimeScheduler.reset();
@@ -398,93 +497,138 @@ class FoundationBridgeTest {
     @Test
     void upstreamTimeoutRemainsDistinctAndDoesNotExposeProviderDetails() {
         setup(Flux.error(new run.halo.aifoundation.exception.AiGenerationTimeoutException(
-            "provider", "private-provider-detail")));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy()).blockLast())
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TIMEOUT))
-            .hasMessageNotContaining("private-provider-detail");
+                "provider", "private-provider-detail")));
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy())
+                        .blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TIMEOUT))
+                .hasMessageNotContaining("private-provider-detail");
     }
 
     @Test
     void everyProviderEventResetsTheResponseDeadline() {
         setup(Flux.defer(() -> Flux.concat(
-            Mono.delay(java.time.Duration.ofSeconds(90)).map(tick -> TextStreamPart.textDelta("t", "one")),
-            Mono.delay(java.time.Duration.ofSeconds(90)).map(tick -> TextStreamPart.reasoningDelta("r", "two", null)),
-            Mono.delay(java.time.Duration.ofSeconds(90)).map(tick -> TextStreamPart.textDelta("t", "three")),
-            Mono.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)))));
+                Mono.delay(java.time.Duration.ofSeconds(90)).map(tick -> TextStreamPart.textDelta("t", "one")),
+                Mono.delay(java.time.Duration.ofSeconds(90))
+                        .map(tick -> TextStreamPart.reasoningDelta("r", "two", null)),
+                Mono.delay(java.time.Duration.ofSeconds(90)).map(tick -> TextStreamPart.textDelta("t", "three")),
+                Mono.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)))));
         reactor.test.StepVerifier.withVirtualTime(() -> bridge.chat("model", java.util.List.of(), "change", copy()))
-            .expectSubscription().thenAwait(java.time.Duration.ofSeconds(270))
-            .expectNextCount(3).expectComplete().verify(java.time.Duration.ofSeconds(5));
+                .expectSubscription()
+                .thenAwait(java.time.Duration.ofSeconds(270))
+                .expectNextCount(3)
+                .expectComplete()
+                .verify(java.time.Duration.ofSeconds(5));
         setup(Flux.defer(() -> Flux.concat(
-            Mono.delay(java.time.Duration.ofSeconds(90)).map(tick -> TextStreamPart.textDelta("t", "one")),
-            Flux.never())));
+                Mono.delay(java.time.Duration.ofSeconds(90)).map(tick -> TextStreamPart.textDelta("t", "one")),
+                Flux.never())));
         reactor.test.StepVerifier.withVirtualTime(() -> bridge.chat("model", java.util.List.of(), "change", copy()))
-            .expectSubscription().thenAwait(java.time.Duration.ofSeconds(90)).expectNextCount(1)
-            .expectNoEvent(java.time.Duration.ofSeconds(119)).thenAwait(java.time.Duration.ofSeconds(1))
-            .expectErrorSatisfies(error -> assertThat(error).isInstanceOfSatisfying(AiGenerationException.class,
-                known -> assertThat(known.reason()).isEqualTo(AiGenerationException.Reason.RESPONSE_TIMEOUT)))
-            .verify(java.time.Duration.ofSeconds(5));
+                .expectSubscription()
+                .thenAwait(java.time.Duration.ofSeconds(90))
+                .expectNextCount(1)
+                .expectNoEvent(java.time.Duration.ofSeconds(119))
+                .thenAwait(java.time.Duration.ofSeconds(1))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOfSatisfying(
+                                AiGenerationException.class,
+                                known -> assertThat(known.reason())
+                                        .isEqualTo(AiGenerationException.Reason.RESPONSE_TIMEOUT)))
+                .verify(java.time.Duration.ofSeconds(5));
     }
 
     @Test
     void preservesSafeFinishFailureReasons() {
         setup(Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "private-provider-detail", null)));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy()).blockLast())
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TRUNCATED));
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy())
+                        .blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TRUNCATED));
         setup(Flux.just(TextStreamPart.finish(FinishReason.TOOL_CALLS, "private-provider-detail", null)));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy()).blockLast())
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TOOL_LOOP_INCOMPLETE));
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy())
+                        .blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason())
+                                .isEqualTo(AiGenerationException.Reason.TOOL_LOOP_INCOMPLETE));
         setup(Flux.empty());
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy()).blockLast())
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STREAM_INCOMPLETE));
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy())
+                        .blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STREAM_INCOMPLETE));
     }
 
     @Test
     void forwardsProviderReasoningButDoesNotFeedDisplayReasoningBackToModel() {
-        var captured = setup(Flux.just(TextStreamPart.reasoningStart("r"),
-            TextStreamPart.reasoningDelta("r", "visible provider reasoning", null),
-            TextStreamPart.reasoningEnd("r"), TextStreamPart.finish(FinishReason.STOP, "stop", null)));
-        var history = java.util.List.of(new ChatApi.Turn("previous", "admin", java.time.Instant.now(),
-            "question", "answer", java.util.List.of(), "completed", null, null,
-            java.util.List.of(new ChatApi.DisplayPart("reasoning", "r0", "old-reasoning-marker",
-                null, null, null, false)), java.util.List.of()));
-        var chunks = bridge.chat("model", history, "continue", copy()).collectList().block();
-        assertThat(chunks).extracting(chunk -> chunk.get("type"))
-            .containsExactly("reasoning-start", "reasoning-delta", "reasoning-end");
-        assertThat(captured.get().getMessages().toString()).contains("answer")
-            .doesNotContain("old-reasoning-marker");
+        var captured = setup(Flux.just(
+                TextStreamPart.reasoningStart("r"),
+                TextStreamPart.reasoningDelta("r", "visible provider reasoning", null),
+                TextStreamPart.reasoningEnd("r"),
+                TextStreamPart.finish(FinishReason.STOP, "stop", null)));
+        var history = java.util.List.of(new ChatApi.Turn(
+                "previous",
+                "admin",
+                java.time.Instant.now(),
+                "question",
+                "answer",
+                java.util.List.of(),
+                "completed",
+                null,
+                null,
+                java.util.List.of(
+                        new ChatApi.DisplayPart("reasoning", "r0", "old-reasoning-marker", null, null, null, false)),
+                java.util.List.of()));
+        var chunks =
+                bridge.chat("model", history, "continue", copy()).collectList().block();
+        assertThat(chunks)
+                .extracting(chunk -> chunk.get("type"))
+                .containsExactly("reasoning-start", "reasoning-delta", "reasoning-end");
+        assertThat(captured.get().getMessages().toString()).contains("answer").doesNotContain("old-reasoning-marker");
     }
 
     @Test
     void includesPersistedQuestionsAndAnswersInFollowingModelContext() {
         var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
-        var answered = new ChatApi.Question("batch", java.util.List.of(new ChatApi.QuestionItem(
-            "style", "Which visual style?", java.util.List.of(), true)),
-            java.util.List.of(new ChatApi.AnswerItem("style", null, "Use generous whitespace")),
-            java.time.Instant.now(), java.time.Instant.now());
-        var history = PageChatService.contextWindow(java.util.List.of(new ChatApi.Turn("previous", "admin",
-            java.time.Instant.now(), "create", "done", java.util.List.of(), "completed", null, null,
-            java.util.List.of(), java.util.List.of(), java.util.List.of(answered))));
+        var answered = new ChatApi.Question(
+                "batch",
+                java.util.List.of(new ChatApi.QuestionItem("style", "Which visual style?", java.util.List.of(), true)),
+                java.util.List.of(new ChatApi.AnswerItem("style", null, "Use generous whitespace")),
+                java.time.Instant.now(),
+                java.time.Instant.now());
+        var history = PageChatService.contextWindow(java.util.List.of(new ChatApi.Turn(
+                "previous",
+                "admin",
+                java.time.Instant.now(),
+                "create",
+                "done",
+                java.util.List.of(),
+                "completed",
+                null,
+                null,
+                java.util.List.of(),
+                java.util.List.of(),
+                java.util.List.of(answered))));
         bridge.chat("model", history, "continue", copy()).blockLast();
-        assertThat(captured.get().getMessages().toString())
-            .contains("Which visual style?", "Use generous whitespace");
+        assertThat(captured.get().getMessages().toString()).contains("Which visual style?", "Use generous whitespace");
     }
 
     @Test
     void toolBudgetsAreStickyEvenWhenAnExecutorExceptionIsHandledByFoundation() {
-        var copy = new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code",
-            null, null, "", ""), new ContentPolicy());
-        for (int i = 0; i < RunBudget.MAX_CALLS; i++) { copy.read(); }
+        var copy = new PageWorkingCopy(
+                new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null, "", ""), new ContentPolicy());
+        for (int i = 0; i < RunBudget.MAX_CALLS; i++) {
+            copy.read();
+        }
         assertThatThrownBy(copy::read).isInstanceOf(IllegalStateException.class);
         setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy).blockLast())
-            .isInstanceOf(AiGenerationException.class);
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy)
+                        .blockLast())
+                .isInstanceOf(AiGenerationException.class);
         var large = new PageWorkingCopy(copy.document(), new ContentPolicy());
         assertThatThrownBy(() -> large.consume("a".repeat(RunBudget.MAX_BYTES + 1)))
-            .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(IllegalStateException.class);
         assertThat(large.exhausted()).isTrue();
     }
 
@@ -492,25 +636,31 @@ class FoundationBridgeTest {
     @EnumSource(value = FinishReason.class, names = "STOP", mode = EnumSource.Mode.EXCLUDE)
     void everyNonStopFinishIsRejected(FinishReason reason) {
         setup(Flux.just(TextStreamPart.finish(reason, "provider-secret", null)));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy()).blockLast())
-            .isInstanceOf(AiGenerationException.class).hasMessageNotContaining("provider-secret");
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy())
+                        .blockLast())
+                .isInstanceOf(AiGenerationException.class)
+                .hasMessageNotContaining("provider-secret");
     }
 
     @Test
     void rejectsErrorsAbortAndLateEventsAndPropagatesCancellation() {
         for (var parts : java.util.List.of(
-            Flux.just(TextStreamPart.error("provider-secret")),
-            Flux.just(TextStreamPart.builder().type(PartType.ABORT).build()),
-            Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null),
-                TextStreamPart.textDelta("t", "late")))) {
+                Flux.just(TextStreamPart.error("provider-secret")),
+                Flux.just(TextStreamPart.builder().type(PartType.ABORT).build()),
+                Flux.just(
+                        TextStreamPart.finish(FinishReason.STOP, "stop", null),
+                        TextStreamPart.textDelta("t", "late")))) {
             setup(parts);
-            assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy()).blockLast())
-                .isInstanceOf(AiGenerationException.class);
+            assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "change", copy())
+                            .blockLast())
+                    .isInstanceOf(AiGenerationException.class);
         }
         var captured = setup(Flux.never());
-        var subscription = bridge.chat("model", java.util.List.of(), "change", copy()).subscribe();
+        var subscription =
+                bridge.chat("model", java.util.List.of(), "change", copy()).subscribe();
         subscription.dispose();
-        assertThat(captured.get().getCancellationToken().isCancellationRequested()).isTrue();
+        assertThat(captured.get().getCancellationToken().isCancellationRequested())
+                .isTrue();
     }
 
     @Test
@@ -523,38 +673,59 @@ class FoundationBridgeTest {
         when(model.streamText(any())).thenAnswer(invocation -> {
             GenerateTextRequest request = invocation.getArgument(0);
             attempts.add(request);
-            request.getPrepareStep().prepare(run.halo.aifoundation.chat.StepContext.builder()
-                .messages(request.getMessages()).build());
+            request.getPrepareStep()
+                    .prepare(run.halo.aifoundation.chat.StepContext.builder()
+                            .messages(request.getMessages())
+                            .build());
             Flux<TextStreamPart> source;
             if (attempts.size() == 1) {
-                var tool = request.getTools().stream().filter(t -> "update_current_page".equals(t.getName()))
-                    .findFirst().orElseThrow();
-                source = tool.getExecutor().execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
-                    .input(java.util.Map.of("html", "<p>verified</p>")).build()).thenMany(Flux.just(
-                        TextStreamPart.start("provider-first"),
-                        TextStreamPart.textStart("same-id"), TextStreamPart.textDelta("same-id", "first"),
-                        TextStreamPart.textEnd("same-id"),
-                        TextStreamPart.toolInputStart("partial", "same-tool", "update_current_page"),
-                        TextStreamPart.toolInputDelta("partial", "same-tool", "update_current_page", "partial-secret"),
-                        TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
+                var tool = request.getTools().stream()
+                        .filter(t -> "update_current_page".equals(t.getName()))
+                        .findFirst()
+                        .orElseThrow();
+                source = tool.getExecutor()
+                        .execute(run.halo.aifoundation.tool.ToolExecutionContext.builder()
+                                .input(java.util.Map.of("html", "<p>verified</p>"))
+                                .build())
+                        .thenMany(Flux.just(
+                                TextStreamPart.start("provider-first"),
+                                TextStreamPart.textStart("same-id"),
+                                TextStreamPart.textDelta("same-id", "first"),
+                                TextStreamPart.textEnd("same-id"),
+                                TextStreamPart.toolInputStart("partial", "same-tool", "update_current_page"),
+                                TextStreamPart.toolInputDelta(
+                                        "partial", "same-tool", "update_current_page", "partial-secret"),
+                                TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
             } else {
-                assertThat(request.getMessages().toString()).contains("verified", "Discard truncated arguments")
-                    .doesNotContain("partial-secret");
-                source = Flux.just(TextStreamPart.start("provider-second"), TextStreamPart.textStart("same-id"),
-                    TextStreamPart.textDelta("same-id", "second"), TextStreamPart.textEnd("same-id"),
-                    TextStreamPart.finish(FinishReason.STOP, "stop", null));
+                assertThat(request.getMessages().toString())
+                        .contains("verified", "Discard truncated arguments")
+                        .doesNotContain("partial-secret");
+                source = Flux.just(
+                        TextStreamPart.start("provider-second"),
+                        TextStreamPart.textStart("same-id"),
+                        TextStreamPart.textDelta("same-id", "second"),
+                        TextStreamPart.textEnd("same-id"),
+                        TextStreamPart.finish(FinishReason.STOP, "stop", null));
             }
             return new StreamTextResult(source, Flux.empty(), Flux.empty(), Flux.empty(), Mono.empty(), Mono.empty());
         });
-        var chunks = bridge.chat("model", java.util.List.of(), "original task", copy).collectList().block();
+        var chunks = bridge.chat("model", java.util.List.of(), "original task", copy)
+                .collectList()
+                .block();
         assertThat(attempts).hasSize(2);
         assertThat(saves).hasValue(1);
-        assertThat(chunks.stream().filter(chunk -> "start".equals(chunk.get("type")))
-            .map(chunk -> chunk.get("messageId")).distinct()).hasSize(1);
+        assertThat(chunks.stream()
+                        .filter(chunk -> "start".equals(chunk.get("type")))
+                        .map(chunk -> chunk.get("messageId"))
+                        .distinct())
+                .hasSize(1);
         assertThat(copy.budget.steps()).isEqualTo(2);
         assertThat(chunks.stream().filter(chunk -> "text-delta".equals(chunk.get("type"))))
-            .extracting(chunk -> chunk.get("id")).containsExactly("attempt-1-same-id", "attempt-2-same-id");
-        assertThat(chunks).filteredOn(chunk -> "data-generation-recovery".equals(chunk.get("type"))).hasSize(1);
+                .extracting(chunk -> chunk.get("id"))
+                .containsExactly("attempt-1-same-id", "attempt-2-same-id");
+        assertThat(chunks)
+                .filteredOn(chunk -> "data-generation-recovery".equals(chunk.get("type")))
+                .hasSize(1);
         assertThat(chunks).noneMatch(chunk -> "finish".equals(chunk.get("type")) || "error".equals(chunk.get("type")));
     }
 
@@ -567,36 +738,54 @@ class FoundationBridgeTest {
             GenerateTextRequest request = invocation.getArgument(0);
             attempts.incrementAndGet();
             var context = run.halo.aifoundation.chat.StepContext.builder()
-                .messages(request.getMessages()).stepIndex(0)
-                .step(run.halo.aifoundation.chat.GenerationStep.builder()
-                    .finishReason(FinishReason.LENGTH).build()).build();
+                    .messages(request.getMessages())
+                    .stepIndex(0)
+                    .step(run.halo.aifoundation.chat.GenerationStep.builder()
+                            .finishReason(FinishReason.LENGTH)
+                            .build())
+                    .build();
             request.getPrepareStep().prepare(context);
             // Foundation emits FINISH_STEP before evaluating its internal tool-loop condition.
-            var source = Flux.just(TextStreamPart.toolInputStart("input", "cut", "update_current_page"),
-                TextStreamPart.toolInputDelta("input", "cut", "update_current_page", "{\"html\":\"cut"),
-                TextStreamPart.builder().type(PartType.FINISH_STEP).stepIndex(0)
-                    .finishReason(FinishReason.LENGTH).build()).concatWith(Flux.defer(() -> {
-                        assertThat(request.getStopWhen().shouldContinue(context)).isFalse();
+            var source = Flux.just(
+                            TextStreamPart.toolInputStart("input", "cut", "update_current_page"),
+                            TextStreamPart.toolInputDelta("input", "cut", "update_current_page", "{\"html\":\"cut"),
+                            TextStreamPart.builder()
+                                    .type(PartType.FINISH_STEP)
+                                    .stepIndex(0)
+                                    .finishReason(FinishReason.LENGTH)
+                                    .build())
+                    .concatWith(Flux.defer(() -> {
+                        assertThat(request.getStopWhen().shouldContinue(context))
+                                .isFalse();
                         return Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null));
                     }));
             return new StreamTextResult(source, Flux.empty(), Flux.empty(), Flux.empty(), Mono.empty(), Mono.empty());
         });
         var chunks = new java.util.ArrayList<java.util.Map<String, Object>>();
         assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "task", copy)
-            .doOnNext(chunks::add).blockLast()).isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TRUNCATED));
+                        .doOnNext(chunks::add)
+                        .blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.TRUNCATED));
         assertThat(attempts).hasValue(3);
         assertThat(copy.budget.steps()).isEqualTo(3);
         assertThat(copy.budget.recoveries()).isEqualTo(2);
-        assertThat(chunks).filteredOn(chunk -> "data-generation-recovery".equals(chunk.get("type"))).hasSize(2);
+        assertThat(chunks)
+                .filteredOn(chunk -> "data-generation-recovery".equals(chunk.get("type")))
+                .hasSize(2);
     }
 
     @Test
     void manualResumeAndAutomaticRecoveryUseOnlyTheLatestSnapshot() {
         setup(Flux.empty());
         var copy = copy();
-        copy.restore(new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null,
-            "<p>old checkpoint</p>", ""), false, null, false, java.util.List.of());
+        copy.restore(
+                new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null, "<p>old checkpoint</p>", ""),
+                false,
+                null,
+                false,
+                java.util.List.of());
         copy.taskContext(() -> "Original request: build a page");
         var attempts = new java.util.ArrayList<GenerateTextRequest>();
         when(model.streamText(any())).thenAnswer(invocation -> {
@@ -608,7 +797,7 @@ class FoundationBridgeTest {
             if (attempts.size() == 1) {
                 assertThat(prompt).contains("old checkpoint");
                 source = copy.update(java.util.Map.of("html", "<p>new checkpoint</p>"))
-                    .thenMany(Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
+                        .thenMany(Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
             } else {
                 assertThat(prompt).contains("new checkpoint").doesNotContain("old checkpoint");
                 source = Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null));
@@ -623,11 +812,12 @@ class FoundationBridgeTest {
     void boundsInitialAndPreparedModelContextsAndRecordsTheirPeak() {
         var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
         var initial = copy();
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(),
-            "x".repeat(RunBudget.MAX_CONTEXT_BYTES), initial).blockLast())
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason())
-                    .isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
+        assertThatThrownBy(() -> bridge.chat(
+                                "model", java.util.List.of(), "x".repeat(RunBudget.MAX_CONTEXT_BYTES), initial)
+                        .blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
         assertThat(initial.usage().maxContextBytes()).isGreaterThan(RunBudget.MAX_CONTEXT_BYTES);
         org.mockito.Mockito.verify(model, never()).streamText(any());
 
@@ -635,12 +825,13 @@ class FoundationBridgeTest {
         bridge.chat("model", java.util.List.of(), "task", stepped).blockLast();
         assertThat(stepped.usage().maxContextBytes()).isPositive();
         var context = run.halo.aifoundation.chat.StepContext.builder()
-            .messages(java.util.List.of(run.halo.aifoundation.message.ModelMessage.user(
-                "x".repeat(RunBudget.MAX_CONTEXT_BYTES)))).build();
+                .messages(java.util.List.of(
+                        run.halo.aifoundation.message.ModelMessage.user("x".repeat(RunBudget.MAX_CONTEXT_BYTES))))
+                .build();
         assertThatThrownBy(() -> captured.get().getPrepareStep().prepare(context))
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason())
-                    .isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.CONTEXT_LIMIT));
         assertThat(stepped.usage().maxContextBytes()).isGreaterThan(RunBudget.MAX_CONTEXT_BYTES);
     }
 
@@ -649,20 +840,25 @@ class FoundationBridgeTest {
         var captured = setup(Flux.just(TextStreamPart.finish(FinishReason.STOP, "stop", null)));
         var copy = copy();
         bridge.chat("model", java.util.List.of(), "task", copy).blockLast();
-        var context = run.halo.aifoundation.chat.StepContext.builder().messages(java.util.List.of()).build();
+        var context = run.halo.aifoundation.chat.StepContext.builder()
+                .messages(java.util.List.of())
+                .build();
         for (int i = 1; i <= 20; i++) {
             var prepared = captured.get().getPrepareStep().prepare(context);
             assertThat(captured.get().getStopWhen().shouldContinue(context)).isEqualTo(i < 20);
             if (i >= 18) assertThat(prepared.getMessages().toString()).contains("model steps remain");
         }
         assertThatThrownBy(() -> captured.get().getPrepareStep().prepare(context))
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STEP_LIMIT));
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STEP_LIMIT));
         assertThat(copy.budget.recover()).isFalse();
         setup(Flux.just(TextStreamPart.finish(FinishReason.TOOL_CALLS, "tool_calls", null)));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "steer", copy).blockLast())
-            .isInstanceOfSatisfying(AiGenerationException.class,
-                error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STEP_LIMIT));
+        assertThatThrownBy(() ->
+                        bridge.chat("model", java.util.List.of(), "steer", copy).blockLast())
+                .isInstanceOfSatisfying(
+                        AiGenerationException.class,
+                        error -> assertThat(error.reason()).isEqualTo(AiGenerationException.Reason.STEP_LIMIT));
     }
 
     @Test
@@ -670,22 +866,25 @@ class FoundationBridgeTest {
         var copy = copy();
         setup(Flux.just(TextStreamPart.finish(FinishReason.LENGTH, "length", null)));
         var chunks = new java.util.ArrayList<java.util.Map<String, Object>>();
-        reactor.test.StepVerifier.create(bridge.chat("model", java.util.List.of(), "task", copy)
-            .doOnNext(chunks::add)).expectNextCount(2)
-            .expectError(AiGenerationException.class).verify();
+        reactor.test.StepVerifier.create(
+                        bridge.chat("model", java.util.List.of(), "task", copy).doOnNext(chunks::add))
+                .expectNextCount(2)
+                .expectError(AiGenerationException.class)
+                .verify();
         org.mockito.Mockito.verify(model, org.mockito.Mockito.times(3)).streamText(any());
         assertThat(copy.budget.recoveries()).isEqualTo(2);
         assertThat(chunks).allMatch(chunk -> "data-generation-recovery".equals(chunk.get("type")));
         org.mockito.Mockito.clearInvocations(model);
         setup(Flux.error(new IllegalStateException("network")));
-        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "task", copy()).blockLast())
-            .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> bridge.chat("model", java.util.List.of(), "task", copy())
+                        .blockLast())
+                .isInstanceOf(IllegalStateException.class);
         org.mockito.Mockito.verify(model).streamText(any());
     }
 
     private PageWorkingCopy copy() {
-        return new PageWorkingCopy(new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null,
-            "", ""), new ContentPolicy());
+        return new PageWorkingCopy(
+                new run.halo.aipagebuilder.model.PageDocument(1, "code", null, null, "", ""), new ContentPolicy());
     }
 
     private AtomicReference<GenerateTextRequest> setup(Flux<TextStreamPart> source) {
@@ -694,9 +893,13 @@ class FoundationBridgeTest {
         when(service.languageModel("model")).thenReturn(Mono.just(model));
         when(model.streamText(any())).thenAnswer(invocation -> {
             request.set(invocation.getArgument(0));
-            return new StreamTextResult(source, Flux.error(new AssertionError("text view subscribed")),
-                Flux.empty(), Flux.empty(), Mono.empty(),
-                Mono.error(new AssertionError("result view subscribed")));
+            return new StreamTextResult(
+                    source,
+                    Flux.error(new AssertionError("text view subscribed")),
+                    Flux.empty(),
+                    Flux.empty(),
+                    Mono.empty(),
+                    Mono.error(new AssertionError("result view subscribed")));
         });
         return request;
     }

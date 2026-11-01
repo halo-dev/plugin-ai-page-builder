@@ -15,16 +15,16 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import run.halo.app.extension.Scheme;
-import run.halo.app.extension.SchemeManager;
-import run.halo.app.extension.index.IndexSpecBuilder;
-import run.halo.app.extension.index.IndexSpecs;
-import run.halo.app.plugin.PluginContext;
 import run.halo.aipagebuilder.model.PageChatSession;
 import run.halo.aipagebuilder.model.PageChatTurnRecord;
 import run.halo.aipagebuilder.model.SiteMemory;
 import run.halo.aipagebuilder.model.ThemePage;
 import run.halo.aipagebuilder.model.ThemePageRevision;
+import run.halo.app.extension.Scheme;
+import run.halo.app.extension.SchemeManager;
+import run.halo.app.extension.index.IndexSpecBuilder;
+import run.halo.app.extension.index.IndexSpecs;
+import run.halo.app.plugin.PluginContext;
 
 @ExtendWith(MockitoExtension.class)
 class AiPageBuilderPluginTest {
@@ -81,12 +81,17 @@ class AiPageBuilderPluginTest {
 
         var captor = ArgumentCaptor.forClass(IndexSpecBuilder.class);
         verify(indexes, org.mockito.Mockito.times(4)).add(captor.capture());
-        var slugIndex = captor.getAllValues().stream().map(IndexSpecBuilder::build)
-            .filter(index -> "spec.slug".equals(index.getName())).findFirst().orElseThrow();
+        var slugIndex = captor.getAllValues().stream()
+                .map(IndexSpecBuilder::build)
+                .filter(index -> "spec.slug".equals(index.getName()))
+                .findFirst()
+                .orElseThrow();
         assertThat(slugIndex.isUnique()).isTrue();
-        var publishedIndex = captor.getAllValues().stream().map(IndexSpecBuilder::build)
-            .filter(index -> "spec.publishedRevision".equals(index.getName()))
-            .findFirst().orElseThrow();
+        var publishedIndex = captor.getAllValues().stream()
+                .map(IndexSpecBuilder::build)
+                .filter(index -> "spec.publishedRevision".equals(index.getName()))
+                .findFirst()
+                .orElseThrow();
         assertThat(publishedIndex.isNullable()).isTrue();
     }
 }

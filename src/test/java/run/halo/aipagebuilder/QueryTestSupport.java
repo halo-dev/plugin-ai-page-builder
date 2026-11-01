@@ -20,7 +20,8 @@ public final class QueryTestSupport {
                 case "IsNullCondition" -> actual == null;
                 case "IsNotNullCondition" -> actual != null;
                 case "EqualCondition" -> Objects.equals(actual, component(query, "key"));
-                case "StringContainsCondition" -> actual != null && actual.contains((String) component(query, "keyword"));
+                case "StringContainsCondition" ->
+                    actual != null && actual.contains((String) component(query, "keyword"));
                 default -> throw new AssertionError(type);
             };
         }
@@ -35,6 +36,8 @@ public final class QueryTestSupport {
             var accessor = query.getClass().getDeclaredMethod(name);
             accessor.setAccessible(true);
             return accessor.invoke(query);
-        } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError(error);
+        }
     }
 }

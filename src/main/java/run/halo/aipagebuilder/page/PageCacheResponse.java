@@ -20,9 +20,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * Lets a CDN revalidate a published page against the rendered body. The ETag covers theme and
- * property changes that happen without a page republish. Only anonymous responses are wrapped:
- * authenticated pages can render user-specific theme markup and must not be shared.
+ * Lets a CDN revalidate a published page against the rendered body. The ETag covers theme and property changes that
+ * happen without a page republish. Only anonymous responses are wrapped: authenticated pages can render user-specific
+ * theme markup and must not be shared.
  */
 final class PageCacheResponse implements ServerResponse {
     private final ServerResponse delegate;
@@ -52,13 +52,11 @@ final class PageCacheResponse implements ServerResponse {
         var response = new ServerHttpResponseDecorator(exchange.getResponse()) {
             @Override
             public Mono<Void> writeWith(Publisher<? extends DataBuffer> body) {
-                return DataBufferUtils.join(body)
-                    .flatMap(buffer -> complete(buffer, requestHeaders));
+                return DataBufferUtils.join(body).flatMap(buffer -> complete(buffer, requestHeaders));
             }
 
             @Override
-            public Mono<Void> writeAndFlushWith(
-                Publisher<? extends Publisher<? extends DataBuffer>> body) {
+            public Mono<Void> writeAndFlushWith(Publisher<? extends Publisher<? extends DataBuffer>> body) {
                 return writeWith(Flux.from(body).concatMap(Flux::from));
             }
 
@@ -90,8 +88,9 @@ final class PageCacheResponse implements ServerResponse {
             // Malformed validators must be ignored, not fail the already rendered response.
             return false;
         }
-        return candidates.stream().anyMatch(candidate -> "*".equals(candidate)
-            || candidate.equals(etag) || ("W/" + etag).equals(candidate));
+        return candidates.stream()
+                .anyMatch(candidate ->
+                        "*".equals(candidate) || candidate.equals(etag) || ("W/" + etag).equals(candidate));
     }
 
     private static String sha256(DataBuffer buffer) {

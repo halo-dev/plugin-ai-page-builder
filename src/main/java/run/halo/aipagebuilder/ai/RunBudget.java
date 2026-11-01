@@ -34,11 +34,25 @@ final class RunBudget {
         return ++steps;
     }
 
-    synchronized boolean hasSteps() { return steps < MAX_STEPS && !tokenLimitReached(); }
-    synchronized int steps() { return steps; }
-    synchronized int recoveries() { return recoveries; }
-    synchronized int calls() { return calls; }
-    synchronized int nextAttempt() { return ++attempts; }
+    synchronized boolean hasSteps() {
+        return steps < MAX_STEPS && !tokenLimitReached();
+    }
+
+    synchronized int steps() {
+        return steps;
+    }
+
+    synchronized int recoveries() {
+        return recoveries;
+    }
+
+    synchronized int calls() {
+        return calls;
+    }
+
+    synchronized int nextAttempt() {
+        return ++attempts;
+    }
 
     synchronized void call() {
         if (++calls > MAX_CALLS || exhaustedReason != null) {
@@ -71,7 +85,9 @@ final class RunBudget {
         }
     }
 
-    synchronized boolean exhausted() { return exhaustionReason() != null; }
+    synchronized boolean exhausted() {
+        return exhaustionReason() != null;
+    }
 
     synchronized AiGenerationException.Reason exhaustionReason() {
         return tokenLimitReached() ? AiGenerationException.Reason.TOKEN_LIMIT : exhaustedReason;
@@ -80,8 +96,14 @@ final class RunBudget {
     synchronized void usage(Number input, Number output) {
         if (input == null || output == null) missingUsageSteps++;
         else reportedSteps++;
-        if (input != null) { inputReports++; inputTokens += Math.max(0, input.longValue()); }
-        if (output != null) { outputReports++; outputTokens += Math.max(0, output.longValue()); }
+        if (input != null) {
+            inputReports++;
+            inputTokens += Math.max(0, input.longValue());
+        }
+        if (output != null) {
+            outputReports++;
+            outputTokens += Math.max(0, output.longValue());
+        }
     }
 
     private boolean tokenLimitReached() {
@@ -89,10 +111,18 @@ final class RunBudget {
     }
 
     synchronized ChatApi.Usage snapshot(String model, long elapsedMillis) {
-        return new ChatApi.Usage(model, "page-agent-v1", steps, reportedSteps, missingUsageSteps,
-            inputReports == 0 ? null : inputTokens,
-            outputReports == 0 ? null : outputTokens,
-            elapsedMillis, bytes, previewBytes, contextBytes);
+        return new ChatApi.Usage(
+                model,
+                "page-agent-v1",
+                steps,
+                reportedSteps,
+                missingUsageSteps,
+                inputReports == 0 ? null : inputTokens,
+                outputReports == 0 ? null : outputTokens,
+                elapsedMillis,
+                bytes,
+                previewBytes,
+                contextBytes);
     }
 
     synchronized boolean recover() {

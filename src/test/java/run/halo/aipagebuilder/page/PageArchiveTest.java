@@ -42,10 +42,10 @@ class PageArchiveTest {
 
     private static void assertInvalid(byte[] bytes, String message) {
         assertThatThrownBy(() -> PageArchive.read(bytes))
-            .isInstanceOfSatisfying(ResponseStatusException.class, error -> {
-                assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-                assertThat(error.getReason()).contains(message);
-            });
+                .isInstanceOfSatisfying(ResponseStatusException.class, error -> {
+                    assertThat(error.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    assertThat(error.getReason()).contains(message);
+                });
     }
 
     @Test
@@ -65,16 +65,20 @@ class PageArchiveTest {
     @Test
     void readsOptionalAccessRestriction() throws Exception {
         var files = files();
-        files.put("page.json", files.get("page.json").replace("\"themeLayout\":false",
-            "\"themeLayout\":false,\"authorizeRequired\":true"));
+        files.put(
+                "page.json",
+                files.get("page.json")
+                        .replace("\"themeLayout\":false", "\"themeLayout\":false,\"authorizeRequired\":true"));
         assertThat(PageArchive.read(zip(files)).authorizeRequired()).isTrue();
     }
 
     @Test
     void rejectsWrongAccessRestrictionType() throws Exception {
         var files = files();
-        files.put("page.json", files.get("page.json").replace("\"themeLayout\":false",
-            "\"themeLayout\":false,\"authorizeRequired\":\"true\""));
+        files.put(
+                "page.json",
+                files.get("page.json")
+                        .replace("\"themeLayout\":false", "\"themeLayout\":false,\"authorizeRequired\":\"true\""));
         assertInvalid(zip(files), "页面信息无效");
     }
 
@@ -114,11 +118,17 @@ class PageArchiveTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"{", "null", "[]", "{}",
-        "{\"format\":\"ai-page-builder\",\"version\":2}",
-        "{\"format\":\"ai-page-builder\",\"version\":4294967297}",
-        "{\"format\":\"ai-page-builder\",\"version\":\"1\"}",
-        "{\"format\":\"other\",\"version\":1}"})
+    @ValueSource(
+            strings = {
+                "{",
+                "null",
+                "[]",
+                "{}",
+                "{\"format\":\"ai-page-builder\",\"version\":2}",
+                "{\"format\":\"ai-page-builder\",\"version\":4294967297}",
+                "{\"format\":\"ai-page-builder\",\"version\":\"1\"}",
+                "{\"format\":\"other\",\"version\":1}"
+            })
     void rejectsInvalidOrUnsupportedMetadata(String metadata) throws Exception {
         var files = files();
         files.put("page.json", metadata);
@@ -133,8 +143,17 @@ class PageArchiveTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"../page.html", "/page.html", "nested/../page.html", "C:/page.html",
-        "nested\\page.html", "./../page.html", ".//page.html", "./C:/page.html"})
+    @ValueSource(
+            strings = {
+                "../page.html",
+                "/page.html",
+                "nested/../page.html",
+                "C:/page.html",
+                "nested\\page.html",
+                "./../page.html",
+                ".//page.html",
+                "./C:/page.html"
+            })
     void rejectsUnsafePaths(String path) throws Exception {
         var files = files();
         files.put(path, "ignored");

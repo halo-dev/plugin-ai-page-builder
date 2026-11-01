@@ -10,13 +10,17 @@ import run.halo.aipagebuilder.Json;
 /** Measures the whole provider-neutral input. Bytes are deliberately not labelled as tokens. */
 final class ModelContextBudget {
     static int bytes(String system, List<ModelMessage> messages, List<ToolDefinition> tools) {
-        var schemas = tools == null ? List.of() : tools.stream().map(tool -> {
-            var schema = new LinkedHashMap<String, Object>();
-            schema.put("name", tool.getName());
-            schema.put("description", tool.getDescription());
-            schema.put("inputSchema", tool.getInputSchema());
-            return schema;
-        }).toList();
+        var schemas = tools == null
+                ? List.of()
+                : tools.stream()
+                        .map(tool -> {
+                            var schema = new LinkedHashMap<String, Object>();
+                            schema.put("name", tool.getName());
+                            schema.put("description", tool.getDescription());
+                            schema.put("inputSchema", tool.getInputSchema());
+                            return schema;
+                        })
+                        .toList();
         var input = new LinkedHashMap<String, Object>();
         input.put("system", system);
         input.put("messages", messages);
@@ -24,5 +28,5 @@ final class ModelContextBudget {
         return Json.toJson(input).getBytes(StandardCharsets.UTF_8).length;
     }
 
-    private ModelContextBudget() { }
+    private ModelContextBudget() {}
 }

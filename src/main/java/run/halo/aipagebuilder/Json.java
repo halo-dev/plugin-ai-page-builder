@@ -10,13 +10,12 @@ public final class Json {
     // Matches the former JsonUtils mapper: omit nulls and keep declaration order, which
     // Jackson 3 otherwise changes by sorting properties alphabetically.
     public static final JsonMapper MAPPER = JsonMapper.builder()
-        .changeDefaultPropertyInclusion(
-            v -> v.withValueInclusion(NON_NULL).withContentInclusion(NON_NULL))
-        .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
-        .disable(MapperFeature.SORT_CREATOR_PROPERTIES_FIRST)
-        .build();
+            .changeDefaultPropertyInclusion(v -> v.withValueInclusion(NON_NULL).withContentInclusion(NON_NULL))
+            .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+            .disable(MapperFeature.SORT_CREATOR_PROPERTIES_FIRST)
+            .build();
 
-    private Json() { }
+    private Json() {}
 
     public static String toJson(Object source) {
         return MAPPER.writeValueAsString(source);

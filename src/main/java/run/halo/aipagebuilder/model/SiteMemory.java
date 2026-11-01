@@ -10,8 +10,12 @@ import run.halo.app.extension.GVK;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@GVK(group = "aipagebuilder.halo.run", version = "v1alpha1", kind = "SiteMemory",
-    plural = "sitememories", singular = "sitememory")
+@GVK(
+        group = "aipagebuilder.halo.run",
+        version = "v1alpha1",
+        kind = "SiteMemory",
+        plural = "sitememories",
+        singular = "sitememory")
 public class SiteMemory extends AbstractExtension {
     public static final String NAME = "site-memory";
 
@@ -22,11 +26,9 @@ public class SiteMemory extends AbstractExtension {
         private List<Entry> entries = new ArrayList<>();
     }
 
-    public record Entry(String id, String subject, String key, String kind, String value,
-                        Source source, Instant updatedAt) {
-    }
+    public record Entry(
+            String id, String subject, String key, String kind, String value, Source source, Instant updatedAt) {}
 
-    public record Source(String pageName, String sessionId, String runId, String sourceId,
-                         String quote, String actor) {
-    }
+    public record Source(
+            String pageName, String sessionId, String runId, String sourceId, String quote, String actor) {}
 }

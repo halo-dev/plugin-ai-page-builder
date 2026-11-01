@@ -8,9 +8,9 @@ import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.ExternalUrlSupplier;
 import run.halo.aipagebuilder.ai.PublicApiCatalog;
 import run.halo.aipagebuilder.model.PageDocument;
+import run.halo.app.infra.ExternalUrlSupplier;
 
 /** Owns preview isolation, including the request used during deferred template rendering. */
 @Component
@@ -19,33 +19,47 @@ public class PagePreview {
     private final PublicApiCatalog publicApiCatalog;
     private final PageOrigins origins;
 
-    public PagePreview(PageRenderer renderer, PublicApiCatalog publicApiCatalog,
-        ExternalUrlSupplier externalUrlSupplier) {
+    public PagePreview(
+            PageRenderer renderer, PublicApiCatalog publicApiCatalog, ExternalUrlSupplier externalUrlSupplier) {
         this.renderer = renderer;
         this.publicApiCatalog = publicApiCatalog;
         this.origins = new PageOrigins(externalUrlSupplier);
     }
 
-    public Mono<ServerResponse> render(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document, String title, String description) {
+    public Mono<ServerResponse> render(
+            ServerRequest request,
+            String name,
+            String slug,
+            boolean themeLayout,
+            PageDocument document,
+            String title,
+            String description) {
         return renderer.render(request, name, slug, themeLayout, document, title, description)
-            .flatMap(response -> RenderingResponse.from(response)
-                .header("Content-Security-Policy", policy(request).document()).build())
-            .cast(ServerResponse.class);
+                .flatMap(response -> RenderingResponse.from(response)
+                        .header("Content-Security-Policy", policy(request).document())
+                        .build())
+                .cast(ServerResponse.class);
     }
 
-    public Mono<ServerResponse> token(ServerRequest request, String name, String slug,
-        boolean themeLayout, PageDocument document, String title, String description) {
+    public Mono<ServerResponse> token(
+            ServerRequest request,
+            String name,
+            String slug,
+            boolean themeLayout,
+            PageDocument document,
+            String title,
+            String description) {
         return Mono.defer(() -> {
             var safeRequest = PagePreviewResponse.withoutCredential(request);
             return renderer.render(safeRequest, name, slug, themeLayout, document, title, description)
-                .flatMap(response -> {
-                    var policy = policy(safeRequest);
-                    var uri = safeRequest.uri();
-                    return RenderingResponse.from(response)
-                        .header("Content-Security-Policy", policy.host(uri)).build()
-                        .map(host -> new PagePreviewResponse(host, uri, policy.child(uri)));
-                });
+                    .flatMap(response -> {
+                        var policy = policy(safeRequest);
+                        var uri = safeRequest.uri();
+                        return RenderingResponse.from(response)
+                                .header("Content-Security-Policy", policy.host(uri))
+                                .build()
+                                .map(host -> new PagePreviewResponse(host, uri, policy.child(uri)));
+                    });
         });
     }
 
@@ -56,17 +70,18 @@ public class PagePreview {
         // Public paths live below the context path, so every source must name it too.
         var origin = scopedOrigin(base, request.requestPath().contextPath().value());
         var paths = Stream.concat(allowedPrefixes().stream(), PreviewPublicPaths.ALL.stream())
-            .toList();
-        var sources = origin == null ? List.<String>of()
-            : paths.stream().map(prefix -> origin + prefix).distinct().toList();
+                .toList();
+        var sources = origin == null
+                ? List.<String>of()
+                : paths.stream().map(prefix -> origin + prefix).distinct().toList();
         // A trailing slash also allows resources below a configured deployment sub-path.
         var resourceSources = base == null ? "'unsafe-inline'" : base + "/ 'unsafe-inline'";
         var connectSources = sources.isEmpty() ? "'none'" : String.join(" ", sources);
         // Theme runtimes may compile expressions. Connections remain limited to public paths.
         return new Policy("default-src 'none'; script-src " + resourceSources
-            + " 'unsafe-eval'; style-src " + resourceSources
-            + "; img-src * data: blob:; font-src * data:; media-src *"
-            + "; connect-src " + connectSources);
+                + " 'unsafe-eval'; style-src " + resourceSources
+                + "; img-src * data: blob:; font-src * data:; media-src *"
+                + "; connect-src " + connectSources);
     }
 
     /** Adds the deployment path the preview document is served under. */
@@ -85,7 +100,7 @@ public class PagePreview {
             return publicApiCatalog.publicPathPrefixes();
         } catch (IllegalStateException error) {
             org.slf4j.LoggerFactory.getLogger(PagePreview.class)
-                .warn("Unable to build the preview API allowlist; blocking API access", error);
+                    .warn("Unable to build the preview API allowlist; blocking API access", error);
             return List.of();
         }
     }
@@ -106,7 +121,7 @@ public class PagePreview {
 
         private String content(String base, String frames) {
             return common + "; base-uri " + base + "; frame-src " + frames
-                + "; object-src 'none'; worker-src 'none'; form-action 'none'";
+                    + "; object-src 'none'; worker-src 'none'; form-action 'none'";
         }
     }
 }

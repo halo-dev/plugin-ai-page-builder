@@ -43,27 +43,25 @@ public class ThemeContextExtractor {
     private static final int COMPONENT_LIMIT = 32;
     private static final int WRAPPER_LIMIT = 5;
     private static final CSSWriterSettings CSS_SETTINGS = new CSSWriterSettings(true);
-    private static final Pattern FRAGMENT = Pattern.compile(
-        "~\\{\\s*([A-Za-z0-9_./-]+)(?:\\s*::\\s*([A-Za-z0-9_-]+)(?:\\([\\s\\S]*\\))?)?\\s*}");
+    private static final Pattern FRAGMENT =
+            Pattern.compile("~\\{\\s*([A-Za-z0-9_./-]+)(?:\\s*::\\s*([A-Za-z0-9_-]+)(?:\\([\\s\\S]*\\))?)?\\s*}");
     private static final Pattern CONTENT_REFERENCE = Pattern.compile("\\$\\{\\s*content\\s*}");
     private static final Pattern DIRECT_LAYOUT_PARAMETER = Pattern.compile(
-        "(?:\\$\\{\\s*(?:head|content|foot)\\s*}"
-            + "|~\\{\\s*\\$\\{\\s*(?:head|content|foot)\\s*}\\s*})");
+            "(?:\\$\\{\\s*(?:head|content|foot)\\s*}" + "|~\\{\\s*\\$\\{\\s*(?:head|content|foot)\\s*}\\s*})");
     private static final Pattern FUNCTION = Pattern.compile("([a-zA-Z-]+)\\s*\\(");
-    private static final Pattern VARIABLE = Pattern.compile("var\\(\\s*(--[a-zA-Z0-9_-]+)",
-        Pattern.CASE_INSENSITIVE);
+    private static final Pattern VARIABLE = Pattern.compile("var\\(\\s*(--[a-zA-Z0-9_-]+)", Pattern.CASE_INSENSITIVE);
     // Tailwind variants/arbitrary values are part of the real class name, so keep ':' and brackets.
-    private static final Pattern CLASS_NAME = Pattern.compile(
-        "!?[A-Za-z_][A-Za-z0-9_:\\[\\].%()#,/'-]{0,127}");
+    private static final Pattern CLASS_NAME = Pattern.compile("!?[A-Za-z_][A-Za-z0-9_:\\[\\].%()#,/'-]{0,127}");
     private static final Pattern STRING_LITERAL = Pattern.compile("'([^']*)'|\"([^\"]*)\"");
     // Article typography (prose, markdown-body, ...) is deliberately excluded: it must not be
     // suggested as landing-page component vocabulary.
-    private static final Pattern COMPONENT_CLASS = Pattern.compile(
-        "\\.(btn|card|badge|alert|input|select|textarea|table|tabs|tab|hero|navbar|menu|dropdown"
-            + "|modal|breadcrumb|pagination|toast|tooltip|progress|avatar|chip|tag|panel|divider"
-            + "|stat|steps|timeline|collapse|drawer)"
-            + "(?![A-Za-z0-9_-])");
+    private static final Pattern COMPONENT_CLASS =
+            Pattern.compile("\\.(btn|card|badge|alert|input|select|textarea|table|tabs|tab|hero|navbar|menu|dropdown"
+                    + "|modal|breadcrumb|pagination|toast|tooltip|progress|avatar|chip|tag|panel|divider"
+                    + "|stat|steps|timeline|collapse|drawer)"
+                    + "(?![A-Za-z0-9_-])");
     private static final Map<String, Pattern> UI_FRAMEWORKS = new LinkedHashMap<>();
+
     static {
         UI_FRAMEWORKS.put("Tailwind CSS", Pattern.compile("--tw-[a-z-]+\\s*:"));
         UI_FRAMEWORKS.put("daisyUI", Pattern.compile("--(?:b1|b2|bc)\\s*:"));
@@ -71,29 +69,70 @@ public class ThemeContextExtractor {
         UI_FRAMEWORKS.put("Bulma", Pattern.compile("--bulma-[a-z-]+\\s*:"));
         UI_FRAMEWORKS.put("Material", Pattern.compile("--md-(?:sys|ref)-[a-z-]+\\s*:"));
     }
-    private static final Set<String> BASE_SELECTORS = Set.of(":root", "html", "body", "h1", "h2",
-        "h3", "h4", "h5", "h6", "p", "a", "main", "article", "section", ".container", ".wrapper");
-    private static final Set<String> PREVIEW_PROPERTIES = Set.of("color", "background-color",
-        "font-family", "font-size", "font-weight", "font-style", "line-height", "letter-spacing",
-        "text-align", "text-decoration-color");
-    private static final Set<String> SAFE_FUNCTIONS = Set.of("var", "rgb", "rgba", "hsl", "hsla",
-        "hwb", "lab", "lch", "oklab", "oklch", "color", "color-mix", "calc", "min", "max", "clamp");
+
+    private static final Set<String> BASE_SELECTORS = Set.of(
+            ":root",
+            "html",
+            "body",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "a",
+            "main",
+            "article",
+            "section",
+            ".container",
+            ".wrapper");
+    private static final Set<String> PREVIEW_PROPERTIES = Set.of(
+            "color",
+            "background-color",
+            "font-family",
+            "font-size",
+            "font-weight",
+            "font-style",
+            "line-height",
+            "letter-spacing",
+            "text-align",
+            "text-decoration-color");
+    private static final Set<String> SAFE_FUNCTIONS = Set.of(
+            "var",
+            "rgb",
+            "rgba",
+            "hsl",
+            "hsla",
+            "hwb",
+            "lab",
+            "lch",
+            "oklab",
+            "oklch",
+            "color",
+            "color-mix",
+            "calc",
+            "min",
+            "max",
+            "clamp");
     private final ContentPolicy policy;
 
     public ThemeContextExtractor(ContentPolicy policy) {
         this.policy = policy;
     }
 
-    @Schema(requiredProperties = {"sources", "notes", "previewCss", "colorMode", "contentSlot",
-        "uiStack", "coverage"})
-    public record Result(List<Source> sources, List<String> notes, String previewCss,
-        ThemeStyleContext.ColorMode colorMode, ThemeStyleContext.ContentSlot contentSlot,
-        ThemeStyleContext.UiStack uiStack, ThemeStyleContext.Coverage coverage) {
-    }
+    @Schema(requiredProperties = {"sources", "notes", "previewCss", "colorMode", "contentSlot", "uiStack", "coverage"})
+    public record Result(
+            List<Source> sources,
+            List<String> notes,
+            String previewCss,
+            ThemeStyleContext.ColorMode colorMode,
+            ThemeStyleContext.ContentSlot contentSlot,
+            ThemeStyleContext.UiStack uiStack,
+            ThemeStyleContext.Coverage coverage) {}
 
     @Schema(requiredProperties = {"path", "kind", "content"})
-    public record Source(String path, String kind, String content) {
-    }
+    public record Source(String path, String kind, String content) {}
 
     /** Reader paths are relative to the theme root; missing files must return null. */
     public Result extract(Function<String, String> reader) {
@@ -105,18 +144,21 @@ public class ThemeContextExtractor {
     }
 
     /**
-     * @param pageTemplate the theme's article page template, if known; its wrapper and
-     *     typography classes are reported as reference only, since generated landing pages
-     *     must fill the layout content slot rather than reproduce an article column.
+     * @param pageTemplate the theme's article page template, if known; its wrapper and typography classes are reported
+     *     as reference only, since generated landing pages must fill the layout content slot rather than reproduce an
+     *     article column.
      */
     public Result extract(Function<String, String> reader, String themeName, String pageTemplate) {
-        return extractSources(path -> {
-            var text = reader.apply(path);
-            return text == null ? null : new SourceText(text, false);
-        }, themeName, pageTemplate);
+        return extractSources(
+                path -> {
+                    var text = reader.apply(path);
+                    return text == null ? null : new SourceText(text, false);
+                },
+                themeName,
+                pageTemplate);
     }
 
-    record SourceText(String text, boolean byteTruncated) { }
+    record SourceText(String text, boolean byteTruncated) {}
 
     Result extractSources(Function<String, SourceText> reader, String themeName, String pageTemplate) {
         var extraction = new Extraction(reader, themeName);
@@ -168,8 +210,7 @@ public class ThemeContextExtractor {
         }
 
         private void gap(String path, String reason, String detail) {
-            var gap = new ThemeStyleContext.Gap(path, reason,
-                detail.substring(0, Math.min(250, detail.length())));
+            var gap = new ThemeStyleContext.Gap(path, reason, detail.substring(0, Math.min(250, detail.length())));
             if (gaps.contains(gap)) return;
             if (gaps.size() < GAP_LIMIT) gaps.add(gap);
             else moreGaps = true;
@@ -200,8 +241,8 @@ public class ThemeContextExtractor {
         }
 
         private void source(String path, String kind, String content, boolean css) {
-            int available = Math.min(6_000,
-                (css ? SOURCE_BUDGET : TEMPLATE_BUDGET) - sourceSize - path.length() - kind.length());
+            int available = Math.min(
+                    6_000, (css ? SOURCE_BUDGET : TEMPLATE_BUDGET) - sourceSize - path.length() - kind.length());
             if (available <= 0 || sources.size() >= (css ? 16 : 8)) {
                 omitted(path, "source_limit", "上下文预算已耗尽，未展开");
                 return;
@@ -253,11 +294,18 @@ public class ThemeContextExtractor {
             root.select("script, iframe, object, embed, noscript").remove();
             var elements = new ArrayList<>(root.getAllElements());
             for (var element : elements) {
-                for (var attribute : List.of("th:style", "th:class", "th:classappend",
-                    "th:data-theme", "th:data-theme-light", "th:data-theme-dark")) {
+                for (var attribute : List.of(
+                        "th:style",
+                        "th:class",
+                        "th:classappend",
+                        "th:data-theme",
+                        "th:data-theme-light",
+                        "th:data-theme-dark")) {
                     if (element.hasAttr(attribute)) {
-                        omitted(path, "dynamic_expression", element.normalName() + "@"
-                            + attribute + "：动态设计值未求值，静态源码不包含运行时设置值");
+                        omitted(
+                                path,
+                                "dynamic_expression",
+                                element.normalName() + "@" + attribute + "：动态设计值未求值，静态源码不包含运行时设置值");
                     }
                 }
                 if (Set.of("div", "main", "article", "section", "body").contains(element.normalName())) {
@@ -277,9 +325,8 @@ public class ThemeContextExtractor {
                     continue;
                 }
                 if (Set.of("link", "style").contains(element.normalName())
-                    && !element.attr("media").isBlank()) {
-                    omitted(path, "conditional_stylesheet",
-                        "带 media 条件的 link/style 未展开 " + element.attr("media"));
+                        && !element.attr("media").isBlank()) {
+                    omitted(path, "conditional_stylesheet", "带 media 条件的 link/style 未展开 " + element.attr("media"));
                     element.remove();
                     continue;
                 }
@@ -289,8 +336,11 @@ public class ThemeContextExtractor {
                     if (cssPath != null) {
                         references.add(() -> stylesheet(cssPath));
                     } else if (!element.attr("th:href").isBlank() || !href.isBlank()) {
-                        omitted(path, "unresolved_stylesheet", "非静态本地 CSS 链接未展开 "
-                            + (element.attr("th:href").isBlank() ? href : element.attr("th:href")));
+                        omitted(
+                                path,
+                                "unresolved_stylesheet",
+                                "非静态本地 CSS 链接未展开 "
+                                        + (element.attr("th:href").isBlank() ? href : element.attr("th:href")));
                     }
                 }
                 if (element.normalName().equals("style")) {
@@ -302,7 +352,7 @@ public class ThemeContextExtractor {
                 }
                 for (var attribute : new ArrayList<>(element.attributes().asList())) {
                     if (!Set.of("class", "id", "style", "th:fragment", "th:replace", "th:insert")
-                        .contains(attribute.getKey())) {
+                            .contains(attribute.getKey())) {
                         element.removeAttr(attribute.getKey());
                     }
                 }
@@ -317,9 +367,10 @@ public class ThemeContextExtractor {
                     continue;
                 }
                 var slots = shell.getAllElements().stream()
-                    .filter(element -> element != shell && (element.hasAttr("th:replace")
-                        || element.hasAttr("th:insert")))
-                    .map(element -> element.clone().empty()).toList();
+                        .filter(element ->
+                                element != shell && (element.hasAttr("th:replace") || element.hasAttr("th:insert")))
+                        .map(element -> element.clone().empty())
+                        .toList();
                 shell.empty();
                 if (shell == root || shell.hasAttr("th:replace") || shell.hasAttr("th:insert")) {
                     slots.forEach(shell::appendChild);
@@ -333,8 +384,8 @@ public class ThemeContextExtractor {
         }
 
         /**
-         * Ancestors that layout.html applies around the content slot. A generated page is
-         * mounted inside them, so their width and padding must not be repeated.
+         * Ancestors that layout.html applies around the content slot. A generated page is mounted inside them, so their
+         * width and padding must not be repeated.
          */
         private List<ThemeStyleContext.ContentSlot.Wrapper> layoutSlot() {
             var text = read("templates/layout.html");
@@ -349,17 +400,15 @@ public class ThemeContextExtractor {
             var document = Jsoup.parse(text, parser);
             Element placeholder = null;
             for (var element : document.getAllElements()) {
-                var expression = element.attr(element.hasAttr("th:replace")
-                    ? "th:replace" : "th:insert").trim();
+                var expression = element.attr(element.hasAttr("th:replace") ? "th:replace" : "th:insert")
+                        .trim();
                 if (CONTENT_REFERENCE.matcher(expression).find()) {
                     if (!DIRECT_LAYOUT_PARAMETER.matcher(expression).matches()) {
-                        omitted("templates/layout.html", "unresolved_slot",
-                            "content 经片段传参或复合表达式挂载，无法静态确定挂载祖先");
+                        omitted("templates/layout.html", "unresolved_slot", "content 经片段传参或复合表达式挂载，无法静态确定挂载祖先");
                         return List.of();
                     }
                     if (placeholder != null) {
-                        omitted("templates/layout.html", "ambiguous_slot",
-                            "存在多个 content 插槽，无法静态确定挂载祖先");
+                        omitted("templates/layout.html", "ambiguous_slot", "存在多个 content 插槽，无法静态确定挂载祖先");
                         return List.of();
                     }
                     placeholder = element;
@@ -383,45 +432,49 @@ public class ThemeContextExtractor {
             var htmlDocument = Jsoup.parse(html.outerHtml());
             var slotElement = placeholder;
             var htmlSlot = htmlDocument.getAllElements().stream()
-                .filter(element -> element.attr("th:replace").equals(slotElement.attr("th:replace"))
-                    && element.attr("th:insert").equals(slotElement.attr("th:insert")))
-                .findFirst().orElse(null);
+                    .filter(element -> element.attr("th:replace").equals(slotElement.attr("th:replace"))
+                            && element.attr("th:insert").equals(slotElement.attr("th:insert")))
+                    .findFirst()
+                    .orElse(null);
             if (htmlSlot == null || !slotAncestry(placeholder).equals(slotAncestry(htmlSlot))) {
-                omitted("templates/layout.html", "ambiguous_slot",
-                    "HTML 隐式闭合或树结构修正改变了 content 祖先，无法静态确定挂载约束");
+                omitted("templates/layout.html", "ambiguous_slot", "HTML 隐式闭合或树结构修正改变了 content 祖先，无法静态确定挂载约束");
                 return List.of();
             }
             // th:insert keeps the host element around the inserted content; th:replace
             // swaps the host out, so only its ancestors wrap the content.
             var chain = new ArrayList<ThemeStyleContext.ContentSlot.Wrapper>();
             var parent = placeholder.hasAttr("th:insert") && !placeholder.hasAttr("th:replace")
-                ? placeholder : placeholder.parent();
+                    ? placeholder
+                    : placeholder.parent();
             boolean main = false;
             boolean conditional = false;
             for (var ancestor = parent; ancestor != null; ancestor = ancestor.parent()) {
                 if (ancestor.hasAttr("th:remove")
-                    && !ancestor.attr("th:remove").trim().equals("none")) {
-                    omitted("templates/layout.html", "unresolved_slot",
-                        "content 挂载祖先包含 th:remove，无法静态确定保留的挂载约束");
+                        && !ancestor.attr("th:remove").trim().equals("none")) {
+                    omitted("templates/layout.html", "unresolved_slot", "content 挂载祖先包含 th:remove，无法静态确定保留的挂载约束");
                     return List.of();
                 }
                 // th:block controls processing but does not emit a wrapper element.
                 main |= !ancestor.normalName().equals("th:block")
-                    && (ancestor.normalName().equals("main") || ancestor.attr("role").equals("main"));
-                conditional |= ancestor.hasAttr("th:if") || ancestor.hasAttr("th:unless")
-                    || ancestor.hasAttr("th:replace")
-                    || (ancestor != placeholder && ancestor.hasAttr("th:insert"));
+                        && (ancestor.normalName().equals("main")
+                                || ancestor.attr("role").equals("main"));
+                conditional |= ancestor.hasAttr("th:if")
+                        || ancestor.hasAttr("th:unless")
+                        || ancestor.hasAttr("th:replace")
+                        || (ancestor != placeholder && ancestor.hasAttr("th:insert"));
             }
             mainLandmark = conditional ? "unknown" : main ? "present" : "absent";
-            while (parent != null && chain.size() < WRAPPER_LIMIT
-                && !Set.of("body", "html", "#root").contains(parent.normalName())) {
+            while (parent != null
+                    && chain.size() < WRAPPER_LIMIT
+                    && !Set.of("body", "html", "#root").contains(parent.normalName())) {
                 var classes = elementClasses(parent);
                 var style = style(parent.attr("style"));
-                if (!parent.normalName().equals("th:block") && (!classes.isEmpty()
-                    || style != null || parent.normalName().equals("main")
-                    || parent.attr("role").equals("main"))) {
-                    chain.add(new ThemeStyleContext.ContentSlot.Wrapper(parent.normalName(),
-                        classes, style));
+                if (!parent.normalName().equals("th:block")
+                        && (!classes.isEmpty()
+                                || style != null
+                                || parent.normalName().equals("main")
+                                || parent.attr("role").equals("main"))) {
+                    chain.add(new ThemeStyleContext.ContentSlot.Wrapper(parent.normalName(), classes, style));
                 }
                 parent = parent.parent();
             }
@@ -430,15 +483,14 @@ public class ThemeContextExtractor {
         }
 
         /**
-         * Reads the page template that Halo inserts into the layout's content slot. Its
-         * ancestors carry the spacing/width that normal theme pages have but a generated page
-         * mounted at the slot alone would miss. A standalone page template repeats the layout
-         * ancestors, so utilities are removed depth by depth; wrappers without a counterpart keep
-         * theirs. This avoids nesting a second max-width or horizontal padding without stripping
-         * an inner article's own centering or width.
+         * Reads the page template that Halo inserts into the layout's content slot. Its ancestors carry the
+         * spacing/width that normal theme pages have but a generated page mounted at the slot alone would miss. A
+         * standalone page template repeats the layout ancestors, so utilities are removed depth by depth; wrappers
+         * without a counterpart keep theirs. This avoids nesting a second max-width or horizontal padding without
+         * stripping an inner article's own centering or width.
          */
-        private ThemeStyleContext.ContentSlot pageTemplate(String path,
-            List<ThemeStyleContext.ContentSlot.Wrapper> slot) {
+        private ThemeStyleContext.ContentSlot pageTemplate(
+                String path, List<ThemeStyleContext.ContentSlot.Wrapper> slot) {
             if (path == null) {
                 return new ThemeStyleContext.ContentSlot("", slot, List.of(), List.of(), mainLandmark);
             }
@@ -463,13 +515,13 @@ public class ThemeContextExtractor {
             }
             var wrapper = new ArrayList<ThemeStyleContext.ContentSlot.Wrapper>();
             var parent = content.parent();
-            while (parent != null && wrapper.size() < WRAPPER_LIMIT
-                && !Set.of("body", "html", "#root").contains(parent.normalName())) {
+            while (parent != null
+                    && wrapper.size() < WRAPPER_LIMIT
+                    && !Set.of("body", "html", "#root").contains(parent.normalName())) {
                 var classes = elementClasses(parent);
                 var style = style(parent.attr("style"));
                 if (!classes.isEmpty() || style != null) {
-                    wrapper.add(new ThemeStyleContext.ContentSlot.Wrapper(parent.normalName(),
-                        classes, style));
+                    wrapper.add(new ThemeStyleContext.ContentSlot.Wrapper(parent.normalName(), classes, style));
                 }
                 parent = parent.parent();
             }
@@ -489,8 +541,7 @@ public class ThemeContextExtractor {
                 if (classes.isEmpty() && (item.style() == null || item.style().isBlank())) {
                     continue;
                 }
-                adjusted.add(new ThemeStyleContext.ContentSlot.Wrapper(item.tag(), classes,
-                    item.style()));
+                adjusted.add(new ThemeStyleContext.ContentSlot.Wrapper(item.tag(), classes, item.style()));
             }
             adjusted.forEach(item -> item.classes().forEach(this::addContainer));
             var contentClasses = elementClasses(content);
@@ -498,34 +549,35 @@ public class ThemeContextExtractor {
             for (var element : document.getAllElements()) {
                 if (!element.normalName().equals("link") || !isStylesheet(element)) continue;
                 if (!element.attr("media").isBlank()) {
-                    omitted(path, "conditional_stylesheet",
-                        "带 media 条件的 link 未展开 " + element.attr("media"));
+                    omitted(path, "conditional_stylesheet", "带 media 条件的 link 未展开 " + element.attr("media"));
                     continue;
                 }
-                var cssPath = cssPath(path, themeName, element.attr("th:href"),
-                    element.attr("href"));
+                var cssPath = cssPath(path, themeName, element.attr("th:href"), element.attr("href"));
                 if (cssPath != null) {
                     pageStyles.add(() -> stylesheet(cssPath));
                 } else if (!element.attr("th:href").isBlank()
-                    || !element.attr("href").isBlank()) {
-                    omitted(path, "unresolved_stylesheet", "非静态本地 CSS 链接未展开 "
-                        + (element.attr("th:href").isBlank()
-                            ? element.attr("href") : element.attr("th:href")));
+                        || !element.attr("href").isBlank()) {
+                    omitted(
+                            path,
+                            "unresolved_stylesheet",
+                            "非静态本地 CSS 链接未展开 "
+                                    + (element.attr("th:href").isBlank()
+                                            ? element.attr("href")
+                                            : element.attr("th:href")));
                 }
             }
             var inlineStyles = document.select("style");
             for (var element : inlineStyles) {
                 if (!element.attr("media").isBlank()) {
-                    omitted(path, "conditional_stylesheet",
-                        "带 media 条件的 style 未展开 " + element.attr("media"));
+                    omitted(path, "conditional_stylesheet", "带 media 条件的 style 未展开 " + element.attr("media"));
                     continue;
                 }
                 var inline = element.data();
                 var stylePath = path + "#style-" + (inlineStyles.indexOf(element) + 1);
                 pageStyles.add(() -> inlineStyle(stylePath, inline));
             }
-            return new ThemeStyleContext.ContentSlot(path, slot, List.copyOf(adjusted),
-                List.copyOf(contentClasses), mainLandmark);
+            return new ThemeStyleContext.ContentSlot(
+                    path, slot, List.copyOf(adjusted), List.copyOf(contentClasses), mainLandmark);
         }
 
         private static boolean isContentSlot(Element element) {
@@ -537,16 +589,17 @@ public class ThemeContextExtractor {
         }
 
         /**
-         * A theme may render different content branches (for example a visual page and a
-         * normal article). Prefer the branch whose content element and ancestors carry the
-         * most theme classes, because that is the branch normal pages use for styling.
+         * A theme may render different content branches (for example a visual page and a normal article). Prefer the
+         * branch whose content element and ancestors carry the most theme classes, because that is the branch normal
+         * pages use for styling.
          */
         private static int slotScore(Element content) {
             int score = elementClasses(content).size();
             var parent = content.parent();
             int depth = 0;
-            while (parent != null && depth++ < WRAPPER_LIMIT
-                && !Set.of("body", "html", "#root").contains(parent.normalName())) {
+            while (parent != null
+                    && depth++ < WRAPPER_LIMIT
+                    && !Set.of("body", "html", "#root").contains(parent.normalName())) {
                 score += elementClasses(parent).size();
                 parent = parent.parent();
             }
@@ -556,7 +609,7 @@ public class ThemeContextExtractor {
         private static boolean isStylesheet(Element element) {
             var rel = element.attr("rel");
             return rel.isBlank()
-                || List.of(rel.toLowerCase(Locale.ROOT).split("\\s+")).contains("stylesheet");
+                    || List.of(rel.toLowerCase(Locale.ROOT).split("\\s+")).contains("stylesheet");
         }
 
         /** Class names plus literal tokens in th:class/th:classappend expressions. */
@@ -579,8 +632,12 @@ public class ThemeContextExtractor {
                 // "'true'" in x == 'true' or getOrDefault(x, 'false').
                 var before = expression.substring(0, matcher.start()).stripTrailing();
                 var after = expression.substring(matcher.end()).stripLeading();
-                if (before.endsWith("==") || before.endsWith("!=") || before.endsWith(",")
-                    || before.endsWith("(") || after.startsWith("==") || after.startsWith("!=")) {
+                if (before.endsWith("==")
+                        || before.endsWith("!=")
+                        || before.endsWith(",")
+                        || before.endsWith("(")
+                        || after.startsWith("==")
+                        || after.startsWith("!=")) {
                     continue;
                 }
                 var value = matcher.group(1) == null ? matcher.group(2) : matcher.group(1);
@@ -605,13 +662,14 @@ public class ThemeContextExtractor {
 
         private static String style(String value) {
             var text = value == null ? "" : value.trim();
-            return text.isEmpty() || text.length() > 300
-                || !text.matches("[A-Za-z0-9_#.,%+*/()'\" :;-]+") ? null : text;
+            return text.isEmpty() || text.length() > 300 || !text.matches("[A-Za-z0-9_#.,%+*/()'\" :;-]+")
+                    ? null
+                    : text;
         }
 
         /**
-         * Rebuild the CSS escape form of a class as ph-css writes selectors, so wrapper and
-         * content classes with variants or arbitrary values can match base rules.
+         * Rebuild the CSS escape form of a class as ph-css writes selectors, so wrapper and content classes with
+         * variants or arbitrary values can match base rules.
          */
         private static String cssClass(String name) {
             var escaped = new StringBuilder(".");
@@ -658,20 +716,24 @@ public class ThemeContextExtractor {
             styles.putIfAbsent(path, new Stylesheet(path, text));
         }
 
-        private record Stylesheet(String path, String inline) { }
+        private record Stylesheet(String path, String inline) {}
 
         private void stylesheets(int layoutCount) {
             var candidates = new ArrayList<>(styles.values());
             var selected = new ArrayList<Stylesheet>();
             selectStyles(candidates.subList(0, layoutCount), FILE_LIMIT, selected);
-            selectStyles(candidates.subList(layoutCount, candidates.size()),
-                FILE_LIMIT - selected.size(), selected);
+            selectStyles(candidates.subList(layoutCount, candidates.size()), FILE_LIMIT - selected.size(), selected);
             int remaining = selected.size();
             for (var style : selected) {
                 // Share the available context before parsing, so early vendor CSS cannot
                 // consume the slots reserved for later theme overrides. Keep cascade order.
-                int budget = Math.max(0, Math.min(6_000,
-                    (SOURCE_BUDGET - sourceSize) / remaining-- - style.path().length() - 3));
+                int budget = Math.max(
+                        0,
+                        Math.min(
+                                6_000,
+                                (SOURCE_BUDGET - sourceSize) / remaining--
+                                        - style.path().length()
+                                        - 3));
                 var text = style.inline() == null ? read(style.path()) : style.inline();
                 if (text != null) css(style.path(), text, budget);
             }
@@ -692,11 +754,11 @@ public class ThemeContextExtractor {
             inspectCss(text);
             try {
                 var errors = new CollectingCSSParseErrorHandler();
-                var sheet = CSSReader.readFromStringReader(text, new CSSReaderSettings()
-                    .setBrowserCompliantMode(true).setCustomErrorHandler(errors));
+                var sheet = CSSReader.readFromStringReader(
+                        text,
+                        new CSSReaderSettings().setBrowserCompliantMode(true).setCustomErrorHandler(errors));
                 if (errors.hasParseErrors()) {
-                    omitted(path, "parse_loss",
-                        "CSS 容错解析省略了 " + errors.getParseErrorCount() + " 处不支持的语法");
+                    omitted(path, "parse_loss", "CSS 容错解析省略了 " + errors.getParseErrorCount() + " 处不支持的语法");
                 }
                 if (sheet == null) {
                     omitted(path, "parse_loss", "CSS 解析失败，未展开");
@@ -766,9 +828,10 @@ public class ThemeContextExtractor {
             var compound = firstCompound(selector);
             int end = compoundMembers(selector);
             return ThemeStyleContext.RootState.fromSelector(compound) != null
-                && (end == selector.getMemberCount()
-                    || selector.getMemberAtIndex(end) == ECSSSelectorCombinator.BLANK)
-                ? compound : null;
+                            && (end == selector.getMemberCount()
+                                    || selector.getMemberAtIndex(end) == ECSSSelectorCombinator.BLANK)
+                    ? compound
+                    : null;
         }
 
         /** The compound selector before the first combinator, e.g. ".prose" in ".prose h2". */
@@ -800,12 +863,11 @@ public class ThemeContextExtractor {
             var condition = rootCondition(selector);
             if (condition == null) return false;
             var descendant = text.substring(condition.length()).trim();
-            return descendant.isEmpty() || BASE_SELECTORS.contains(descendant)
-                || containers.contains(descendant);
+            return descendant.isEmpty() || BASE_SELECTORS.contains(descendant) || containers.contains(descendant);
         }
 
-        private List<ICSSTopLevelRule> filterRules(AbstractHasTopLevelRules parent,
-            boolean preview, int depth, String path) {
+        private List<ICSSTopLevelRule> filterRules(
+                AbstractHasTopLevelRules parent, boolean preview, int depth, String path) {
             var result = new ArrayList<ICSSTopLevelRule>();
             if (depth > 4) {
                 omitted(path, "depth_limit", "CSS 嵌套深度上限，未展开");
@@ -829,10 +891,11 @@ public class ThemeContextExtractor {
                         } else if (!preview || safeDeclaration(declaration)) {
                             selected.addDeclaration(declaration);
                             size += value.length();
-                            if (!preview && variableExamples < 4
-                                && VARIABLE.matcher(declaration.getExpressionAsCSSString()).find()) {
-                                note("主题变量原始用法：" + value
-                                    + "；保留外层颜色函数，变量可能只是分量；不要复制主题变量定义遮蔽动态值。");
+                            if (!preview
+                                    && variableExamples < 4
+                                    && VARIABLE.matcher(declaration.getExpressionAsCSSString())
+                                            .find()) {
+                                note("主题变量原始用法：" + value + "；保留外层颜色函数，变量可能只是分量；不要复制主题变量定义遮蔽动态值。");
                                 variableExamples++;
                             }
                         }
@@ -869,16 +932,22 @@ public class ThemeContextExtractor {
             // Do not retain var() references to rejected or unknown custom properties.
             boolean changed;
             do {
-                changed = variables.entrySet().removeIf(entry -> entry.getValue().stream()
-                    .anyMatch(declaration -> !knownVariables(declaration, variables.keySet())));
+                changed = variables
+                        .entrySet()
+                        .removeIf(entry -> entry.getValue().stream()
+                                .anyMatch(declaration -> !knownVariables(declaration, variables.keySet())));
             } while (changed);
             pruneVariables(previewRules, variables.keySet());
             var preview = new StringBuilder();
             for (var rule : previewRules) {
                 var css = rule.getAsCSSString(CSS_SETTINGS, 0);
                 var lower = css.toLowerCase(Locale.ROOT);
-                if (lower.contains("url") || lower.contains("@import") || lower.contains("\\\\")
-                    || lower.contains("<") || lower.contains("image-set") || lower.contains("expression")) {
+                if (lower.contains("url")
+                        || lower.contains("@import")
+                        || lower.contains("\\\\")
+                        || lower.contains("<")
+                        || lower.contains("image-set")
+                        || lower.contains("expression")) {
                     note("previewCss：含资源或动态语法的规则已省略");
                     continue;
                 }
@@ -897,37 +966,48 @@ public class ThemeContextExtractor {
                 note("previewCss：组合 CSS 未通过 ContentPolicy，已省略");
             }
             note("静态 CSS 不能确定访客当前模式；未读取主题设置、存储或执行脚本，动态条件可能未展开。");
-            note(rootStates.isEmpty()
-                ? "颜色模式 unknown：未识别到显式根条件，访客当前模式未知。"
-                : "已识别显式根条件，详见 colorMode.rootStates。");
-            var colorMode = new ThemeStyleContext.ColorMode(rootStates.isEmpty() ? "unknown" : "explicit",
-                List.copyOf(rootStates.values()), List.copyOf(colorEvidence));
-            var uiStack = new ThemeStyleContext.UiStack(List.copyOf(frameworks),
-                List.copyOf(componentClasses));
-            return new Result(List.copyOf(sources), List.copyOf(notes), css, colorMode,
-                contentSlot, uiStack, new ThemeStyleContext.Coverage(List.copyOf(gaps), moreGaps));
+            note(rootStates.isEmpty() ? "颜色模式 unknown：未识别到显式根条件，访客当前模式未知。" : "已识别显式根条件，详见 colorMode.rootStates。");
+            var colorMode = new ThemeStyleContext.ColorMode(
+                    rootStates.isEmpty() ? "unknown" : "explicit",
+                    List.copyOf(rootStates.values()),
+                    List.copyOf(colorEvidence));
+            var uiStack = new ThemeStyleContext.UiStack(List.copyOf(frameworks), List.copyOf(componentClasses));
+            return new Result(
+                    List.copyOf(sources),
+                    List.copyOf(notes),
+                    css,
+                    colorMode,
+                    contentSlot,
+                    uiStack,
+                    new ThemeStyleContext.Coverage(List.copyOf(gaps), moreGaps));
         }
     }
 
     private static List<String> slotAncestry(Element slot) {
         return slot.parents().stream()
-            .filter(element -> !Set.of("body", "html", "#root").contains(element.normalName()))
-            .map(element -> element.normalName() + element.attributes()).toList();
+                .filter(element -> !Set.of("body", "html", "#root").contains(element.normalName()))
+                .map(element -> element.normalName() + element.attributes())
+                .toList();
     }
 
     private static boolean safePath(String path) {
-        return path.length() <= 240 && path.matches("/?[A-Za-z0-9_./~-]+")
-            && !path.startsWith("//") && !List.of(path.split("/")).contains("..");
+        return path.length() <= 240
+                && path.matches("/?[A-Za-z0-9_./~-]+")
+                && !path.startsWith("//")
+                && !List.of(path.split("/")).contains("..");
     }
 
     private static String cleanPath(String path) {
-        return String.join("/", java.util.Arrays.stream(path.split("/"))
-            .filter(segment -> !segment.isEmpty() && !segment.equals(".")).toList());
+        return String.join(
+                "/",
+                java.util.Arrays.stream(path.split("/"))
+                        .filter(segment -> !segment.isEmpty() && !segment.equals("."))
+                        .toList());
     }
 
     /**
-     * Accepts both static href and Thymeleaf {@code @{...}} forms, and strips query/hash before
-     * validating the path. A theme version query is irrelevant to reading the CSS file itself.
+     * Accepts both static href and Thymeleaf {@code @{...}} forms, and strips query/hash before validating the path. A
+     * theme version query is irrelevant to reading the CSS file itself.
      */
     private static String cssPath(String template, String themeName, String... hrefs) {
         for (var href : hrefs) {
@@ -937,8 +1017,7 @@ public class ThemeContextExtractor {
                 path = path.substring(2, path.length() - 1);
             }
             path = path.split("[?#]", 2)[0].trim();
-            if (!path.matches("[A-Za-z0-9_./~-]+") || !safePath(path)
-                || !path.endsWith(".css")) {
+            if (!path.matches("[A-Za-z0-9_./~-]+") || !safePath(path) || !path.endsWith(".css")) {
                 continue;
             }
             path = (path.startsWith("/") ? "/" : "") + cleanPath(path);
@@ -964,8 +1043,7 @@ public class ThemeContextExtractor {
 
     private static boolean safeDeclaration(CSSDeclaration declaration) {
         var property = declaration.getProperty();
-        if (!PREVIEW_PROPERTIES.contains(property.toLowerCase(Locale.ROOT))
-            && !property.matches("--[a-zA-Z0-9_-]+")) {
+        if (!PREVIEW_PROPERTIES.contains(property.toLowerCase(Locale.ROOT)) && !property.matches("--[a-zA-Z0-9_-]+")) {
             return false;
         }
         var value = declaration.getExpressionAsCSSString();
@@ -981,14 +1059,14 @@ public class ThemeContextExtractor {
         return true;
     }
 
-    private static void collectVariables(List<ICSSTopLevelRule> rules,
-        Map<String, List<CSSDeclaration>> variables) {
+    private static void collectVariables(List<ICSSTopLevelRule> rules, Map<String, List<CSSDeclaration>> variables) {
         for (var rule : rules) {
             if (rule instanceof CSSStyleRule style) {
                 for (var declaration : style.getAllDeclarations()) {
                     if (declaration.getProperty().startsWith("--")) {
-                        variables.computeIfAbsent(declaration.getProperty(), key -> new ArrayList<>())
-                            .add(declaration);
+                        variables
+                                .computeIfAbsent(declaration.getProperty(), key -> new ArrayList<>())
+                                .add(declaration);
                     }
                 }
             } else if (rule instanceof AbstractHasTopLevelRules nested) {

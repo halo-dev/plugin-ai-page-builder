@@ -19,26 +19,23 @@ import org.springframework.web.reactive.function.server.HandlerStrategies;
 import org.springframework.web.reactive.function.server.RenderingResponse;
 import org.springframework.web.reactive.function.server.ServerRequest;
 import reactor.core.publisher.Mono;
-import run.halo.app.infra.ExternalUrlSupplier;
-import run.halo.app.theme.TemplateNameResolver;
 import run.halo.aipagebuilder.ai.PublicApiCatalog;
 import run.halo.aipagebuilder.content.ContentPolicy;
 import run.halo.aipagebuilder.model.PageDocument;
+import run.halo.app.infra.ExternalUrlSupplier;
+import run.halo.app.theme.TemplateNameResolver;
 
 class PagePreviewRenderingTest {
     private final TemplateNameResolver resolver = mock(TemplateNameResolver.class);
     private final PublicApiCatalog publicApiCatalog = mock(PublicApiCatalog.class);
     private final ContentPolicy policy = mock(ContentPolicy.class);
     private final ExternalUrlSupplier externalUrlSupplier = requestBasedExternalUrl();
-    private final PageRenderer renderer =
-        new PageRenderer(resolver, policy, externalUrlSupplier);
-    private final PagePreview previews =
-        new PagePreview(renderer, publicApiCatalog, externalUrlSupplier);
+    private final PageRenderer renderer = new PageRenderer(resolver, policy, externalUrlSupplier);
+    private final PagePreview previews = new PagePreview(renderer, publicApiCatalog, externalUrlSupplier);
     private final ServerRequest request = ServerRequest.create(
-        MockServerWebExchange.from(MockServerHttpRequest.get("http://localhost/p/about")),
-        HandlerStrategies.withDefaults().messageReaders());
-    private final PageDocument document = new PageDocument(1, "code", "", Map.of(),
-        "<p>About</p>", "p { color: red }");
+            MockServerWebExchange.from(MockServerHttpRequest.get("http://localhost/p/about")),
+            HandlerStrategies.withDefaults().messageReaders());
+    private final PageDocument document = new PageDocument(1, "code", "", Map.of(), "<p>About</p>", "p { color: red }");
 
     @org.junit.jupiter.api.BeforeEach
     void defaultCompiledContent() {
@@ -51,100 +48,107 @@ class PagePreviewRenderingTest {
     void previewsIsolateScriptsButPublicPagesRetainTheirRuntime(boolean themeLayout) {
         var template = themeLayout ? "ai-page-builder" : "ai-page-builder-standalone";
         when(resolver.resolveTemplateNameOrDefault(any(), eq(template)))
-            .thenReturn(Mono.just("plugin:ai-page-builder:" + template));
-        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
-            "/apis/api.content.halo.run/v1alpha1/", "/apis/api.photo.halo.run/v1alpha1/"));
-        var scripted = new PageDocument(2, "code", null, null, "<p>Body</p>", "",
-            "document.querySelector('p').textContent = 'Ready';");
+                .thenReturn(Mono.just("plugin:ai-page-builder:" + template));
+        when(publicApiCatalog.publicPathPrefixes())
+                .thenReturn(List.of("/apis/api.content.halo.run/v1alpha1/", "/apis/api.photo.halo.run/v1alpha1/"));
+        var scripted = new PageDocument(
+                2, "code", null, null, "<p>Body</p>", "", "document.querySelector('p').textContent = 'Ready';");
         when(policy.sanitizeHtml(scripted.html())).thenReturn(scripted.html());
-        var preview = (RenderingResponse) previews.render(request, "about", "about", themeLayout,
-            scripted, "About", "Description").block();
+        var preview = (RenderingResponse)
+                previews.render(request, "about", "about", themeLayout, scripted, "About", "Description")
+                        .block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .isEqualTo("sandbox allow-scripts; default-src 'none'; "
-                + "script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'; "
-                + "style-src http://localhost/ 'unsafe-inline'; "
-                + "img-src * data: blob:; font-src * data:; media-src *; connect-src "
-                + "http://localhost/apis/api.content.halo.run/v1alpha1/ "
-                + "http://localhost/apis/api.photo.halo.run/v1alpha1/ "
-                + "http://localhost/rss.xml http://localhost/feed.xml "
-                + "http://localhost/sitemap.xml http://localhost/feed/; "
-                + "base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; "
-                + "form-action 'none'");
-        var published = (RenderingResponse) renderer.render(request, "about", "about", themeLayout,
-            scripted, "About", "Description").block();
+                .isEqualTo("sandbox allow-scripts; default-src 'none'; "
+                        + "script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'; "
+                        + "style-src http://localhost/ 'unsafe-inline'; "
+                        + "img-src * data: blob:; font-src * data:; media-src *; connect-src "
+                        + "http://localhost/apis/api.content.halo.run/v1alpha1/ "
+                        + "http://localhost/apis/api.photo.halo.run/v1alpha1/ "
+                        + "http://localhost/rss.xml http://localhost/feed.xml "
+                        + "http://localhost/sitemap.xml http://localhost/feed/; "
+                        + "base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; "
+                        + "form-action 'none'");
+        var published = (RenderingResponse)
+                renderer.render(request, "about", "about", themeLayout, scripted, "About", "Description")
+                        .block();
         assertThat(published.headers().getFirst("Content-Security-Policy")).isNull();
         assertThat(preview.model()).isEqualTo(published.model());
         assertThat(((PageRenderer.PageView) preview.model().get("aiPageBuilder")).html())
-            .contains("<script>");
+                .contains("<script>");
     }
 
     @Test
     void previewsWithoutApisKeepOnlyPublicFeeds() {
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of());
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
-            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+                .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
-        var preview = (RenderingResponse) previews.render(request, "about", "about", true,
-            document, "About", "Description").block();
+        var preview =
+                (RenderingResponse) previews.render(request, "about", "about", true, document, "About", "Description")
+                        .block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("connect-src http://localhost/rss.xml http://localhost/feed.xml "
-                + "http://localhost/sitemap.xml http://localhost/feed/;")
-            .doesNotContain("/apis/")
-            .doesNotContain("allow-same-origin");
+                .contains("connect-src http://localhost/rss.xml http://localhost/feed.xml "
+                        + "http://localhost/sitemap.xml http://localhost/feed/;")
+                .doesNotContain("/apis/")
+                .doesNotContain("allow-same-origin");
     }
 
     @Test
     void rejectsHostValuesThatCouldInjectCspDirectives() {
-        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
-            "/apis/api.content.halo.run/v1alpha1/"));
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of("/apis/api.content.halo.run/v1alpha1/"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
-            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+                .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
-        var injected = ServerRequest.create(MockServerWebExchange.from(
-            MockServerHttpRequest.get("/p/about").header("Host", "a; connect-src *").build()),
-            HandlerStrategies.withDefaults().messageReaders());
-        var preview = (RenderingResponse) previews.render(injected, "about", "about", true,
-            document, "About", "Description").block();
+        var injected = ServerRequest.create(
+                MockServerWebExchange.from(MockServerHttpRequest.get("/p/about")
+                        .header("Host", "a; connect-src *")
+                        .build()),
+                HandlerStrategies.withDefaults().messageReaders());
+        var preview =
+                (RenderingResponse) previews.render(injected, "about", "about", true, document, "About", "Description")
+                        .block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("connect-src 'none'").doesNotContain("connect-src *");
+                .contains("connect-src 'none'")
+                .doesNotContain("connect-src *");
     }
 
     @Test
     void rejectsExternalUrlPathsThatCouldInjectCspDirectives() {
-        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
-            "/apis/api.content.halo.run/v1alpha1/"));
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of("/apis/api.content.halo.run/v1alpha1/"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
-            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+                .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
-        var relative = ServerRequest.create(MockServerWebExchange.from(
-            MockServerHttpRequest.get("/p/about").build()),
-            HandlerStrategies.withDefaults().messageReaders());
-        var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog,
-            fixedExternalUrl("https://pages.example.com/site;x"))
-            .render(relative, "about", "about", true, document, "About", "Description").block();
+        var relative = ServerRequest.create(
+                MockServerWebExchange.from(MockServerHttpRequest.get("/p/about").build()),
+                HandlerStrategies.withDefaults().messageReaders());
+        var preview = (RenderingResponse)
+                new PagePreview(renderer, publicApiCatalog, fixedExternalUrl("https://pages.example.com/site;x"))
+                        .render(relative, "about", "about", true, document, "About", "Description")
+                        .block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("script-src 'unsafe-inline' 'unsafe-eval'")
-            .contains("connect-src 'none'").doesNotContain("site;x");
+                .contains("script-src 'unsafe-inline' 'unsafe-eval'")
+                .contains("connect-src 'none'")
+                .doesNotContain("site;x");
     }
 
     @Test
     void previewUsesServingOriginWhilePublicLinksPreferTheConfiguredUrl() {
-        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
-            "/apis/api.content.halo.run/v1alpha1/"));
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of("/apis/api.content.halo.run/v1alpha1/"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
-            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+                .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
         var external = fixedExternalUrl("https://pages.example.com/site");
         var configuredRenderer = new PageRenderer(resolver, policy, external);
-        var preview = (RenderingResponse) new PagePreview(configuredRenderer, publicApiCatalog,
-            external).render(request, "about", "about", true, document, "About", "Description").block();
+        var preview = (RenderingResponse) new PagePreview(configuredRenderer, publicApiCatalog, external)
+                .render(request, "about", "about", true, document, "About", "Description")
+                .block();
         var policy = preview.headers().getFirst("Content-Security-Policy");
         assertThat(policy)
-            .contains("connect-src http://localhost/apis/api.content.halo.run/v1alpha1/ "
-                + "http://localhost/rss.xml")
-            .contains("script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'")
-            .contains("style-src http://localhost/ 'unsafe-inline'")
-            .doesNotContain("pages.example.com");
+                .contains("connect-src http://localhost/apis/api.content.halo.run/v1alpha1/ "
+                        + "http://localhost/rss.xml")
+                .contains("script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'")
+                .contains("style-src http://localhost/ 'unsafe-inline'")
+                .doesNotContain("pages.example.com");
         assertThat(configuredRenderer.origin(request)).isEqualTo("https://pages.example.com/site");
     }
 
@@ -152,50 +156,58 @@ class PagePreviewRenderingTest {
     void malformedOriginsAreScopedWithoutFailingThePreview() {
         when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of());
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
-            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+                .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/site/p/about")
-            .contextPath("/site").header("Host", "[").build());
-        var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog,
-            requestBasedExternalUrl()).render(ServerRequest.create(exchange,
-            HandlerStrategies.withDefaults().messageReaders()), "about", "about", true, document,
-            "About", "Description").block();
-        assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("connect-src http://[/site/rss.xml");
+                .contextPath("/site")
+                .header("Host", "[")
+                .build());
+        var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog, requestBasedExternalUrl())
+                .render(
+                        ServerRequest.create(
+                                exchange, HandlerStrategies.withDefaults().messageReaders()),
+                        "about",
+                        "about",
+                        true,
+                        document,
+                        "About",
+                        "Description")
+                .block();
+        assertThat(preview.headers().getFirst("Content-Security-Policy")).contains("connect-src http://[/site/rss.xml");
     }
 
     @Test
     void previewPolicyFallsBackToTheExternalUrlWhenTheRequestOriginIsUnknown() {
-        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of(
-            "/apis/api.content.halo.run/v1alpha1/"));
+        when(publicApiCatalog.publicPathPrefixes()).thenReturn(List.of("/apis/api.content.halo.run/v1alpha1/"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
-            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+                .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
-        var relative = ServerRequest.create(MockServerWebExchange.from(
-            MockServerHttpRequest.get("/p/about").build()),
-            HandlerStrategies.withDefaults().messageReaders());
-        var preview = (RenderingResponse) new PagePreview(renderer, publicApiCatalog,
-            fixedExternalUrl("https://pages.example.com/site"))
-            .render(relative, "about", "about", true, document, "About", "Description").block();
+        var relative = ServerRequest.create(
+                MockServerWebExchange.from(MockServerHttpRequest.get("/p/about").build()),
+                HandlerStrategies.withDefaults().messageReaders());
+        var preview = (RenderingResponse)
+                new PagePreview(renderer, publicApiCatalog, fixedExternalUrl("https://pages.example.com/site"))
+                        .render(relative, "about", "about", true, document, "About", "Description")
+                        .block();
         var policy = preview.headers().getFirst("Content-Security-Policy");
         assertThat(policy)
-            .contains("connect-src "
-                + "https://pages.example.com/site/apis/api.content.halo.run/v1alpha1/ "
-                + "https://pages.example.com/site/rss.xml")
-            .contains("script-src https://pages.example.com/site/ 'unsafe-inline' 'unsafe-eval'");
+                .contains("connect-src "
+                        + "https://pages.example.com/site/apis/api.content.halo.run/v1alpha1/ "
+                        + "https://pages.example.com/site/rss.xml")
+                .contains("script-src https://pages.example.com/site/ 'unsafe-inline' 'unsafe-eval'");
     }
 
     @Test
     void previewsKeepPublicFeedsWhenTheCatalogIsUnavailable() {
-        when(publicApiCatalog.publicPathPrefixes())
-            .thenThrow(new IllegalStateException("接口目录正在变化，请重试"));
+        when(publicApiCatalog.publicPathPrefixes()).thenThrow(new IllegalStateException("接口目录正在变化，请重试"));
         when(resolver.resolveTemplateNameOrDefault(any(), eq("ai-page-builder")))
-            .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
+                .thenReturn(Mono.just("plugin:ai-page-builder:ai-page-builder"));
         when(policy.sanitizeHtml(document.html())).thenReturn(document.html());
-        var preview = (RenderingResponse) previews.render(request, "about", "about", true,
-            document, "About", "Description").block();
+        var preview =
+                (RenderingResponse) previews.render(request, "about", "about", true, document, "About", "Description")
+                        .block();
         assertThat(preview.headers().getFirst("Content-Security-Policy"))
-            .contains("connect-src http://localhost/rss.xml")
-            .doesNotContain("/apis/");
+                .contains("connect-src http://localhost/rss.xml")
+                .doesNotContain("/apis/");
     }
 
     private static ExternalUrlSupplier requestBasedExternalUrl() {
