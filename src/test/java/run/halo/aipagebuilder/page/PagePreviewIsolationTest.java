@@ -46,6 +46,52 @@ class PagePreviewIsolationTest {
             new PageDocument(2, "code", null, null, "<p>中文页面</p>", "p {color: red}", "window.executed = true");
 
     @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "<!doctype html><html><head><script>theme()</script></head><body>%s</body></html>",
+                "<!-- example <head> --><html><HEAD data-label='a > b'><title>x</title></HEAD><body>%s</body></html>",
+                "<html data-example='<head>'><head></head><body>%s</body></html>",
+                "<!doctype html><html><body>%s</body></html>",
+                "<script>var example = '<head>'</script>%s",
+                "%s"
+            })
+    void ordinaryPreviewPreservesWhitespaceAndMarkupWhenInsertingPolicy(String template) {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("https://example.test/pages/one/preview"));
+        var request = ServerRequest.create(exchange, strategies.messageReaders());
+        when(templates.resolveTemplateNameOrDefault(any(), any())).thenReturn(Mono.just("test"));
+        var content = new PageDocument(
+                2, "code", null, null, "<div style='white-space:pre-wrap'>A  B\n C</div><pre>\n\n中文</pre>", "");
+        var response = previews.render(request, "one", "about", true, content, "About", "")
+                .block();
+        var page =
+                (PageRenderer.PageView) ((PagePreviewResponse) response).model().get("aiPageBuilder");
+        var original = template.formatted(page.html());
+        response.writeTo(exchange, context(new View() {
+                    @Override
+                    public Mono<Void> render(Map<String, ?> model, MediaType type, ServerWebExchange incoming) {
+                        return incoming.getResponse()
+                                .writeWith(Mono.just(incoming.getResponse()
+                                        .bufferFactory()
+                                        .wrap(original.getBytes(StandardCharsets.UTF_8))));
+                    }
+                }))
+                .block();
+
+        var html = exchange.getResponse().getBodyAsString().block();
+        var parsed = Jsoup.parse(html);
+        var meta = parsed.head().child(0);
+        assertThat(meta.attr("http-equiv")).isEqualTo("Content-Security-Policy");
+        assertThat(html.replace(meta.outerHtml(), "")).isEqualTo(original);
+        assertThat(parsed.selectFirst("div").wholeText()).isEqualTo("A  B\n C");
+        assertThat(parsed.selectFirst("pre").wholeText()).isEqualTo("\n中文");
+        if (html.contains("<script>")) {
+            assertThat(html.indexOf(meta.outerHtml())).isLessThan(html.indexOf("<script>"));
+        }
+        assertThat(exchange.getResponse().getHeaders().getContentLength())
+                .isEqualTo(html.getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    @ParameterizedTest
     @ValueSource(booleans = {true, false})
     void largeApiCatalogKeepsHeadersSmallAndEnforcesEveryPathInTheDocument(boolean token) {
         var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("https://example.test/pages/one/preview"));

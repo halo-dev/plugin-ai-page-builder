@@ -9,6 +9,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.DataNode;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.parser.Parser;
 import org.reactivestreams.Publisher;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -99,9 +100,7 @@ record PagePreviewResponse(RenderingResponse delegate, URI documentUri, String p
                     } finally {
                         DataBufferUtils.release(buffer);
                     }
-                    var document = documentUri == null ? Jsoup.parse(html) : host(html, documentUri, childPolicy);
-                    prependPolicy(document, policy);
-                    var bytes = document.outerHtml().getBytes(StandardCharsets.UTF_8);
+                    var bytes = render(html).getBytes(StandardCharsets.UTF_8);
                     getHeaders().setContentLength(bytes.length);
                     return super.writeWith(Mono.just(bufferFactory().wrap(bytes)));
                 });
@@ -117,13 +116,29 @@ record PagePreviewResponse(RenderingResponse delegate, URI documentUri, String p
         return delegate.writeTo(renderingExchange.mutate().response(response).build(), context);
     }
 
+    private String render(String html) {
+        if (documentUri != null) {
+            var document = host(html, documentUri, childPolicy);
+            prependPolicy(document, policy);
+            return document.outerHtml();
+        }
+        // Locate the real head without reserializing theme markup: another DOM roundtrip
+        // collapses CSS-preserved whitespace and consumes a leading newline in <pre>.
+        var document = Jsoup.parse(html, Parser.htmlParser().setTrackPosition(true));
+        var head = document.head().sourceRange();
+        // An implicit head has a zero-width range before its first content token.
+        var index = head.isTracked() ? head.endPos() : 0;
+        return html.substring(0, index) + policyElement(policy).outerHtml() + html.substring(index);
+    }
+
     private static void prependPolicy(Document document, String policy) {
+        document.head().prependChild(policyElement(policy));
+    }
+
+    private static Element policyElement(String policy) {
         // Apply before every theme resource/script. Sandbox remains in the HTTP header:
         // meta CSP cannot enforce it, while API allowlists can exceed proxy header buffers.
-        document.head()
-                .prependElement("meta")
-                .attr("http-equiv", "Content-Security-Policy")
-                .attr("content", policy);
+        return new Element("meta").attr("http-equiv", "Content-Security-Policy").attr("content", policy);
     }
 
     private static Document host(String html, URI base, String policy) {
