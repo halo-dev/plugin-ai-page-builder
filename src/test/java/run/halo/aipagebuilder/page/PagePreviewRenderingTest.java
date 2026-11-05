@@ -57,8 +57,8 @@ class PagePreviewRenderingTest {
         var preview = (RenderingResponse)
                 previews.render(request, "about", "about", themeLayout, scripted, "About", "Description")
                         .block();
-        assertThat(preview.headers().getFirst("Content-Security-Policy"))
-                .isEqualTo("sandbox allow-scripts; default-src 'none'; "
+        assertThat(((PagePreviewResponse) preview).policy())
+                .isEqualTo("default-src 'none'; "
                         + "script-src http://localhost/ 'unsafe-inline' 'unsafe-eval'; "
                         + "style-src http://localhost/ 'unsafe-inline'; "
                         + "img-src * data: blob:; font-src * data:; media-src *; connect-src "
@@ -68,6 +68,7 @@ class PagePreviewRenderingTest {
                         + "http://localhost/sitemap.xml http://localhost/feed/; "
                         + "base-uri 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; "
                         + "form-action 'none'");
+        assertThat(preview.headers().getFirst("Content-Security-Policy")).isEqualTo("sandbox allow-scripts");
         var published = (RenderingResponse)
                 renderer.render(request, "about", "about", themeLayout, scripted, "About", "Description")
                         .block();
@@ -86,7 +87,7 @@ class PagePreviewRenderingTest {
         var preview =
                 (RenderingResponse) previews.render(request, "about", "about", true, document, "About", "Description")
                         .block();
-        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+        assertThat(((PagePreviewResponse) preview).policy())
                 .contains("connect-src http://localhost/rss.xml http://localhost/feed.xml "
                         + "http://localhost/sitemap.xml http://localhost/feed/;")
                 .doesNotContain("/apis/")
@@ -107,7 +108,7 @@ class PagePreviewRenderingTest {
         var preview =
                 (RenderingResponse) previews.render(injected, "about", "about", true, document, "About", "Description")
                         .block();
-        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+        assertThat(((PagePreviewResponse) preview).policy())
                 .contains("connect-src 'none'")
                 .doesNotContain("connect-src *");
     }
@@ -125,7 +126,7 @@ class PagePreviewRenderingTest {
                 new PagePreview(renderer, publicApiCatalog, fixedExternalUrl("https://pages.example.com/site;x"))
                         .render(relative, "about", "about", true, document, "About", "Description")
                         .block();
-        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+        assertThat(((PagePreviewResponse) preview).policy())
                 .contains("script-src 'unsafe-inline' 'unsafe-eval'")
                 .contains("connect-src 'none'")
                 .doesNotContain("site;x");
@@ -142,7 +143,7 @@ class PagePreviewRenderingTest {
         var preview = (RenderingResponse) new PagePreview(configuredRenderer, publicApiCatalog, external)
                 .render(request, "about", "about", true, document, "About", "Description")
                 .block();
-        var policy = preview.headers().getFirst("Content-Security-Policy");
+        var policy = ((PagePreviewResponse) preview).policy();
         assertThat(policy)
                 .contains("connect-src http://localhost/apis/api.content.halo.run/v1alpha1/ "
                         + "http://localhost/rss.xml")
@@ -172,7 +173,7 @@ class PagePreviewRenderingTest {
                         "About",
                         "Description")
                 .block();
-        assertThat(preview.headers().getFirst("Content-Security-Policy")).contains("connect-src http://[/site/rss.xml");
+        assertThat(((PagePreviewResponse) preview).policy()).contains("connect-src http://[/site/rss.xml");
     }
 
     @Test
@@ -188,7 +189,7 @@ class PagePreviewRenderingTest {
                 new PagePreview(renderer, publicApiCatalog, fixedExternalUrl("https://pages.example.com/site"))
                         .render(relative, "about", "about", true, document, "About", "Description")
                         .block();
-        var policy = preview.headers().getFirst("Content-Security-Policy");
+        var policy = ((PagePreviewResponse) preview).policy();
         assertThat(policy)
                 .contains("connect-src "
                         + "https://pages.example.com/site/apis/api.content.halo.run/v1alpha1/ "
@@ -205,7 +206,7 @@ class PagePreviewRenderingTest {
         var preview =
                 (RenderingResponse) previews.render(request, "about", "about", true, document, "About", "Description")
                         .block();
-        assertThat(preview.headers().getFirst("Content-Security-Policy"))
+        assertThat(((PagePreviewResponse) preview).policy())
                 .contains("connect-src http://localhost/rss.xml")
                 .doesNotContain("/apis/");
     }

@@ -36,9 +36,10 @@ public class PagePreview {
             String description) {
         return renderer.render(request, name, slug, themeLayout, document, title, description)
                 .flatMap(response -> RenderingResponse.from(response)
-                        .header("Content-Security-Policy", policy(request).document())
+                        .header("Content-Security-Policy", "sandbox allow-scripts")
                         .build())
-                .cast(ServerResponse.class);
+                .map(response ->
+                        new PagePreviewResponse(response, policy(request).document()));
     }
 
     public Mono<ServerResponse> token(
@@ -56,9 +57,9 @@ public class PagePreview {
                         var policy = policy(safeRequest);
                         var uri = safeRequest.uri();
                         return RenderingResponse.from(response)
-                                .header("Content-Security-Policy", policy.host(uri))
+                                .header("Content-Security-Policy", "sandbox allow-scripts")
                                 .build()
-                                .map(host -> new PagePreviewResponse(host, uri, policy.child(uri)));
+                                .map(host -> new PagePreviewResponse(host, uri, policy.host(uri), policy.child(uri)));
                     });
         });
     }
@@ -107,11 +108,11 @@ public class PagePreview {
 
     private record Policy(String common) {
         String document() {
-            return "sandbox allow-scripts; " + content("'none'", "'none'");
+            return content("'none'", "'none'");
         }
 
         String host(URI uri) {
-            return "sandbox allow-scripts; " + content(uri.toASCIIString(), "data:");
+            return content(uri.toASCIIString(), "data:");
         }
 
         String child(URI uri) {
