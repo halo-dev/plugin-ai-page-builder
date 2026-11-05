@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 import org.jsoup.Jsoup;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -43,6 +44,56 @@ class PagePreviewIsolationTest {
     private final HandlerStrategies strategies = HandlerStrategies.withDefaults();
     private final PageDocument document =
             new PageDocument(2, "code", null, null, "<p>中文页面</p>", "p {color: red}", "window.executed = true");
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void largeApiCatalogKeepsHeadersSmallAndEnforcesEveryPathInTheDocument(boolean token) {
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("https://example.test/pages/one/preview"));
+        var request = ServerRequest.create(exchange, strategies.messageReaders());
+        var paths = IntStream.range(0, 300)
+                .mapToObj(index -> "/apis/api.plugin-" + index + ".halo.run/v1alpha1/items/")
+                .toList();
+        when(catalog.publicPathPrefixes()).thenReturn(paths);
+        when(templates.resolveTemplateNameOrDefault(any(), any())).thenReturn(Mono.just("test"));
+        var response = (token
+                        ? previews.token(request, "one", "about", true, document, "About", "")
+                        : previews.render(request, "one", "about", true, document, "About", ""))
+                .block();
+        response.writeTo(exchange, context(new View() {
+                    @Override
+                    public Mono<Void> render(Map<String, ?> model, MediaType type, ServerWebExchange incoming) {
+                        var html = "<!doctype html><html><head><script>window.theme = true</script>"
+                                + "<link rel='stylesheet' href='/theme.css'></head><body>中文页面</body></html>";
+                        var buffer = incoming.getResponse().bufferFactory().wrap(html.getBytes(StandardCharsets.UTF_8));
+                        return incoming.getResponse().writeAndFlushWith(Mono.just(Mono.just(buffer)));
+                    }
+                }))
+                .block();
+
+        var headers = exchange.getResponse().getHeaders();
+        assertThat(headers.toString().getBytes(StandardCharsets.UTF_8).length).isLessThan(1024);
+        assertThat(headers.getFirst("Content-Security-Policy")).isEqualTo("sandbox allow-scripts");
+        var html = exchange.getResponse().getBodyAsString().block();
+        assertThat(headers.getContentLength()).isEqualTo(html.getBytes(StandardCharsets.UTF_8).length);
+        var parsed = Jsoup.parse(html);
+        assertThat(parsed.head().child(0).attr("http-equiv")).isEqualTo("Content-Security-Policy");
+        var policy = parsed.head().child(0).attr("content");
+        assertThat(policy.length()).isGreaterThan(16 * 1024);
+        for (var path : paths) {
+            assertThat(policy).contains("https://example.test" + path);
+        }
+        assertThat(policy).doesNotContain("sandbox", "connect-src *", "allow-same-origin");
+        if (token) {
+            var source = parsed.selectFirst("iframe").attr("src").split(",", 2)[1];
+            parsed = Jsoup.parse(new String(Base64.getDecoder().decode(source), StandardCharsets.UTF_8));
+            assertThat(parsed.head().child(0).attr("http-equiv")).isEqualTo("Content-Security-Policy");
+            for (var path : paths) {
+                assertThat(parsed.head().child(0).attr("content")).contains("https://example.test" + path);
+            }
+        }
+        assertThat(parsed.selectFirst("script")).isNotNull();
+        assertThat(parsed.body().text()).contains("中文页面");
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"", "/site"})
@@ -114,7 +165,13 @@ class PagePreviewIsolationTest {
                 .doesNotContain("sandbox", "frame-src data:", "allow-same-origin");
         assertThat(exchange.getResponse().getHeaders().getFirst("Content-Security-Policy"))
                 .isEqualTo(expectedPolicy)
-                .contains("sandbox allow-scripts", "base-uri " + safeUri, "frame-src data:");
+                .isEqualTo("sandbox allow-scripts");
+        assertThat(host.head().child(0).attr("http-equiv")).isEqualTo("Content-Security-Policy");
+        assertThat(host.head().child(0).attr("content"))
+                .contains(
+                        "base-uri " + safeUri,
+                        "frame-src data:",
+                        "connect-src https://example.test" + prefix + "/apis/api.content.halo.run/");
         assertThat(exchange.getResponse().getHeaders().getCacheControl()).isEqualTo("no-store");
         assertThat(exchange.getResponse().getHeaders().getContentLength())
                 .isEqualTo(hostHtml.getBytes(StandardCharsets.UTF_8).length);
@@ -135,7 +192,8 @@ class PagePreviewIsolationTest {
         response.writeTo(exchange, context(new View() {
                     @Override
                     public Mono<Void> render(Map<String, ?> model, MediaType type, ServerWebExchange incoming) {
-                        assertThat(incoming).isSameAs(exchange);
+                        assertThat(incoming.getRequest()).isSameAs(exchange.getRequest());
+                        assertThat(incoming.getAttributes()).isSameAs(exchange.getAttributes());
                         var page = (PageRenderer.PageView) model.get("aiPageBuilder");
                         return incoming.getResponse()
                                 .writeWith(Mono.just(incoming.getResponse()
@@ -149,8 +207,11 @@ class PagePreviewIsolationTest {
                 .doesNotContain("<iframe");
         assertThat(exchange.getResponse().getHeaders().getFirst("Content-Security-Policy"))
                 .isEqualTo(response.headers().getFirst("Content-Security-Policy"))
+                .isEqualTo("sandbox allow-scripts");
+        var html = Jsoup.parse(exchange.getResponse().getBodyAsString().block());
+        assertThat(html.head().child(0).attr("http-equiv")).isEqualTo("Content-Security-Policy");
+        assertThat(html.head().child(0).attr("content"))
                 .contains(
-                        "sandbox allow-scripts",
                         "connect-src https://example.test/rss.xml https://example.test/feed.xml "
                                 + "https://example.test/sitemap.xml https://example.test/feed/",
                         "base-uri 'none'",

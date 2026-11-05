@@ -108,13 +108,15 @@ class PagePreviewTest {
                 .expectHeader()
                 .valueEquals("X-Robots-Tag", "noindex, nofollow, noarchive")
                 .expectHeader()
-                .value(
-                        "Content-Security-Policy",
-                        value -> assertThat(value)
-                                .contains("sandbox allow-scripts", "frame-src data:", "connect-src 'none'"))
+                .value("Content-Security-Policy", value -> assertThat(value).isEqualTo("sandbox allow-scripts"))
                 .expectBody(String.class)
-                .value(body ->
-                        assertThat(body).contains("<iframe", "sandbox=\"allow-scripts\"", "data:text/html;base64,"));
+                .value(body -> assertThat(body)
+                        .contains(
+                                "<iframe",
+                                "sandbox=\"allow-scripts\"",
+                                "data:text/html;base64,",
+                                "frame-src data:",
+                                "connect-src 'none'"));
     }
 
     @Test
